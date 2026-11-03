@@ -89,6 +89,18 @@ static void on_fifo(evutil_socket_t fd, short what, void *arg)
 		hb->len = 0;  /* An overlong line: drop it rather than wedge. */
 }
 
+/* REI_HEADLESS_VSYNC=1 runs the headless outputs through the vsync-driven render
+ * path real displays use (draw, queue a "flip", wait for it to complete), with
+ * the flip completing after one refresh period. It exists so the automated tests
+ * can exercise that path without a GPU. */
+static enum rei_render_result headless_render(void *data, struct rei_gles *gles,
+					      const struct rei_scene_snapshot *snap,
+					      const struct rei_gles_target *target)
+{
+	(void)data;
+	return rei_gles_draw(gles, snap, target) ? REI_RENDER_TIMED : REI_RENDER_FAILED;
+}
+
 static bool headless_start(struct rei_backend *b)
 {
 	struct headless_backend *hb = (struct headless_backend *)b;
@@ -98,6 +110,9 @@ static bool headless_start(struct rei_backend *b)
 		char name[64];
 		struct rei_output_params p;
 		rei_backend_output_params(b->server, i, "HEADLESS", name, sizeof name, &p);
+		const char *vsync = getenv("REI_HEADLESS_VSYNC");
+		if (vsync && vsync[0] == '1')
+			p.render_ops.render = headless_render;
 		if (!rei_server_add_output(b->server, &p))
 			return false;
 	}
