@@ -234,7 +234,7 @@ static void test_config(void)
 {
 	struct rei_config *c = rei_config_defaults();
 	CHECK(c->toolbar_enabled && c->toolbar_position == REI_BAR_TOP && c->toolbar_thickness == 28);
-	CHECK(!strcmp(c->toolbar_font, "Sans 11") && !strcmp(c->toolbar_clock_format, "%H:%M"));
+	CHECK(!strcmp(c->toolbar_font, "Sans 11") && !strcmp(c->toolbar_clock_format, "%H:%M:%S"));
 	CHECK(c->toolbar_background == 0x161c26 && c->toolbar_foreground == 0xd6dde8 &&
 	      c->toolbar_highlight == 0x3c6ebe);
 	rei_config_free(c);
@@ -242,7 +242,7 @@ static void test_config(void)
 	/* The first-run file says exactly the defaults. */
 	c = parse_ok(rei_config_default_text());
 	CHECK(c->toolbar_enabled && c->toolbar_position == REI_BAR_TOP && c->toolbar_thickness == 28);
-	CHECK(!strcmp(c->toolbar_clock_format, "%H:%M"));
+	CHECK(!strcmp(c->toolbar_clock_format, "%H:%M:%S"));
 	rei_config_free(c);
 
 	c = parse_ok("[toolbar]\nenabled = false\nposition = \"left\"\nthickness = 40\n"

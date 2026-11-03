@@ -249,7 +249,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_position = REI_BAR_TOP;
 	cfg->toolbar_thickness = 28;
 	cfg->toolbar_font = rei_xstrdup("Sans 11");
-	cfg->toolbar_clock_format = rei_xstrdup("%H:%M");
+	cfg->toolbar_clock_format = rei_xstrdup("%H:%M:%S");
 	cfg->toolbar_background = 0x161c26;
 	cfg->toolbar_foreground = 0xd6dde8;
 	cfg->toolbar_highlight = 0x3c6ebe;

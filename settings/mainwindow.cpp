@@ -282,7 +282,7 @@ QWidget *MainWindow::buildToolbarTab()
 	addField(f, tr("Thickness (px)"), "toolbar", "thickness", Int, 28, {}, 16, 96);
 	addField(f, tr("Font"), "toolbar", "font", Font, "Sans 11", {}, 0, 0, 1,
 		 tr("A Pango font description, e.g. “Sans 11”."));
-	addField(f, tr("Clock format"), "toolbar", "clock_format", String, "%H:%M", {}, 0, 0, 1,
+	addField(f, tr("Clock format"), "toolbar", "clock_format", String, "%H:%M:%S", {}, 0, 0, 1,
 		 tr("strftime format; empty hides the clock."));
 	addField(f, tr("Background"), "toolbar", "background", Color, "#161c26");
 	addField(f, tr("Text"), "toolbar", "foreground", Color, "#d6dde8");
