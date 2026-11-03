@@ -2,3 +2,5 @@ option('drm', type: 'feature', value: 'auto',
   description: 'DRM/KMS backend (needs libdrm, gbm, libseat, libinput and libudev)')
 option('xwayland', type: 'feature', value: 'auto',
   description: 'Xwayland support, to run X11 programs (needs libxcb)')
+option('settings', type: 'feature', value: 'auto',
+  description: 'The Qt settings application (needs Qt 6 Widgets)')

@@ -360,6 +360,27 @@ ignored. The parsed document is retained in `rei_config.root` so later
 subsystems (keybindings, toolbar, wallpaper) read their own sections without
 changing the core loader. All keybindings will be configurable there.
 
+## Config hot reload (`src/reload.c`)
+
+An inotify watch on the config file's *directory* (so a save-by-rename is seen) plus `SIGHUP`
+trigger a reload after a 150 ms settle. A reload parses the whole new file, builds everything
+that can fail (keybindings, and the keymap if the layout changed) and only then commits, so an
+invalid file changes nothing. Most code reads `server->config` on every use, so swapping the
+pointer is enough; superseded configs are kept until exit because a few places may briefly hold
+a string from one. Things that cache are refreshed explicitly: bindings and keymap (resent to
+clients with the repeat rate), the wallpaper, libinput device settings (through the backend's
+`config_changed` hook), and the window layout (`rei_wm_arrange_all`). `[[output]]` and the backend
+choice need a restart, and the log says so.
+
+## Settings app (`settings/`)
+
+Qt 6 Widgets. `TomlDoc` keeps the file as lines and edits values in place, so comments survive;
+it understands only the TOML subset the config uses. Each simple option is a widget bound to
+`[section] key`; only fields the user changed are written, and `[[output]]` blocks are rewritten
+only if the monitors table changed. Before saving, the candidate file is checked by running
+`rei-wm --check-config`, so the app can never write something the compositor would refuse. A
+missing config is started from `rei-wm --print-default-config`.
+
 ## Roadmap
 
 | # | milestone | state |
@@ -374,7 +395,7 @@ changing the core loader. All keybindings will be configurable there.
 | 7 | toolbar (any edge): workspaces at the start, clock at the end | done |
 | 8 | DRM/KMS backend, libseat + libinput, dmabuf, direct scanout, hardware cursor | written; awaiting hardware testing |
 | 9 | Xwayland window manager | done |
-| 10 | Qt settings application, config hot reload | |
+| 10 | Qt settings application, config hot reload | done |
 | 11 | PipeWire volume widget and media keys | |
 
 ## Testing
@@ -400,6 +421,9 @@ changing the core loader. All keybindings will be configurable there.
   output;
 - `drm_logic`: the DRM backend's pure decisions (see above); `*-vsync`: the render, input, wm, notch and
   bar tests again with `REI_HEADLESS_VSYNC=1`, exercising the vsync-driven frame path;
+- `reload`: config hot reload end to end (gaps, keybindings, toolbar, an invalid file, SIGHUP);
+  `settings-tomldoc` and `settings-window`: the settings app's in-place TOML editor and its window,
+  driven offscreen against the real `rei-wm --check-config`;
 - `decoration`: notch geometry, hit-testing, hover/scale variants and artwork pixels;
 - `notch`: the notches end to end (focus-only, no resizing, hover, click and cancel,
   handle drag, the pull-back rule, drag-and-drop into a slot with the drop hint,
