@@ -7,18 +7,19 @@ environment, written in C11. MIT licensed.
 event loop and threading model, the core Wayland protocols, an OpenGL ES
 renderer, keyboard/pointer input with a configurable keybinding engine, the
 window manager (an i3-style tiling tree with configurable gaps, floating windows,
-fullscreen, per-output workspaces), and the window notches (a drag handle and
-minimize/maximize/close tabs on the focused window). Real applications can
-connect, be tiled, and be driven from the keyboard or mouse. There is **no
-toolbar** yet, and no real hardware input (libinput arrives with the DRM
-backend): see the roadmap in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+fullscreen, per-output workspaces), the window notches (a drag handle and
+minimize/maximize/close tabs on the focused window), and a built-in toolbar with
+workspace buttons and a clock. Real applications can connect, be tiled, and be
+driven from the keyboard or mouse. There is no real hardware input yet (libinput
+arrives with the DRM backend), and the Qt settings app, Xwayland and PipeWire are
+still to come: see the roadmap in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-![Three unmodified Weston demo clients tiled by rei-wm, the focused one showing its notches](docs/images/milestone-6-notches.png)
+![Two unmodified Weston demo clients tiled by rei-wm under the toolbar](docs/images/milestone-7-toolbar.png)
 
-*Three unmodified Weston demo clients (one of them OpenGL) tiled by rei-wm over a
-wallpaper. Windows have no border; the focused one (bottom right) shows its drag
-handle and minimize/maximize/close tabs hovering above it, with the pointer over
-close.*
+*Unmodified Weston demo clients tiled by rei-wm over a wallpaper, under the toolbar:
+workspace buttons at the start (workspace 1 is where you are; the pointer is over 2,
+which has a window of its own) and the clock at the end. Windows have no border; the
+focused one shows its drag handle and minimize/maximize/close tabs above it.*
 
 ## Building
 
@@ -27,7 +28,10 @@ Dependencies (Debian/Ubuntu package names):
 ```
 meson ninja-build pkg-config libwayland-dev wayland-protocols libevent-dev
 libegl-dev libgles-dev libxkbcommon-dev xkb-data
+libcairo2-dev libpango1.0-dev fontconfig
 ```
+
+and at least one font (e.g. `fonts-dejavu-core`) for the toolbar's text.
 
 Rendering uses OpenGL ES 3 through EGL's surfaceless platform, so it needs a
 Mesa (or other) GLES driver but no display server; software rendering
@@ -104,6 +108,15 @@ Because the tabs hover above the window, tiled windows always keep that much roo
 above them (the top gap, and the gap between stacked windows, is at least the notch
 height), and a floating window can't be dragged so high that its tabs leave the
 screen. `notch_height` in `[decoration]` sets the size; 0 turns them off.
+
+**The toolbar** is a strip along one edge of every output (`position` = top, bottom,
+left or right): workspace buttons at its start and a clock at its end. Each output's
+bar lists that output's workspaces; the one you are on is highlighted (more dimly on
+outputs that don't have the focus). Click a button to go to that workspace, scroll
+the wheel over the bar to step through them, and hover to highlight. Windows never
+use the space the bar takes. See the `[toolbar]` section of the config for the
+position, size, font, clock format (`strftime`) and colours; `enabled = false`
+removes it.
 
 Workspaces belong to an output and are numbered globally, like i3's. An empty
 one disappears when you leave it. Gaps (`gap_outer`, `gap_inner`) and the other

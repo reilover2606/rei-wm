@@ -1,0 +1,9 @@
+# LeakSanitizer suppressions for the test suite.
+#
+# Pango loads fonts on a background thread and fontconfig keeps its own caches;
+# very occasionally (about 1 run in 500) something it allocated there is still
+# unreleased when the process exits, even after we release Pango's font map and
+# call FcFini(). The allocation stacks are entirely inside libfontconfig, none of
+# it memory rei-wm owns, so these are ignored. Leaks allocated by rei-wm are still
+# reported.
+leak:libfontconfig

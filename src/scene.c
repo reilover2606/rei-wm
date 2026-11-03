@@ -4,6 +4,7 @@
 #include "desktop.h"
 #include "proto/xdg_shell.h"
 #include "server.h"
+#include "toolbar.h"
 
 struct rei_scene_snapshot *rei_scene_build(struct rei_server *s, uint64_t serial)
 {
@@ -16,12 +17,13 @@ struct rei_scene_snapshot *rei_scene_build(struct rei_server *s, uint64_t serial
 
 	struct rei_output *o;
 	wl_list_for_each(o, &s->outputs, link) {
-		if (!o->wallpaper)
-			continue;
 		int32_t w, h;
 		rei_output_logical_size(o, &w, &h);
-		rei_snapshot_add(snap, o->wallpaper, (float)o->x, (float)o->y,
-				 (float)w, (float)h, true);
+		if (o->wallpaper)
+			rei_snapshot_add(snap, o->wallpaper, (float)o->x, (float)o->y,
+					 (float)w, (float)h, true);
+		/* Below every window, so a fullscreen one covers it. */
+		rei_toolbar_emit(s, o, snap);
 	}
 
 	/* Each output draws its own workspace's windows. */

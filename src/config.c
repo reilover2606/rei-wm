@@ -18,6 +18,8 @@
 /* silently ignored.                                                        */
 /* ------------------------------------------------------------------------ */
 
+static bool parse_color(const char *s, uint32_t *out);
+
 struct reader {
 	char *err;
 	size_t errlen;
@@ -99,6 +101,14 @@ static void read_string(struct reader *r, const struct toml_table *t, const char
 		return;
 	free(*out);
 	*out = rei_xstrdup(v->u.s);
+}
+
+static void read_color(struct reader *r, const struct toml_table *t, const char *prefix,
+		       const char *key, uint32_t *out)
+{
+	const struct toml_value *v = get(r, t, prefix, key, TOML_STRING);
+	if (v && !parse_color(v->u.s, out))
+		fail(r, "%s%s: '%s' is not a colour like \"#1b2733\"", prefix, key, v->u.s);
 }
 
 static void read_choice(struct reader *r, const struct toml_table *t, const char *prefix,
@@ -213,6 +223,14 @@ struct rei_config *rei_config_defaults(void)
 	cfg->kb_layout = rei_xstrdup("");
 	cfg->kb_variant = rei_xstrdup("");
 	cfg->kb_options = rei_xstrdup("");
+	cfg->toolbar_enabled = true;
+	cfg->toolbar_position = REI_BAR_TOP;
+	cfg->toolbar_thickness = 28;
+	cfg->toolbar_font = rei_xstrdup("Sans 11");
+	cfg->toolbar_clock_format = rei_xstrdup("%H:%M");
+	cfg->toolbar_background = 0x161c26;
+	cfg->toolbar_foreground = 0xd6dde8;
+	cfg->toolbar_highlight = 0x3c6ebe;
 	cfg->notch_height = 22;
 	cfg->repeat_rate = 25;
 	cfg->repeat_delay = 600;
@@ -299,6 +317,27 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 			cfg->bindings[cfg->n_bindings].action = rei_xstrdup(e->val->u.s);
 			cfg->n_bindings++;
 		}
+	}
+
+	const struct toml_table *tb = get_table(&r, root, "toolbar");
+	if (tb) {
+		static const char *const positions[] = { "top", "bottom", "left", "right", NULL };
+		const struct toml_value *en = get(&r, tb, "toolbar.", "enabled", TOML_BOOL);
+		if (en)
+			cfg->toolbar_enabled = en->u.b;
+		char *pos = rei_xstrdup("top");
+		read_choice(&r, tb, "toolbar.", "position", &pos, positions);
+		for (int i = 0; positions[i]; i++) {
+			if (strcmp(pos, positions[i]) == 0)
+				cfg->toolbar_position = (enum rei_bar_position)i;
+		}
+		free(pos);
+		read_int(&r, tb, "toolbar.", "thickness", &cfg->toolbar_thickness, 16, 96);
+		read_string(&r, tb, "toolbar.", "font", &cfg->toolbar_font);
+		read_string(&r, tb, "toolbar.", "clock_format", &cfg->toolbar_clock_format);
+		read_color(&r, tb, "toolbar.", "background", &cfg->toolbar_background);
+		read_color(&r, tb, "toolbar.", "foreground", &cfg->toolbar_foreground);
+		read_color(&r, tb, "toolbar.", "highlight", &cfg->toolbar_highlight);
 	}
 
 	const struct toml_table *deco = get_table(&r, root, "decoration");
@@ -466,6 +505,8 @@ void rei_config_free(struct rei_config *cfg)
 	free(cfg->path);
 	free(cfg->backend);
 	free(cfg->composition_key);
+	free(cfg->toolbar_font);
+	free(cfg->toolbar_clock_format);
 	free(cfg->kb_rules);
 	free(cfg->kb_model);
 	free(cfg->kb_layout);

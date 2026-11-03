@@ -117,6 +117,7 @@ int main(int argc, char **argv)
 	snprintf(logpath, sizeof logpath, "%s/log.txt", dir);
 	snprintf(sockpath, sizeof sockpath, "%s/%s", dir, SOCKET);
 	write_file(cfg,
+		"[toolbar]\nenabled = false\n"  /* the clock would add snapshots to the count below */
 		"[[output]]\nname = \"A\"\nwidth = 800\nheight = 600\n"
 		"[[output]]\nname = \"B\"\nwidth = 1024\nheight = 768\nrefresh = 75\n");
 

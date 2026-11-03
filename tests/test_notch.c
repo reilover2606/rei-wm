@@ -245,8 +245,9 @@ int main(int argc, char **argv)
 	CHECK(mkdtemp(g_dir));
 	chmod(g_dir, 0700);
 
-	char config[400];
+	char config[500];
 	snprintf(config, sizeof config,
+		 "[toolbar]\nenabled = false\n"
 		 "[layout]\ngap_outer = 4\ngap_inner = 4\n"
 		 "[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n", OUT_W, OUT_H);
 	start_compositor(argv[1], config, true);

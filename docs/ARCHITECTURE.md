@@ -139,6 +139,34 @@ from the corner nearest the pointer; clients can also ask via
 workspace. Windows on a workspace that isn't showing get no frame callbacks, so
 clients throttle.
 
+### Toolbar (`src/toolbar.c`, `src/toolbar_render.c`)
+
+One bar per output, along the configured edge. It is drawn by the compositor as an
+ordinary opaque drawable below every window (so a fullscreen window covers it) and the
+edge it occupies is removed from the output's *usable area*: tiling, floating
+placement, the notch pull-back rule and initial centring all read that one area, so
+none of them needed to know about the bar.
+
+- **Geometry is font independent.** Workspace buttons are fixed `thickness` x
+  `thickness` squares laid from the start of the bar, so hit-testing never depends on
+  how text happens to measure. Only the clock's text depends on the font.
+- **Text** is rendered with Pango and Cairo on the event thread into a pixbuf at the
+  output's physical resolution (Cairo's ARGB32 is already our premultiplied BGRA). A
+  vertical bar is too narrow for "14:32", so the clock is broken into stacked parts
+  ("14" over "32").
+- **Redrawn only when something changes.** Each output caches its last
+  `rei_bar_state` (the workspace list and their states, the hovered button, the clock
+  text, size, scale, font and colours, built from a zeroed struct) and re-renders only if
+  a byte-for-byte comparison differs, so most scene rebuilds reuse the pixbuf.
+- **The clock ticks exactly when it must.** The timer is armed for the next moment
+  the formatted text differs, found by formatting successive seconds, so `%H:%M` wakes
+  once a minute on the minute and `%S` once a second, with no format parsing.
+- **Input.** The bar belongs to the compositor like the notches: over it no client has
+  the pointer; a workspace button is clicked by press and release on it (the grab ends
+  before the workspace changes, as with the notches); the wheel steps through that output's
+  workspaces and stops at the ends; and a window above the bar (a floating one) or a
+  fullscreen window takes precedence over it.
+
 ### Window notches (`src/decoration.c`)
 
 Windows have no border or title bar. The *focused* window gets two tabs that hover
@@ -270,6 +298,8 @@ These are deliberate and tracked by later milestones:
 - **`wl_surface.damage` is ignored** and `set_buffer_transform` is stored but not
   applied: the whole buffer is re-uploaded and drawn untransformed. Every frame
   redraws the whole output; damage tracking is future work.
+- **The toolbar is workspaces and a clock.** No other modules (volume, battery, tray) yet and
+  no urgency highlighting; its colours and font are configurable but there are no themes.
 - **No server-side decorations** (`xdg-decoration`), `linux-dmabuf`, `viewporter`
   or fractional scale yet.
 
@@ -298,7 +328,7 @@ changing the core loader. All keybindings will be configurable there.
 | 4 | libxkbcommon, keybinding engine, focus, clipboard, move (libinput moved to 8) | done |
 | 5 | tiling tree (H/V splits), floating, fullscreen, gaps, per-output workspaces | done |
 | 6 | window notches: close/min/max (right), drag handle (left) | done |
-| 7 | toolbar (any edge): workspaces left, clock right | |
+| 7 | toolbar (any edge): workspaces at the start, clock at the end | done |
 | 8 | DRM/KMS backend, libseat + libinput, dmabuf, direct scanout, hardware cursor | |
 | 9 | Xwayland window manager, cursor override | |
 | 10 | Qt settings application, config hot reload | |
@@ -318,6 +348,13 @@ changing the core loader. All keybindings will be configurable there.
 - `input`: keyboard, pointer, focus, bindings, popup grabs, move, clipboard between
   two clients and an abrupt client disconnect, all through the headless FIFO and
   observed from real Wayland clients;
+- `toolbar`: bar geometry for all four positions (the bar and window area exactly partition an
+  output), button hit-testing, colour mixing, the renderer's pixels (fills, hover, clock placement,
+  vertical stacking, scale) and config validation;
+- `bar-top`, `bar-bottom`, `bar-left`, `bar-right`, `bar-multi`: the toolbar end to end, once per
+  position and once on two outputs: the reduced window area, workspace buttons and highlighting,
+  clicking, hover, the wheel, a fullscreen window covering the bar, a ticking clock, and one bar per
+  output;
 - `decoration`: notch geometry, hit-testing, hover/scale variants and artwork pixels;
 - `notch`: the notches end to end (focus-only, no resizing, hover, click and cancel,
   handle drag, the pull-back rule, drag-and-drop into a slot with the drop hint,
@@ -338,9 +375,11 @@ changing the core loader. All keybindings will be configurable there.
 
 The nested backend is not covered by the automated tests; it was verified by
 hand against a headless Weston parent, capturing the parent's screen with
-`weston-screenshooter`. The suite also runs clean under sanitizers (`tests/tsan.supp` suppresses one
-shutdown race inside Mesa's llvmpipe driver; races in rei-wm itself are still
-reported). The nested backend's *input forwarding* is not covered by automated
+`weston-screenshooter`. The suite also runs clean under sanitizers. Three narrow suppressions cover third-party
+libraries only, with their reasons written next to them: `tests/tsan.supp` for a shutdown race
+inside Mesa's llvmpipe driver and for Pango's background font thread (glib's futex-based
+locks are invisible to TSan), and `tests/lsan.supp` for a rare fontconfig allocation still held
+at exit. Races and leaks in rei-wm's own code are still reported. The nested backend's *input forwarding* is not covered by automated
 tests (Weston's headless mode has no input to forward); it is written and
 compiles but has only been exercised for presentation. CI-style sanitizer builds:
 

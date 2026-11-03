@@ -56,6 +56,10 @@ struct rei_server {
 	struct wl_list views;       /* every rei_view, in creation order */
 	struct wl_list workspaces;  /* rei_workspace, sorted by number */
 	struct rei_output *focused_output;  /* Where keyboard focus and new windows go. */
+	struct event *clock_event;   /* Ticks when the toolbar clock's text changes. */
+	char clock_text[64];
+	struct rei_output *bar_hover_output;  /* Toolbar button under the pointer. */
+	int bar_hover_ws;
 	struct rei_view *notch_hover_view;  /* Notch under the pointer, to highlight it. */
 	enum rei_notch_part notch_hover_part;
 	struct { bool active; struct rei_rect rect; } drop_hint;  /* Where a dragged window would land. */

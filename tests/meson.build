@@ -1,11 +1,12 @@
-# TSan suppressions for races inside Mesa's software driver (see tsan.supp).
+# Sanitizer suppressions for third-party libraries (see tsan.supp and lsan.supp).
 # Harmless when the tests aren't built with TSan.
 test_env = environment()
 test_env.set('TSAN_OPTIONS', 'suppressions=' + meson.current_source_dir() / 'tsan.supp')
+test_env.set('LSAN_OPTIONS', 'suppressions=' + meson.current_source_dir() / 'lsan.supp')
 
 test_deps = [rei_core_dep]
 
-foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'keybindings', 'layout', 'decoration']
+foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'keybindings', 'layout', 'decoration', 'toolbar']
   exe = executable('test_' + t, 'test_' + t + '.c',
     include_directories: inc,
     dependencies: test_deps,
@@ -67,3 +68,16 @@ test('notch', notch_test,
   env: test_env,
   timeout: 120,
 )
+
+bar_test = executable('test_bar', 'test_bar.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+foreach mode : ['top', 'bottom', 'left', 'right', 'multi']
+  test('bar-' + mode, bar_test,
+    args: [rei_wm.full_path(), mode],
+    depends: rei_wm,
+    env: test_env,
+    timeout: 120,
+  )
+endforeach

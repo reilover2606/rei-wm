@@ -5,6 +5,7 @@
 
 #include "input/input.h"
 #include "proto/xdg_shell.h"
+#include "toolbar.h"
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
@@ -24,11 +25,10 @@ static struct rei_rect output_rect(const struct rei_output *o)
 	return (struct rei_rect){ o->x, o->y, w, h };
 }
 
-/* The part of an output windows may be tiled into, before the outer gap. The
- * toolbar will claim its edge from this later. */
+/* The part of an output windows may use: the output less the toolbar's edge. */
 static struct rei_rect output_usable(const struct rei_output *o)
 {
-	return output_rect(o);
+	return rei_toolbar_usable(o);
 }
 
 static struct rei_rect inset(struct rei_rect r, int d)
@@ -338,14 +338,16 @@ void rei_view_map(struct rei_view *v)
 		 * several new windows don't land exactly on top of each other. */
 		struct rei_output *o = v->ws->output;
 		struct rei_rect g = rei_xdg_toplevel_geometry(v->toplevel);
-		struct rei_rect or = output_rect(o);
+		struct rei_rect or = output_usable(o);
+		or.x -= o->x;  /* Floating positions are relative to the output. */
+		or.y -= o->y;
 		int count = 0;
 		struct rei_view *it;
 		wl_list_for_each(it, &v->ws->floating, float_link)
 			count += it != v && it->mapped;
 		int step = (count % CASCADE_SLOTS) * CASCADE_STEP;
-		v->float_rect = (struct rei_rect){ (or.w - g.w) / 2 + step, (or.h - g.h) / 2 + step,
-						   g.w, g.h };
+		v->float_rect = (struct rei_rect){ or.x + (or.w - g.w) / 2 + step,
+						   or.y + (or.h - g.h) / 2 + step, g.w, g.h };
 		arrange(o);
 	}
 
