@@ -1,0 +1,44 @@
+project('rei-wm', 'c',
+  version: '0.1.0',
+  license: 'MIT',
+  meson_version: '>=1.0',
+  default_options: [
+    'c_std=c11',
+    'warning_level=2',
+    'buildtype=debugoptimized',
+  ],
+)
+
+add_project_arguments('-D_GNU_SOURCE', language: 'c')
+
+cc = meson.get_compiler('c')
+
+wayland_server = dependency('wayland-server', version: '>=1.20')
+wayland_client = dependency('wayland-client', version: '>=1.20')
+wayland_protocols = dependency('wayland-protocols', version: '>=1.24')
+libevent = dependency('libevent')
+libevent_pthreads = dependency('libevent_pthreads')
+threads = dependency('threads')
+m_dep = cc.find_library('m', required: false)
+
+wayland_scanner_dep = dependency('wayland-scanner', native: true)
+wayland_scanner = find_program(wayland_scanner_dep.get_variable(pkgconfig: 'wayland_scanner'))
+protocols_dir = wayland_protocols.get_variable(pkgconfig: 'pkgdatadir')
+
+# Client-side protocol glue, used only by the nested backend (rei-wm acting as
+# a client of a parent compositor).
+scan_client_header = generator(wayland_scanner,
+  output: '@BASENAME@-client-protocol.h',
+  arguments: ['client-header', '@INPUT@', '@OUTPUT@'])
+scan_code = generator(wayland_scanner,
+  output: '@BASENAME@-protocol.c',
+  arguments: ['private-code', '@INPUT@', '@OUTPUT@'])
+
+xdg_shell_xml = files(protocols_dir / 'stable' / 'xdg-shell' / 'xdg-shell.xml')
+xdg_shell_client_h = scan_client_header.process(xdg_shell_xml)
+xdg_shell_code = scan_code.process(xdg_shell_xml)
+
+inc = include_directories('src')
+
+subdir('src')
+subdir('tests')
