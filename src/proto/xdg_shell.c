@@ -110,16 +110,49 @@ static void send_xdg_configure(struct rei_xdg_surface *xs)
 	xdg_surface_send_configure(xs->resource, serial);
 }
 
-static void send_toplevel_configure(struct rei_xdg_toplevel *tl)
+/* Sends the configure the window manager wants, unless the client already has
+ * exactly that (or `force` is set). */
+static void send_toplevel_configure(struct rei_xdg_toplevel *tl, bool force)
 {
+	if (!force && tl->sent.valid && tl->sent.w == tl->want.w && tl->sent.h == tl->want.h &&
+	    tl->sent.activated == tl->activated && tl->sent.tiled == tl->want.tiled &&
+	    tl->sent.fullscreen == tl->want.fullscreen)
+		return;
+
 	struct wl_array states;
 	wl_array_init(&states);
+	uint32_t *st;
 	if (tl->activated) {
-		uint32_t *st = wl_array_add(&states, sizeof *st);
+		st = wl_array_add(&states, sizeof *st);
 		*st = XDG_TOPLEVEL_STATE_ACTIVATED;
 	}
-	/* 0x0 = "pick your own size". Tiling will set real sizes in milestone 5. */
-	xdg_toplevel_send_configure(tl->resource, 0, 0, &states);
+	if (tl->want.fullscreen) {
+		st = wl_array_add(&states, sizeof *st);
+		*st = XDG_TOPLEVEL_STATE_FULLSCREEN;
+	}
+	/* Tiled windows are told which edges touch a neighbour or the screen, so
+	 * toolkits can drop rounded corners and shadows. All four, always: every
+	 * edge of a tile abuts something. */
+	if (tl->want.tiled &&
+	    wl_resource_get_version(tl->resource) >= XDG_TOPLEVEL_STATE_TILED_LEFT_SINCE_VERSION) {
+		static const uint32_t tiled[] = {
+			XDG_TOPLEVEL_STATE_TILED_LEFT, XDG_TOPLEVEL_STATE_TILED_RIGHT,
+			XDG_TOPLEVEL_STATE_TILED_TOP, XDG_TOPLEVEL_STATE_TILED_BOTTOM,
+		};
+		for (size_t i = 0; i < REI_ARRAY_LEN(tiled); i++) {
+			st = wl_array_add(&states, sizeof *st);
+			*st = tiled[i];
+		}
+	}
+
+	tl->sent.valid = true;
+	tl->sent.w = tl->want.w;
+	tl->sent.h = tl->want.h;
+	tl->sent.activated = tl->activated;
+	tl->sent.tiled = tl->want.tiled;
+	tl->sent.fullscreen = tl->want.fullscreen;
+
+	xdg_toplevel_send_configure(tl->resource, tl->want.w, tl->want.h, &states);
 	wl_array_release(&states);
 	send_xdg_configure(tl->xs);
 }
@@ -135,8 +168,19 @@ void rei_xdg_toplevel_set_activated(struct rei_xdg_toplevel *tl, bool activated)
 	if (tl->activated == activated)
 		return;
 	tl->activated = activated;
-	if (tl->xs->initial_sent)
-		send_toplevel_configure(tl);
+	if (tl->xs && tl->xs->initial_sent)
+		send_toplevel_configure(tl, false);
+}
+
+void rei_xdg_toplevel_set_state(struct rei_xdg_toplevel *tl, int32_t width, int32_t height,
+				bool tiled, bool fullscreen)
+{
+	tl->want.w = width;
+	tl->want.h = height;
+	tl->want.tiled = tiled;
+	tl->want.fullscreen = fullscreen;
+	if (tl->xs && tl->xs->initial_sent)
+		send_toplevel_configure(tl, false);
 }
 
 void rei_xdg_toplevel_close(struct rei_xdg_toplevel *tl)
@@ -310,7 +354,9 @@ static void toplevel_destroy_request(struct wl_client *c, struct wl_resource *r)
 
 static void toplevel_set_parent(struct wl_client *c, struct wl_resource *r, struct wl_resource *p)
 {
-	(void)c; (void)r; (void)p;
+	(void)c;
+	struct rei_xdg_toplevel *tl = wl_resource_get_user_data(r);
+	tl->has_parent = p != NULL;  /* Transient windows float. */
 }
 
 static void toplevel_set_title(struct wl_client *c, struct wl_resource *r, const char *title)
@@ -347,7 +393,10 @@ static void toplevel_move(struct wl_client *c, struct wl_resource *r,
 static void toplevel_resize(struct wl_client *c, struct wl_resource *r,
 			    struct wl_resource *seat, uint32_t serial, uint32_t edges)
 {
-	(void)c; (void)r; (void)seat; (void)serial; (void)edges;
+	(void)c; (void)seat;
+	struct rei_xdg_toplevel *tl = wl_resource_get_user_data(r);
+	if (tl->xs && tl->view)
+		rei_input_begin_resize(tl->xs->server, tl->view, serial, edges);
 }
 
 static void toplevel_set_max_size(struct wl_client *c, struct wl_resource *r, int32_t w, int32_t h)
@@ -374,21 +423,35 @@ static void toplevel_set_min_size(struct wl_client *c, struct wl_resource *r, in
 	tl->min_h = h;
 }
 
-/* Maximize/fullscreen/minimize are placeholders until the window manager and
- * decorations exist. A client that asks must still get a configure back, or it
- * may wait forever for the state change. */
+/* Maximize is a placeholder until the window decorations exist (milestone 6).
+ * A client that asks must still get a configure back, or it may wait forever. */
 static void toplevel_state_request(struct wl_client *c, struct wl_resource *r)
 {
 	(void)c;
 	struct rei_xdg_toplevel *tl = wl_resource_get_user_data(r);
-	if (tl->xs->initial_sent)
-		send_toplevel_configure(tl);
+	if (tl->xs && tl->xs->initial_sent)
+		send_toplevel_configure(tl, true);
 }
 
 static void toplevel_set_fullscreen(struct wl_client *c, struct wl_resource *r, struct wl_resource *o)
 {
 	(void)o;
-	toplevel_state_request(c, r);
+	struct rei_xdg_toplevel *tl = wl_resource_get_user_data(r);
+	if (tl->view)
+		rei_wm_set_fullscreen(tl->view, true);  /* Re-arranging sends the configure. */
+	else
+		tl->want_fullscreen = true;  /* Applied when the window gets its slot. */
+	(void)c;
+}
+
+static void toplevel_unset_fullscreen(struct wl_client *c, struct wl_resource *r)
+{
+	(void)c;
+	struct rei_xdg_toplevel *tl = wl_resource_get_user_data(r);
+	if (tl->view)
+		rei_wm_set_fullscreen(tl->view, false);
+	else
+		tl->want_fullscreen = false;
 }
 
 static void toplevel_set_minimized(struct wl_client *c, struct wl_resource *r)
@@ -409,7 +472,7 @@ static const struct xdg_toplevel_interface toplevel_impl = {
 	.set_maximized = toplevel_state_request,
 	.unset_maximized = toplevel_state_request,
 	.set_fullscreen = toplevel_set_fullscreen,
-	.unset_fullscreen = toplevel_state_request,
+	.unset_fullscreen = toplevel_unset_fullscreen,
 	.set_minimized = toplevel_set_minimized,
 };
 
@@ -528,10 +591,18 @@ static void xdg_surface_commit(struct rei_surface *surface, void *data)
 			return;
 		}
 		xs->initial_sent = true;
-		if (xs->toplevel)
-			send_toplevel_configure(xs->toplevel);
-		else
+		if (xs->toplevel) {
+			struct rei_xdg_toplevel *tl = xs->toplevel;
+			tl->sent.valid = false;
+			/* The window gets its place now, before it has any content, so the
+			 * very first configure already carries the right size. */
+			tl->view = rei_view_create(xs->server, tl);
+			rei_wm_add_view(tl->view);
+			if (!tl->sent.valid)
+				send_toplevel_configure(tl, true);  /* No output yet: size 0x0. */
+		} else {
 			send_popup_configure(xs->popup);
+		}
 		return;
 	}
 
@@ -546,8 +617,8 @@ static void xdg_surface_commit(struct rei_surface *surface, void *data)
 		if (xs->popup)
 			rei_input_refocus(xs->server);  /* A grabbing popup takes the keyboard. */
 		if (xs->toplevel) {
-			xs->toplevel->view = rei_view_create(xs->server, xs->toplevel);
-			rei_view_map(xs->toplevel->view);
+			if (xs->toplevel->view)
+				rei_view_map(xs->toplevel->view);
 			rei_info("window mapped: \"%s\" (%s) %dx%d",
 				 xs->toplevel->title ? xs->toplevel->title : "",
 				 xs->toplevel->app_id ? xs->toplevel->app_id : "",
@@ -557,6 +628,8 @@ static void xdg_surface_commit(struct rei_surface *surface, void *data)
 		unmap_xdg_surface(xs);
 		xs->initial_sent = xs->configured = false;
 		xs->n_sent = 0;
+		if (xs->toplevel)
+			xs->toplevel->sent.valid = false;
 	}
 }
 
@@ -822,29 +895,56 @@ static void emit_xs(const struct rei_xdg_surface *xs, struct rei_scene_snapshot 
 
 void rei_xdg_emit_view(const struct rei_view *view, struct rei_scene_snapshot *snap)
 {
-	emit_xs(view->toplevel->xs, snap);
+	if (view->toplevel->xs)
+		emit_xs(view->toplevel->xs, snap);
+}
 
-	/* Popups are kept in creation order, so a popup always follows its parent. */
+/* A popup is shown when the window it belongs to is on a visible workspace. */
+static bool popup_visible(const struct rei_xdg_popup *p)
+{
+	const struct rei_xdg_surface *root = p->xs ? popup_root(p->xs) : NULL;
+	return root && root->toplevel && root->toplevel->view && root->toplevel->view->mapped &&
+	       rei_view_visible(root->toplevel->view);
+}
+
+void rei_xdg_emit_popups(struct rei_server *server, struct rei_scene_snapshot *snap)
+{
+	/* Creation order, so a popup always follows its parent. */
 	const struct rei_xdg_popup *p;
-	wl_list_for_each(p, &view->server->popups, link) {
-		if (p->xs && popup_root(p->xs) == view->toplevel->xs)
+	wl_list_for_each(p, &server->popups, link) {
+		if (popup_visible(p))
 			emit_xs(p->xs, snap);
 	}
 }
 
+static const struct rei_xdg_surface *root_xs_of(struct rei_surface *root)
+{
+	if ((root->role != REI_ROLE_XDG_TOPLEVEL && root->role != REI_ROLE_XDG_POPUP) || !root->role_data)
+		return NULL;
+	return root->role_data;
+}
+
+static bool xs_view_visible(const struct rei_xdg_surface *xs)
+{
+	const struct rei_xdg_surface *top = popup_root(xs);
+	return top && top->toplevel && top->toplevel->view && rei_view_visible(top->toplevel->view);
+}
+
 bool rei_xdg_surface_rect(struct rei_surface *root, struct rei_rect *out)
 {
-	if (root->role != REI_ROLE_XDG_TOPLEVEL && root->role != REI_ROLE_XDG_POPUP)
-		return false;
-	if (!root->role_data)
-		return false;
-	const struct rei_xdg_surface *xs = root->role_data;
+	const struct rei_xdg_surface *xs = root_xs_of(root);
 	int32_t gx, gy;
-	if (!xs->mapped || !xs_geometry_origin(xs, &gx, &gy))
+	if (!xs || !xs->mapped || !xs_view_visible(xs) || !xs_geometry_origin(xs, &gx, &gy))
 		return false;
 	struct rei_rect g = xs_geometry(xs);
 	*out = (struct rei_rect){ gx - g.x, gy - g.y, root->width, root->height };
 	return true;
+}
+
+bool rei_xdg_surface_hidden(struct rei_surface *root)
+{
+	const struct rei_xdg_surface *xs = root_xs_of(root);
+	return xs && xs->mapped && !xs_view_visible(xs);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -882,14 +982,18 @@ static bool pick_xs(const struct rei_xdg_surface *xs, double x, double y,
 bool rei_xdg_pick_view(const struct rei_view *view, double x, double y,
 		       struct rei_surface **out, double *sx, double *sy)
 {
-	/* Popups are above their window, newest on top. */
+	return view->toplevel->xs && pick_xs(view->toplevel->xs, x, y, out, sx, sy);
+}
+
+bool rei_xdg_pick_popups(struct rei_server *server, double x, double y,
+			 struct rei_surface **out, double *sx, double *sy)
+{
 	const struct rei_xdg_popup *p;
-	wl_list_for_each_reverse(p, &view->server->popups, link) {
-		if (p->xs && popup_root(p->xs) == view->toplevel->xs &&
-		    pick_xs(p->xs, x, y, out, sx, sy))
+	wl_list_for_each_reverse(p, &server->popups, link) {
+		if (popup_visible(p) && pick_xs(p->xs, x, y, out, sx, sy))
 			return true;
 	}
-	return view->toplevel->xs && pick_xs(view->toplevel->xs, x, y, out, sx, sy);
+	return false;
 }
 
 struct rei_surface *rei_xdg_topmost_grab_surface(struct rei_server *server)

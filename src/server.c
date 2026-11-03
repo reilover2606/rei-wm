@@ -113,6 +113,8 @@ static void fire_frame_callbacks(struct rei_server *s, const struct rei_output *
 
 		struct rei_rect r;
 		bool fire = true;
+		if (rei_xdg_surface_hidden(rei_surface_root(surf)))
+			continue;  /* On a workspace that isn't showing: clients throttle. */
 		if (rei_xdg_surface_rect(rei_surface_root(surf), &r)) {
 			bool here = rects_intersect(&r, out->x, out->y, ow, oh);
 			bool anywhere = here;
@@ -267,6 +269,7 @@ static void sync_output_geometry(struct rei_server *s)
 		rei_wl_output_update(o);
 	}
 	rei_input_clamp_cursor(s);
+	rei_wm_arrange_all(s);  /* Window positions derive from output positions. */
 	rei_server_schedule_flush(s);
 }
 
@@ -284,6 +287,7 @@ struct rei_output *rei_server_add_output(struct rei_server *s,
 	o->x = p->x;
 	o->y = p->y;
 	o->backend_data = p->backend_data;
+	o->server = s;
 
 	wl_list_insert(s->outputs.prev, &o->link);
 	rei_outputs_layout(&s->outputs);
@@ -329,6 +333,8 @@ struct rei_output *rei_server_add_output(struct rei_server *s,
 		s->cursor_placed = true;
 	}
 
+	rei_wm_output_added(s, o);
+
 	/* Other outputs may have shifted; every render thread needs a fresh scene. */
 	sync_output_geometry(s);
 	rei_server_schedule_damage(s);
@@ -339,6 +345,7 @@ void rei_server_remove_output(struct rei_server *s, struct rei_output *o)
 {
 	rei_info("output removed: name=%s id=%u", o->name, o->id);
 
+	rei_wm_output_removed(s, o);
 	rei_wl_output_remove(o);
 	/* Join the render thread first so nothing is in flight referencing it. */
 	rei_render_destroy(o->render);
@@ -400,6 +407,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	wl_list_init(&s->outputs);
 	wl_list_init(&s->surfaces);
 	wl_list_init(&s->views);
+	rei_wm_init(s);
 	wl_list_init(&s->popups);
 	wl_list_init(&s->wl_outputs);
 
@@ -566,6 +574,7 @@ void rei_server_destroy(struct rei_server *s)
 	if (s->display)
 		wl_display_destroy(s->display);
 	rei_input_finish(s);
+	rei_wm_finish(s);
 	rei_seat_finish(s);
 	rei_image_free(s->wallpaper_image);
 	if (s->base)

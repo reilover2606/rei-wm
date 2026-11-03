@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <wayland-server-core.h>
 
+#include "geom.h"
+
 struct rei_server;
 struct rei_surface;
 struct rei_view;
@@ -52,10 +54,13 @@ struct rei_input {
 
 	uint32_t last_button_serial;
 
-	/* Interactive move of a window (placeholder WM). */
+	/* Interactive move and resize of a floating window. */
 	struct rei_view *move_view;
 	double move_cursor_x, move_cursor_y;
 	int32_t move_view_x, move_view_y;
+	struct rei_view *resize_view;
+	uint32_t resize_edges;  /* xdg_toplevel resize edge bits */
+	struct rei_rect resize_start;
 };
 
 /* The server's [input]/[keybindings] config must be loaded. */
@@ -87,5 +92,9 @@ void rei_input_clamp_cursor(struct rei_server *server);
 /* Starts moving `view` with the pointer, if the button press `serial` is the
  * latest one and a button is held. Returns false (and does nothing) otherwise. */
 bool rei_input_begin_move(struct rei_server *server, struct rei_view *view, uint32_t serial);
+
+/* Likewise for resizing from the given xdg_toplevel resize edges. */
+bool rei_input_begin_resize(struct rei_server *server, struct rei_view *view, uint32_t serial,
+			    uint32_t edges);
 
 #endif

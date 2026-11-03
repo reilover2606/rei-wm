@@ -3,19 +3,19 @@
 A Wayland compositor, tiling/floating window manager and small desktop
 environment, written in C11. MIT licensed.
 
-**Status: early development.** Milestones 0–4 are done: the build, config,
+**Status: early development.** Milestones 0–5 are done: the build, config,
 event loop and threading model, the core Wayland protocols, an OpenGL ES
-renderer with alpha blending, wallpaper and a cursor, and keyboard/pointer
-input with a configurable keybinding engine, focus handling, clipboard and
-window dragging. Real applications can connect, be displayed and be typed into.
-There is **no tiling, no workspaces and no decorations** yet, and no real
-hardware input (libinput arrives with the DRM backend): see the roadmap in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+renderer, keyboard/pointer input with a configurable keybinding engine, and now
+the window manager: an i3-style tiling tree with configurable gaps, floating
+windows, fullscreen, and per-output workspaces. Real applications can connect, be
+tiled, and be driven from the keyboard. There are **no window decorations or
+toolbar** yet, and no real hardware input (libinput arrives with the DRM
+backend): see the roadmap in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-![Three unmodified Weston demo clients running inside rei-wm](docs/images/milestone-3-demo.png)
+![Three unmodified Weston demo clients tiled by rei-wm](docs/images/milestone-5-tiling.png)
 
-*Three unmodified Weston demo clients (one of them OpenGL) inside rei-wm, over a
-wallpaper. Windows are alpha-blended; the arrow is rei-wm's own cursor.*
+*Three unmodified Weston demo clients (one of them OpenGL) tiled by rei-wm over a
+wallpaper, with 16px gaps: one column, and a second column split vertically.*
 
 ## Building
 
@@ -70,6 +70,30 @@ In the headless backend nothing is visible, so ask rei-wm for a screenshot:
 `kill -USR2 <pid>` writes a PPM per output to `$REI_SCREENSHOT_DIR` (default
 `$XDG_RUNTIME_DIR`). `kill -USR1` forces a redraw.
 
+### Using it
+
+`Mod` is the composition key (Super by default). The defaults follow i3:
+
+| keys | action |
+|---|---|
+| `Mod+Return` | open a terminal (`$TERMINAL`, else `foot`) |
+| `Mod+Shift+q` | close the focused window |
+| `Mod+h/j/k/l` | focus left / down / up / right |
+| `Mod+Shift+h/j/k/l` | move the window that way |
+| `Mod+v` / `Mod+b` | the next window opens stacked / side by side |
+| `Mod+Shift+Space` | toggle floating |
+| `Mod+f` | toggle fullscreen |
+| `Mod+1`…`Mod+0` | go to workspace 1–10 (created if new) |
+| `Mod+Shift+1`…`0` | send the window to that workspace |
+| `Mod+Tab` / `Mod+Shift+Tab` | cycle focus |
+| `Mod+Shift+e` | quit |
+| `Mod`+left-drag / right-drag | move / resize a floating window |
+
+Workspaces belong to an output and are numbered globally, like i3's. An empty
+one disappears when you leave it. Gaps (`gap_outer`, `gap_inner`) and the other
+options are in the config; set `new_windows = "float"` to stop tiling new windows,
+or `focus_follows_mouse = true` for i3's pointer focus. Dialogs always float.
+
 Keybindings are plain strings in the config, so they can be edited by hand (or
 by the settings application later). The defaults are written into the file on
 first run:
@@ -81,6 +105,7 @@ first run:
 "Mod+Tab"       = "focus_next"
 "Mod+Shift+e"   = "none"            # "none" removes a built-in binding
 "Mod+F1"        = "exec firefox"    # and you can add your own
+"Mod+r"         = "workspace 5"
 ```
 
 Configuration lives in `~/.config/rei-wm/config.toml` (or

@@ -139,7 +139,7 @@ void rei_input_refocus(struct rei_server *server)
 		return;
 	struct rei_surface *target = rei_xdg_topmost_grab_surface(server);
 	if (!target)
-		target = rei_desktop_keyboard_surface(server);
+		target = rei_wm_keyboard_surface(server);
 	set_keyboard_focus(in, target);
 
 	/* The scene changed (a window appeared, vanished, moved or was raised), so
@@ -262,9 +262,31 @@ static void update_pointer(struct rei_input *in, uint32_t time_ms, bool send_mot
 	struct rei_server *s = in->server;
 
 	if (in->move_view) {
-		rei_view_move_to(in->move_view,
-				 in->move_view_x + (int32_t)lround(s->cursor_x - in->move_cursor_x),
-				 in->move_view_y + (int32_t)lround(s->cursor_y - in->move_cursor_y));
+		rei_wm_float_move(in->move_view,
+				  in->move_view_x + (int32_t)lround(s->cursor_x - in->move_cursor_x),
+				  in->move_view_y + (int32_t)lround(s->cursor_y - in->move_cursor_y));
+		return;
+	}
+
+	if (in->resize_view) {
+		/* Edges bits follow xdg_toplevel: top 1, bottom 2, left 4, right 8. */
+		int32_t dx = (int32_t)lround(s->cursor_x - in->move_cursor_x);
+		int32_t dy = (int32_t)lround(s->cursor_y - in->move_cursor_y);
+		struct rei_rect r = in->resize_start;
+		const int32_t min_w = 80, min_h = 40;
+		if (in->resize_edges & 4) { r.x += dx; r.w -= dx; }
+		if (in->resize_edges & 8) { r.w += dx; }
+		if (in->resize_edges & 1) { r.y += dy; r.h -= dy; }
+		if (in->resize_edges & 2) { r.h += dy; }
+		if (r.w < min_w) {  /* Clamp, keeping the opposite edge where it was. */
+			if (in->resize_edges & 4) r.x = in->resize_start.x + in->resize_start.w - min_w;
+			r.w = min_w;
+		}
+		if (r.h < min_h) {
+			if (in->resize_edges & 1) r.y = in->resize_start.y + in->resize_start.h - min_h;
+			r.h = min_h;
+		}
+		rei_wm_float_set_rect(in->resize_view, r.x, r.y, r.w, r.h);
 		return;
 	}
 
@@ -277,11 +299,19 @@ static void update_pointer(struct rei_input *in, uint32_t time_ms, bool send_mot
 
 	struct rei_surface *hit = NULL;
 	double sx = 0, sy = 0;
-	rei_desktop_pick(s, s->cursor_x, s->cursor_y, &hit, &sx, &sy);
+	rei_wm_pick(s, s->cursor_x, s->cursor_y, &hit, &sx, &sy);
 	if (hit != in->pointer_focus)
 		set_pointer_focus(in, hit, sx, sy);
 	else if (hit && send_motion)
 		rei_seat_pointer_motion(s->seat, hit, time_ms, sx, sy);
+
+	/* Optionally, focus follows the pointer (only on real motion, so windows
+	 * appearing or vanishing under a still pointer don't steal focus). */
+	if (send_motion && s->config->focus_follows_mouse && hit && !rei_xdg_topmost_grab_surface(s)) {
+		struct rei_view *v = rei_wm_view_for_surface(s, hit);
+		if (v && v != rei_wm_active_view(s))
+			rei_wm_focus_view(v);
+	}
 }
 
 static void pointer_moved(struct rei_input *in, uint32_t time_ms)
@@ -320,30 +350,67 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 		    : !set_remove(in->buttons, &in->n_buttons, button))
 		return;
 
-	if (pressed && in->n_buttons == 1 && !in->move_view) {
+	if (pressed && in->n_buttons == 1 && !in->move_view && !in->resize_view) {
 		/* First button down: this click decides focus. */
 		struct rei_surface *target = in->pointer_focus;
 		rei_xdg_dismiss_popups(s, target);
+
+		/* Mod+drag moves (left button) or resizes (right) a floating window,
+		 * wherever in it the pointer is; the client never sees the click. */
+		struct rei_view *under = target ? rei_wm_view_for_surface(s, target) : NULL;
+		uint32_t mod = rei_composition_mod(s->config->composition_key);
+		if (under && under->floating && (rei_xkb_mods(in->xkb) & mod) &&
+		    (button == 272 || button == 273)) {
+			rei_wm_focus_view(under);
+			in->move_cursor_x = s->cursor_x;
+			in->move_cursor_y = s->cursor_y;
+			if (button == 272) {
+				in->move_view = under;
+				in->move_view_x = under->x;
+				in->move_view_y = under->y;
+			} else {
+				struct rei_rect r = rei_view_rect(under);
+				in->resize_view = under;
+				in->resize_start = r;
+				/* Grab the corner nearest the pointer. */
+				in->resize_edges = (s->cursor_x < r.x + r.w / 2.0 ? 4u : 8u) |
+						   (s->cursor_y < r.y + r.h / 2.0 ? 1u : 2u);
+			}
+			if (in->grab_surface) {
+				wl_list_remove(&in->grab_destroy.link);
+				wl_list_init(&in->grab_destroy.link);
+				in->grab_surface = NULL;
+			}
+			set_pointer_focus(in, NULL, 0, 0);
+			rei_server_schedule_flush(s);
+			return;
+		}
+
+		if (!target)
+			rei_wm_focus_output_at(s, s->cursor_x, s->cursor_y);
 		if (target) {
-			struct rei_view *view = rei_desktop_view_for_surface(s, target);
+			struct rei_view *view = rei_wm_view_for_surface(s, target);
 			if (view)
-				rei_view_activate(view);
+				rei_wm_focus_view(view);
 			/* Implicit grab, remembering where the surface is. */
 			in->grab_surface = target;
 			in->grab_destroy.notify = on_grab_destroyed;
 			wl_signal_add(&target->destroy_signal, &in->grab_destroy);
 			double sx, sy;
 			struct rei_surface *again;
-			rei_desktop_pick(s, s->cursor_x, s->cursor_y, &again, &sx, &sy);
+			rei_wm_pick(s, s->cursor_x, s->cursor_y, &again, &sx, &sy);
 			in->grab_origin_x = s->cursor_x - sx;
 			in->grab_origin_y = s->cursor_y - sy;
 		}
 	}
 
-	if (in->move_view) {
-		/* The move owns the pointer; the client sees no buttons. */
+	if (in->move_view || in->resize_view) {
+		/* The move or resize owns the pointer; the client sees no buttons. */
 		if (in->n_buttons == 0) {
+			if (in->move_view)
+				rei_wm_float_settle(in->move_view);  /* May now belong to another output. */
 			in->move_view = NULL;
+			in->resize_view = NULL;
 			update_pointer(in, time_ms, false);  /* Pick whatever is under the cursor now. */
 		}
 		rei_server_schedule_flush(s);
@@ -366,7 +433,7 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 void rei_input_pointer_axis(struct rei_server *s, uint32_t time_ms, bool horizontal, double value)
 {
 	struct rei_input *in = s->input;
-	if (!in || in->move_view)
+	if (!in || in->move_view || in->resize_view)
 		return;
 	struct rei_surface *to = in->grab_surface ? in->grab_surface : in->pointer_focus;
 	if (!to)
@@ -386,23 +453,43 @@ void rei_input_release_all(struct rei_server *s, uint32_t time_ms)
 		rei_input_key(s, time_ms, in->pressed[in->n_pressed - 1], false);
 }
 
-bool rei_input_begin_move(struct rei_server *s, struct rei_view *view, uint32_t serial)
+/* Both grabs need a button held, a matching serial, and a floating window:
+ * tiled windows don't move or resize freely. */
+static bool begin_grab(struct rei_server *s, struct rei_view *view, uint32_t serial)
 {
 	struct rei_input *in = s->input;
-	if (!in || in->n_buttons == 0 || serial != in->last_button_serial)
+	if (!in || in->n_buttons == 0 || serial != in->last_button_serial || !view->floating)
 		return false;
-	in->move_view = view;
 	in->move_cursor_x = s->cursor_x;
 	in->move_cursor_y = s->cursor_y;
-	in->move_view_x = view->x;
-	in->move_view_y = view->y;
 
-	/* The client gives up the pointer for the duration of the move. */
+	/* The client gives up the pointer for the duration. */
 	if (in->grab_surface) {
 		wl_list_remove(&in->grab_destroy.link);
 		wl_list_init(&in->grab_destroy.link);
 		in->grab_surface = NULL;
 	}
 	set_pointer_focus(in, NULL, 0, 0);
+	return true;
+}
+
+bool rei_input_begin_move(struct rei_server *s, struct rei_view *view, uint32_t serial)
+{
+	if (!begin_grab(s, view, serial))
+		return false;
+	s->input->move_view = view;
+	s->input->move_view_x = view->x;
+	s->input->move_view_y = view->y;
+	return true;
+}
+
+bool rei_input_begin_resize(struct rei_server *s, struct rei_view *view, uint32_t serial,
+			    uint32_t edges)
+{
+	if (edges == 0 || !begin_grab(s, view, serial))
+		return false;
+	s->input->resize_view = view;
+	s->input->resize_edges = edges;
+	s->input->resize_start = rei_view_rect(view);
 	return true;
 }

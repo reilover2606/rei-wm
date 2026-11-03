@@ -13,6 +13,8 @@ struct rei_drawable {
 	struct rei_pixbuf *pix;  /* Holds a reference. */
 	float x, y, w, h;
 	bool opaque;             /* Safe to draw without blending. */
+	bool has_clip;           /* Drawn only inside `clip` (global coordinates). */
+	float clip_x, clip_y, clip_w, clip_h;
 };
 
 /*
@@ -33,6 +35,11 @@ struct rei_scene_snapshot {
 struct rei_scene_snapshot *rei_snapshot_create(uint64_t serial);
 struct rei_scene_snapshot *rei_snapshot_ref(struct rei_scene_snapshot *s);
 void rei_snapshot_unref(struct rei_scene_snapshot *s);
+
+/* Restricts every drawable added since index `first` to a rectangle. Used to keep
+ * a tiled window inside its slot while its client catches up with a resize. */
+void rei_snapshot_clip_from(struct rei_scene_snapshot *s, size_t first,
+			    float x, float y, float w, float h);
 
 /* Only valid while the snapshot is still being built (before it is shared). */
 void rei_snapshot_add(struct rei_scene_snapshot *s, struct rei_pixbuf *pix,

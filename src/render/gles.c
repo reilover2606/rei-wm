@@ -317,6 +317,25 @@ bool rei_gles_draw(struct rei_gles *g, const struct rei_scene_snapshot *snap,
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
 
+		if (d->has_clip) {
+			/* GL's y axis is ours: row 0 of the framebuffer is the top of the
+			 * screen (see the vertex shader), so no flip is needed. */
+			float cx0 = (d->clip_x - (float)t->origin_x) * (float)t->scale;
+			float cy0 = (d->clip_y - (float)t->origin_y) * (float)t->scale;
+			float cx1 = cx0 + d->clip_w * (float)t->scale;
+			float cy1 = cy0 + d->clip_h * (float)t->scale;
+			cx0 = cx0 < 0 ? 0 : cx0;
+			cy0 = cy0 < 0 ? 0 : cy0;
+			cx1 = cx1 > (float)t->width ? (float)t->width : cx1;
+			cy1 = cy1 > (float)t->height ? (float)t->height : cy1;
+			glEnable(GL_SCISSOR_TEST);
+			glScissor((GLint)cx0, (GLint)cy0,
+				  cx1 > cx0 ? (GLsizei)(cx1 - cx0) : 0,
+				  cy1 > cy0 ? (GLsizei)(cy1 - cy0) : 0);
+		} else {
+			glDisable(GL_SCISSOR_TEST);
+		}
+
 		glUniform4f(g->u_rect, x, y, w, h);
 		glUniform1f(g->u_opaque, d->opaque ? 1.0f : 0.0f);
 		if (d->opaque)
@@ -326,6 +345,7 @@ bool rei_gles_draw(struct rei_gles *g, const struct rei_scene_snapshot *snap,
 		glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 	}
 	glDisable(GL_BLEND);
+	glDisable(GL_SCISSOR_TEST);
 	evict_unused(g);
 
 	GLenum err = glGetError();
