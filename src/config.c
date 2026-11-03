@@ -243,12 +243,20 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		read_choice(&r, general, "general.", "backend", &cfg->backend, backends);
 		read_choice(&r, general, "general.", "composition_key",
 			    &cfg->composition_key, mod_keys);
+		const struct toml_value *ffm = get(&r, general, "general.", "focus_follows_mouse", TOML_BOOL);
+		if (ffm)
+			cfg->focus_follows_mouse = ffm->u.b;
 	}
 
 	const struct toml_table *layout = get_table(&r, root, "layout");
 	if (layout) {
 		read_int(&r, layout, "layout.", "gap_outer", &cfg->gap_outer, 0, 500);
 		read_int(&r, layout, "layout.", "gap_inner", &cfg->gap_inner, 0, 500);
+		static const char *const modes[] = { "tile", "float", NULL };
+		char *mode = rei_xstrdup("tile");
+		read_choice(&r, layout, "layout.", "new_windows", &mode, modes);
+		cfg->float_new_windows = strcmp(mode, "float") == 0;
+		free(mode);
 	}
 
 	const struct toml_table *input = get_table(&r, root, "input");

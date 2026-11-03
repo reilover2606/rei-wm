@@ -52,7 +52,9 @@ struct rei_server {
 
 	/* Protocol state. */
 	struct wl_list surfaces;    /* rei_surface */
-	struct wl_list views;       /* rei_view, bottom to top (placeholder WM) */
+	struct wl_list views;       /* every rei_view, in creation order */
+	struct wl_list workspaces;  /* rei_workspace, sorted by number */
+	struct rei_output *focused_output;  /* Where keyboard focus and new windows go. */
 	struct wl_list popups;      /* xdg popups, creation order */
 	struct wl_list wl_outputs;  /* rei_wl_output, including ones being retired */
 	struct rei_seat *seat;

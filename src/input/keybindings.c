@@ -10,18 +10,50 @@
 #include "input/xkb.h"
 #include "util/util.h"
 
-/* Keep in step with the [keybindings] section of config_default.c. Bindings
- * for tiling, workspaces and floating arrive with the window manager. */
+/* Keep in step with the [keybindings] section of config_default.c (a test checks
+ * that they match). */
 const struct rei_default_binding rei_default_bindings[] = {
 	{ "Mod+Return", "exec ${TERMINAL:-foot}" },
 	{ "Mod+Shift+q", "close" },
 	{ "Mod+Shift+e", "quit" },
 	{ "Mod+Tab", "focus_next" },
 	{ "Mod+Shift+Tab", "focus_prev" },
+	{ "Mod+h", "focus left" },
+	{ "Mod+j", "focus down" },
+	{ "Mod+k", "focus up" },
+	{ "Mod+l", "focus right" },
+	{ "Mod+Shift+h", "move left" },
+	{ "Mod+Shift+j", "move down" },
+	{ "Mod+Shift+k", "move up" },
+	{ "Mod+Shift+l", "move right" },
+	{ "Mod+b", "split h" },
+	{ "Mod+v", "split v" },
+	{ "Mod+Shift+space", "toggle_floating" },
+	{ "Mod+f", "fullscreen" },
+	{ "Mod+1", "workspace 1" },
+	{ "Mod+2", "workspace 2" },
+	{ "Mod+3", "workspace 3" },
+	{ "Mod+4", "workspace 4" },
+	{ "Mod+5", "workspace 5" },
+	{ "Mod+6", "workspace 6" },
+	{ "Mod+7", "workspace 7" },
+	{ "Mod+8", "workspace 8" },
+	{ "Mod+9", "workspace 9" },
+	{ "Mod+0", "workspace 10" },
+	{ "Mod+Shift+1", "move_to_workspace 1" },
+	{ "Mod+Shift+2", "move_to_workspace 2" },
+	{ "Mod+Shift+3", "move_to_workspace 3" },
+	{ "Mod+Shift+4", "move_to_workspace 4" },
+	{ "Mod+Shift+5", "move_to_workspace 5" },
+	{ "Mod+Shift+6", "move_to_workspace 6" },
+	{ "Mod+Shift+7", "move_to_workspace 7" },
+	{ "Mod+Shift+8", "move_to_workspace 8" },
+	{ "Mod+Shift+9", "move_to_workspace 9" },
+	{ "Mod+Shift+0", "move_to_workspace 10" },
 	{ NULL, NULL },
 };
 
-static uint32_t composition_bit(const char *name)
+uint32_t rei_composition_mod(const char *name)
 {
 	if (!strcmp(name, "alt")) return REI_MOD_ALT;
 	if (!strcmp(name, "ctrl")) return REI_MOD_CTRL;
@@ -62,7 +94,7 @@ bool rei_combo_parse(const char *text, const char *composition_key,
 	for (size_t i = 0; i + 1 < n; i++) {
 		const char *m = tokens[i];
 		if (!strcasecmp(m, "mod"))
-			mods |= composition_bit(composition_key);
+			mods |= rei_composition_mod(composition_key);
 		else if (!strcasecmp(m, "super") || !strcasecmp(m, "logo"))
 			mods |= REI_MOD_LOGO;
 		else if (!strcasecmp(m, "alt"))
@@ -95,6 +127,9 @@ out:
 	return ok;
 }
 
+/* What follows the action's name. */
+enum arg_kind { ARG_NONE, ARG_TEXT, ARG_DIR, ARG_SPLIT, ARG_WORKSPACE };
+
 bool rei_action_parse(const char *text, struct rei_action *out, char *err, size_t errlen)
 {
 	while (*text == ' ')
@@ -105,37 +140,83 @@ bool rei_action_parse(const char *text, struct rei_action *out, char *err, size_
 	while (*arg == ' ')
 		arg++;
 
-	struct {
+	static const struct {
 		const char *name;
 		enum rei_action_type type;
-		bool takes_arg;
+		enum arg_kind kind;
 	} actions[] = {
-		{ "none", REI_ACTION_NONE, false },
-		{ "exec", REI_ACTION_EXEC, true },
-		{ "close", REI_ACTION_CLOSE, false },
-		{ "quit", REI_ACTION_QUIT, false },
-		{ "focus_next", REI_ACTION_FOCUS_NEXT, false },
-		{ "focus_prev", REI_ACTION_FOCUS_PREV, false },
+		{ "none", REI_ACTION_NONE, ARG_NONE },
+		{ "exec", REI_ACTION_EXEC, ARG_TEXT },
+		{ "close", REI_ACTION_CLOSE, ARG_NONE },
+		{ "quit", REI_ACTION_QUIT, ARG_NONE },
+		{ "focus_next", REI_ACTION_FOCUS_NEXT, ARG_NONE },
+		{ "focus_prev", REI_ACTION_FOCUS_PREV, ARG_NONE },
+		{ "focus", REI_ACTION_FOCUS_DIR, ARG_DIR },
+		{ "move", REI_ACTION_MOVE_DIR, ARG_DIR },
+		{ "split", REI_ACTION_SPLIT, ARG_SPLIT },
+		{ "toggle_floating", REI_ACTION_TOGGLE_FLOATING, ARG_NONE },
+		{ "fullscreen", REI_ACTION_FULLSCREEN, ARG_NONE },
+		{ "workspace", REI_ACTION_WORKSPACE, ARG_WORKSPACE },
+		{ "move_to_workspace", REI_ACTION_MOVE_TO_WORKSPACE, ARG_WORKSPACE },
 	};
 
 	for (size_t i = 0; i < REI_ARRAY_LEN(actions); i++) {
 		if (strlen(actions[i].name) != name_len || strncmp(actions[i].name, text, name_len))
 			continue;
-		if (actions[i].takes_arg && !arg[0]) {
-			snprintf(err, errlen, "'%s' needs a command, e.g. \"exec foot\"", actions[i].name);
-			return false;
-		}
-		if (!actions[i].takes_arg && arg[0]) {
-			snprintf(err, errlen, "'%s' takes no argument", actions[i].name);
-			return false;
-		}
+
 		out->type = actions[i].type;
-		out->arg = actions[i].takes_arg ? rei_xstrdup(arg) : NULL;
-		return true;
+		out->arg = NULL;
+		out->value = 0;
+		const char *name = actions[i].name;
+
+		switch (actions[i].kind) {
+		case ARG_NONE:
+			if (arg[0]) {
+				snprintf(err, errlen, "'%s' takes no argument", name);
+				return false;
+			}
+			return true;
+		case ARG_TEXT:
+			if (!arg[0]) {
+				snprintf(err, errlen, "'%s' needs a command, e.g. \"exec foot\"", name);
+				return false;
+			}
+			out->arg = rei_xstrdup(arg);
+			return true;
+		case ARG_DIR:
+			if (!strcmp(arg, "left")) out->value = REI_DIR_LEFT;
+			else if (!strcmp(arg, "right")) out->value = REI_DIR_RIGHT;
+			else if (!strcmp(arg, "up")) out->value = REI_DIR_UP;
+			else if (!strcmp(arg, "down")) out->value = REI_DIR_DOWN;
+			else {
+				snprintf(err, errlen, "'%s' needs a direction: left, right, up or down", name);
+				return false;
+			}
+			return true;
+		case ARG_SPLIT:
+			if (!strcmp(arg, "h") || !strcmp(arg, "horizontal")) out->value = REI_LAYOUT_SPLIT_H;
+			else if (!strcmp(arg, "v") || !strcmp(arg, "vertical")) out->value = REI_LAYOUT_SPLIT_V;
+			else {
+				snprintf(err, errlen, "'split' needs h (side by side) or v (stacked)");
+				return false;
+			}
+			return true;
+		case ARG_WORKSPACE: {
+			char *end = NULL;
+			long n = strtol(arg, &end, 10);
+			if (!arg[0] || *end || n < 1 || n > 99) {
+				snprintf(err, errlen, "'%s' needs a workspace number from 1 to 99", name);
+				return false;
+			}
+			out->value = (int)n;
+			return true;
+		}
+		}
 	}
 
-	snprintf(err, errlen, "unknown action '%.*s' (known: none, exec, close, quit, "
-		 "focus_next, focus_prev)", (int)name_len, text);
+	snprintf(err, errlen, "unknown action '%.*s' (known: none, exec, close, quit, focus_next, "
+		 "focus_prev, focus, move, split, toggle_floating, fullscreen, workspace, "
+		 "move_to_workspace)", (int)name_len, text);
 	return false;
 }
 

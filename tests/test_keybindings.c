@@ -74,6 +74,32 @@ static void test_actions(void)
 	CHECK(rei_action_parse("none", &a, err, sizeof err) && a.type == REI_ACTION_NONE);
 	CHECK(rei_action_parse("focus_next", &a, err, sizeof err) && a.type == REI_ACTION_FOCUS_NEXT);
 
+	/* Window-management actions carry a direction, a split layout or a number. */
+	CHECK(rei_action_parse("focus left", &a, err, sizeof err));
+	CHECK(a.type == REI_ACTION_FOCUS_DIR && a.value == REI_DIR_LEFT);
+	CHECK(rei_action_parse("focus down", &a, err, sizeof err) && a.value == REI_DIR_DOWN);
+	CHECK(rei_action_parse("move up", &a, err, sizeof err));
+	CHECK(a.type == REI_ACTION_MOVE_DIR && a.value == REI_DIR_UP);
+	CHECK(rei_action_parse("move right", &a, err, sizeof err) && a.value == REI_DIR_RIGHT);
+	CHECK(rei_action_parse("split h", &a, err, sizeof err));
+	CHECK(a.type == REI_ACTION_SPLIT && a.value == REI_LAYOUT_SPLIT_H);
+	CHECK(rei_action_parse("split vertical", &a, err, sizeof err) && a.value == REI_LAYOUT_SPLIT_V);
+	CHECK(rei_action_parse("toggle_floating", &a, err, sizeof err) && a.type == REI_ACTION_TOGGLE_FLOATING);
+	CHECK(rei_action_parse("fullscreen", &a, err, sizeof err) && a.type == REI_ACTION_FULLSCREEN);
+	CHECK(rei_action_parse("workspace 7", &a, err, sizeof err));
+	CHECK(a.type == REI_ACTION_WORKSPACE && a.value == 7);
+	CHECK(rei_action_parse("move_to_workspace 12", &a, err, sizeof err));
+	CHECK(a.type == REI_ACTION_MOVE_TO_WORKSPACE && a.value == 12);
+
+	CHECK(!rei_action_parse("focus", &a, err, sizeof err) && strstr(err, "direction"));
+	CHECK(!rei_action_parse("focus sideways", &a, err, sizeof err) && strstr(err, "direction"));
+	CHECK(!rei_action_parse("split", &a, err, sizeof err) && strstr(err, "h (side by side) or v"));
+	CHECK(!rei_action_parse("workspace", &a, err, sizeof err) && strstr(err, "workspace number"));
+	CHECK(!rei_action_parse("workspace 0", &a, err, sizeof err) && strstr(err, "1 to 99"));
+	CHECK(!rei_action_parse("workspace 100", &a, err, sizeof err));
+	CHECK(!rei_action_parse("workspace two", &a, err, sizeof err));
+	CHECK(!rei_action_parse("fullscreen now", &a, err, sizeof err) && strstr(err, "takes no argument"));
+
 	CHECK(!rei_action_parse("exec", &a, err, sizeof err) && strstr(err, "needs a command"));
 	CHECK(!rei_action_parse("close now", &a, err, sizeof err) && strstr(err, "takes no argument"));
 	CHECK(!rei_action_parse("explode", &a, err, sizeof err) && strstr(err, "unknown action 'explode'"));
@@ -108,6 +134,25 @@ static void test_bindings_merge(void)
 	CHECK(!rei_bindings_match(b, mods, XKB_KEY_q));
 	CHECK(!rei_bindings_match(b, mods | REI_MOD_CTRL, XKB_KEY_Return));
 	CHECK(!rei_bindings_match(b, 0, XKB_KEY_Return));
+	/* The i3-style window-management defaults are all there. */
+	a = rei_bindings_match(b, mods, XKB_KEY_h);
+	CHECK(a && a->type == REI_ACTION_FOCUS_DIR && a->value == REI_DIR_LEFT);
+	a = rei_bindings_match(b, mods | REI_MOD_SHIFT, XKB_KEY_l);
+	CHECK(a && a->type == REI_ACTION_MOVE_DIR && a->value == REI_DIR_RIGHT);
+	a = rei_bindings_match(b, mods, XKB_KEY_v);
+	CHECK(a && a->type == REI_ACTION_SPLIT && a->value == REI_LAYOUT_SPLIT_V);
+	a = rei_bindings_match(b, mods | REI_MOD_SHIFT, XKB_KEY_space);
+	CHECK(a && a->type == REI_ACTION_TOGGLE_FLOATING);
+	CHECK(rei_bindings_match(b, mods, XKB_KEY_f)->type == REI_ACTION_FULLSCREEN);
+	for (int n = 1; n <= 10; n++) {
+		xkb_keysym_t key = XKB_KEY_1 + (xkb_keysym_t)(n % 10 == 0 ? 9 : n - 1);
+		if (n == 10)
+			key = XKB_KEY_0;
+		a = rei_bindings_match(b, mods, key);
+		CHECK(a && a->type == REI_ACTION_WORKSPACE && a->value == n);
+		a = rei_bindings_match(b, mods | REI_MOD_SHIFT, key);
+		CHECK(a && a->type == REI_ACTION_MOVE_TO_WORKSPACE && a->value == n);
+	}
 	size_t n_defaults = b->n;
 	rei_bindings_free(b);
 	rei_config_free(c);
@@ -151,6 +196,10 @@ static void test_config_validation(void)
 		{ "[input]\nrepeat_rate = -1\n", "input.repeat_rate" },
 		{ "[input]\nrepeat_delay = \"fast\"\n", "input.repeat_delay" },
 		{ "[input]\nkeyboard_layout = 3\n", "input.keyboard_layout" },
+		{ "[keybindings]\n\"Mod+q\" = \"workspace 0\"\n", "1 to 99" },
+		{ "[keybindings]\n\"Mod+q\" = \"focus nowhere\"\n", "direction" },
+		{ "[layout]\nnew_windows = \"sideways\"\n", "layout.new_windows" },
+		{ "[general]\nfocus_follows_mouse = \"yes\"\n", "general.focus_follows_mouse" },
 	};
 	for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
 		struct rei_config *c = rei_config_parse(bad[i].text, err, sizeof err);
@@ -173,6 +222,16 @@ static void test_config_validation(void)
 
 /* The file written on first run must say exactly what the built-ins do, so
  * editing it never silently changes behaviour. */
+static void test_wm_config(void)
+{
+	struct rei_config *c = config_from("");
+	CHECK(!c->float_new_windows && !c->focus_follows_mouse);  /* tile, click to focus */
+	rei_config_free(c);
+	c = config_from("[general]\nfocus_follows_mouse = true\n[layout]\nnew_windows = \"float\"\n");
+	CHECK(c->float_new_windows && c->focus_follows_mouse);
+	rei_config_free(c);
+}
+
 static void test_default_text_matches_builtins(void)
 {
 	struct rei_config *c = config_from(rei_config_default_text());
@@ -263,6 +322,7 @@ int main(void)
 	test_actions();
 	test_bindings_merge();
 	test_config_validation();
+	test_wm_config();
 	test_default_text_matches_builtins();
 	test_xkb();
 	puts("test_keybindings: ok");

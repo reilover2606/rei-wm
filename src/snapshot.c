@@ -44,3 +44,15 @@ void rei_snapshot_add(struct rei_scene_snapshot *s, struct rei_pixbuf *pix,
 		.opaque = opaque || pix->opaque,
 	};
 }
+
+void rei_snapshot_clip_from(struct rei_scene_snapshot *s, size_t first,
+			    float x, float y, float w, float h)
+{
+	for (size_t i = first; i < s->n_items; i++) {
+		s->items[i].has_clip = true;
+		s->items[i].clip_x = x;
+		s->items[i].clip_y = y;
+		s->items[i].clip_w = w;
+		s->items[i].clip_h = h;
+	}
+}

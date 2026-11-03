@@ -90,7 +90,7 @@ void rei_actions_run(struct rei_server *s, const struct rei_action *action)
 		rei_spawn(s, action->arg);
 		break;
 	case REI_ACTION_CLOSE: {
-		struct rei_view *v = rei_desktop_top_view(s);
+		struct rei_view *v = rei_wm_active_view(s);
 		if (v)
 			rei_xdg_toplevel_close(v->toplevel);
 		break;
@@ -100,10 +100,31 @@ void rei_actions_run(struct rei_server *s, const struct rei_action *action)
 		rei_server_stop(s);
 		break;
 	case REI_ACTION_FOCUS_NEXT:
-		rei_desktop_cycle(s, true);
+		rei_wm_cycle(s, true);
 		break;
 	case REI_ACTION_FOCUS_PREV:
-		rei_desktop_cycle(s, false);
+		rei_wm_cycle(s, false);
+		break;
+	case REI_ACTION_FOCUS_DIR:
+		rei_wm_focus_direction(s, (enum rei_direction)action->value);
+		break;
+	case REI_ACTION_MOVE_DIR:
+		rei_wm_move_direction(s, (enum rei_direction)action->value);
+		break;
+	case REI_ACTION_SPLIT:
+		rei_wm_split(s, (enum rei_layout)action->value);
+		break;
+	case REI_ACTION_TOGGLE_FLOATING:
+		rei_wm_toggle_floating(s);
+		break;
+	case REI_ACTION_FULLSCREEN:
+		rei_wm_toggle_fullscreen(s);
+		break;
+	case REI_ACTION_WORKSPACE:
+		rei_wm_goto_workspace(s, action->value);
+		break;
+	case REI_ACTION_MOVE_TO_WORKSPACE:
+		rei_wm_move_to_workspace(s, action->value);
 		break;
 	}
 	rei_server_schedule_flush(s);

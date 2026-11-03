@@ -5,16 +5,13 @@
 #include <stdint.h>
 #include <wayland-server-core.h>
 
+#include "geom.h"
 #include "pixbuf.h"
 #include "snapshot.h"
 
 struct rei_server;
 struct rei_surface;
 struct rei_subsurface;
-
-struct rei_rect {
-	int32_t x, y, w, h;
-};
 
 /* A set of rectangles (not normalised: overlaps are allowed). */
 struct rei_rects {

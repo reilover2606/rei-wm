@@ -172,16 +172,19 @@ struct ppm {
 	uint8_t *rgb;
 };
 
-static struct ppm screenshot(void)
+/* A screenshot of the named output (the compositor writes one per output). */
+static struct ppm screenshot_output(const char *name)
 {
-	unlink(g_shot);
+	char path[256];
+	snprintf(path, sizeof path, "%s/rei-wm-%s.ppm", g_dir, name);
+	unlink(path);
 	CHECK(kill(g_pid, SIGUSR2) == 0);
 	struct stat st;
-	for (int t = 0; stat(g_shot, &st) != 0; t += 20) {
+	for (int t = 0; stat(path, &st) != 0; t += 20) {
 		CHECK(t < 5000);
 		sleep_ms(20);
 	}
-	FILE *f = fopen(g_shot, "rb");
+	FILE *f = fopen(path, "rb");
 	CHECK(f);
 	struct ppm img;
 	int maxv;
@@ -191,6 +194,11 @@ static struct ppm screenshot(void)
 	CHECK(fread(img.rgb, 1, (size_t)img.w * (size_t)img.h * 3, f) == (size_t)img.w * (size_t)img.h * 3);
 	fclose(f);
 	return img;
+}
+
+static struct ppm screenshot(void)
+{
+	return screenshot_output("OUT");
 }
 
 static void expect_px(const struct ppm *img, int x, int y, int r, int g, int b, int tol,
@@ -394,6 +402,13 @@ struct window {
 	struct xdg_popup *popup;
 	bool configured, activated, frame_done, popup_configured;
 	bool close_requested, popup_dismissed;
+	/* What the compositor last told this toplevel (0x0 = pick your own size). */
+	int32_t cfg_w, cfg_h;
+	bool cfg_tiled, cfg_fullscreen;
+	/* What the test client is showing, and how it behaves when resized. */
+	uint32_t color;
+	int32_t natural_w, natural_h, buf_w, buf_h;
+	bool has_buffer;
 	uint32_t serial;
 	int n_configures;
 	int popup_x, popup_y, popup_w, popup_h;
@@ -411,13 +426,19 @@ static const struct xdg_surface_listener xs_listener = { xs_configure };
 
 static void tl_configure(void *d, struct xdg_toplevel *t, int32_t wd, int32_t h, struct wl_array *states)
 {
-	(void)t; (void)wd; (void)h;
+	(void)t;
 	struct window *w = d;
-	w->activated = false;
+	w->cfg_w = wd;
+	w->cfg_h = h;
+	w->activated = w->cfg_tiled = w->cfg_fullscreen = false;
 	uint32_t *s;
 	wl_array_for_each(s, states) {
 		if (*s == XDG_TOPLEVEL_STATE_ACTIVATED)
 			w->activated = true;
+		if (*s == XDG_TOPLEVEL_STATE_TILED_LEFT)
+			w->cfg_tiled = true;
+		if (*s == XDG_TOPLEVEL_STATE_FULLSCREEN)
+			w->cfg_fullscreen = true;
 	}
 }
 static void tl_close(void *d, struct xdg_toplevel *t)
@@ -714,6 +735,23 @@ static bool wait_for2(struct client *a, struct client *b, const bool *flag, int 
 		}
 	}
 	return *flag;
+}
+
+/* ---- a client that obeys its configure, like a real application ---------- */
+
+/* Shows the window at the size the compositor asked for (or its natural size if
+ * it was told 0x0). Returns true if it committed a new buffer. */
+static bool window_follow(struct client *c, struct window *w)
+{
+	int32_t bw = w->cfg_w > 0 ? w->cfg_w : w->natural_w;
+	int32_t bh = w->cfg_h > 0 ? w->cfg_h : w->natural_h;
+	if (w->has_buffer && bw == w->buf_w && bh == w->buf_h)
+		return false;
+	window_show(w, make_buffer(c, bw, bh, WL_SHM_FORMAT_XRGB8888, w->color), false);
+	w->buf_w = bw;
+	w->buf_h = bh;
+	w->has_buffer = true;
+	return true;
 }
 
 #endif

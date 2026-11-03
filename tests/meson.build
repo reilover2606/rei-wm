@@ -5,7 +5,7 @@ test_env.set('TSAN_OPTIONS', 'suppressions=' + meson.current_source_dir() / 'tsa
 
 test_deps = [rei_core_dep]
 
-foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'keybindings']
+foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'keybindings', 'layout']
   exe = executable('test_' + t, 'test_' + t + '.c',
     include_directories: inc,
     dependencies: test_deps,
@@ -44,4 +44,15 @@ test('input', input_test,
   args: [rei_wm.full_path()],
   depends: rei_wm,
   timeout: 90,
+)
+
+wm_test = executable('test_wm', 'test_wm.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('wm', wm_test,
+  args: [rei_wm.full_path()],
+  depends: rei_wm,
+  env: test_env,
+  timeout: 120,
 )

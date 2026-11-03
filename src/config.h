@@ -28,7 +28,10 @@ struct rei_config {
 	char *backend;          /* "auto", "headless" or "nested". */
 	char *composition_key;  /* "super", "alt", "ctrl" or "shift". */
 
+	bool focus_follows_mouse;  /* Moving the pointer onto a window focuses it. */
+
 	/* [layout] */
+	bool float_new_windows;    /* new_windows = "float": don't tile new windows. */
 	int32_t gap_outer;  /* Between windows and the edge of the desktop. */
 	int32_t gap_inner;  /* Between adjacent windows. */
 

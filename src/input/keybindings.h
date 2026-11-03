@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <xkbcommon/xkbcommon.h>
 
+#include "layout.h"
+
 struct rei_config;
 
 /*
@@ -29,12 +31,23 @@ enum rei_action_type {
 	REI_ACTION_QUIT,
 	REI_ACTION_FOCUS_NEXT,
 	REI_ACTION_FOCUS_PREV,
+	REI_ACTION_FOCUS_DIR,        /* focus left|right|up|down */
+	REI_ACTION_MOVE_DIR,         /* move left|right|up|down */
+	REI_ACTION_SPLIT,            /* split h|v */
+	REI_ACTION_TOGGLE_FLOATING,
+	REI_ACTION_FULLSCREEN,
+	REI_ACTION_WORKSPACE,        /* workspace N */
+	REI_ACTION_MOVE_TO_WORKSPACE,  /* move_to_workspace N */
 };
 
 struct rei_action {
 	enum rei_action_type type;
 	char *arg;  /* Command line for exec; NULL otherwise. */
+	int value;  /* A rei_direction, a rei_layout, or a workspace number. */
 };
+
+/* The modifier bit the config's composition key ("super", "alt", ...) stands for. */
+uint32_t rei_composition_mod(const char *composition_key);
 
 /* `composition_key` is the config's "super"/"alt"/"ctrl"/"shift". */
 bool rei_combo_parse(const char *text, const char *composition_key,
