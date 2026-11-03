@@ -300,11 +300,35 @@ bool rei_tree_move(struct rei_tree *tree, struct rei_node *leaf, enum rei_direct
 	return true;
 }
 
+struct rei_node *rei_tree_insert_beside(struct rei_tree *tree, struct rei_node *target,
+					void *data, enum rei_direction dir)
+{
+	enum rei_layout axis = dir_axis(dir);
+	if (target->is_split || !target->parent)
+		return rei_tree_add_leaf(tree, target->is_split ? target : NULL, data);
+
+	/* The new window must sit in a container that runs the right way. If the
+	 * target is alone in its container, that container can simply change
+	 * direction; otherwise the target gets a new container around it. */
+	if (child_count(target->parent) == 1)
+		target->parent->layout = axis;
+	else if (target->parent->layout != axis)
+		rei_tree_split(tree, target, axis);
+
+	struct rei_node *parent = target->parent;
+	struct rei_node *leaf = node_new(false, REI_LAYOUT_SPLIT_H, data);
+	if (dir_forward(dir))
+		insert_after(parent, target, leaf);
+	else
+		insert_before(parent, target, leaf);
+	return leaf;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Geometry                                                                 */
 /* ------------------------------------------------------------------------ */
 
-static void layout_node(struct rei_node *n, struct rei_rect r, int gap)
+static void layout_node(struct rei_node *n, struct rei_rect r, int gap_x, int gap_y)
 {
 	n->rect = r;
 	if (!n->is_split)
@@ -316,6 +340,7 @@ static void layout_node(struct rei_node *n, struct rei_rect r, int gap)
 
 	bool horizontal = n->layout == REI_LAYOUT_SPLIT_H;
 	int extent = horizontal ? r.w : r.h;
+	int gap = horizontal ? gap_x : gap_y;
 
 	/* If the gaps alone don't fit, shrink them so every child still lies inside
 	 * this container (a degenerate case: more windows than pixels). */
@@ -348,15 +373,20 @@ static void layout_node(struct rei_node *n, struct rei_rect r, int gap)
 			cr.y = r.y + start;
 			cr.h = size;
 		}
-		layout_node(c, cr, gap);
+		layout_node(c, cr, gap_x, gap_y);
 		prev_edge = edge;
 		i++;
 	}
 }
 
+void rei_tree_layout_xy(struct rei_tree *tree, struct rei_rect area, int gap_x, int gap_y)
+{
+	layout_node(tree->root, area, gap_x < 0 ? 0 : gap_x, gap_y < 0 ? 0 : gap_y);
+}
+
 void rei_tree_layout(struct rei_tree *tree, struct rei_rect area, int gap)
 {
-	layout_node(tree->root, area, gap < 0 ? 0 : gap);
+	rei_tree_layout_xy(tree, area, gap, gap);
 }
 
 static size_t collect(const struct rei_node *n, struct rei_node **out, size_t cap, size_t count)

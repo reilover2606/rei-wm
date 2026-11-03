@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <wayland-server-core.h>
 
+#include "decoration.h"
 #include "geom.h"
 
 struct rei_server;
@@ -53,6 +54,11 @@ struct rei_input {
 	double grab_origin_x, grab_origin_y;  /* Global position of that surface's top-left. */
 
 	uint32_t last_button_serial;
+
+	/* A notch button pressed and not yet released (the click is the release). */
+	enum rei_notch_part notch_press;
+	struct rei_view *notch_view;
+	double drag_start_x, drag_start_y;  /* Where a handle drag began, to tell a drag from a click. */
 
 	/* Interactive move and resize of a floating window. */
 	struct rei_view *move_view;

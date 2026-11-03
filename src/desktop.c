@@ -1,5 +1,6 @@
 #include "desktop.h"
 
+#include <math.h>
 #include <stdlib.h>
 
 #include "input/input.h"
@@ -107,6 +108,13 @@ static int lowest_free_number(struct rei_server *s)
 /* Arranging: turn the tree and floating windows into rectangles + configures */
 /* ------------------------------------------------------------------------ */
 
+/* The highest a floating window's top edge may be: low enough that its notches
+ * (which hover above it) stay on the screen. */
+static int32_t min_window_y(const struct rei_output *o)
+{
+	return output_usable(o).y + o->server->config->notch_height;
+}
+
 static void apply_to_view(struct rei_view *v, struct rei_rect r, bool tiled, bool fullscreen)
 {
 	v->x = r.x;
@@ -124,8 +132,18 @@ static void arrange(struct rei_output *o)
 	struct rei_workspace *ws = o->workspace;
 	const struct rei_config *cfg = s->config;
 
+	/* Room for the notches: the focused window's tabs hover above it, so every
+	 * tiled window keeps at least that much space above it, whether or not it is
+	 * focused. That makes focus changes cost nothing in layout. */
+	int notch = cfg->notch_height;
 	struct rei_rect area = inset(output_usable(o), cfg->gap_outer);
-	rei_tree_layout(ws->tree, area, cfg->gap_inner);
+	if (notch > cfg->gap_outer) {
+		area.y += notch - cfg->gap_outer;
+		area.h -= notch - cfg->gap_outer;
+		if (area.h < 1)
+			area.h = 1;
+	}
+	rei_tree_layout_xy(ws->tree, area, cfg->gap_inner, notch > cfg->gap_inner ? notch : cfg->gap_inner);
 
 	size_t n = rei_tree_leaf_count(ws->tree);
 	struct rei_node **leaves = rei_xcalloc(n ? n : 1, sizeof *leaves);
@@ -140,6 +158,11 @@ static void arrange(struct rei_output *o)
 	wl_list_for_each(v, &ws->floating, float_link) {
 		/* A floating window keeps whatever size its client chose until the user
 		 * resizes it; then we dictate it. */
+		/* If the notches would stick out above the screen, pull the window back
+		 * down; the corrected position is what gets remembered. */
+		int32_t min_y = min_window_y(o);
+		if (notch > 0 && o->y + v->float_rect.y < min_y)
+			v->float_rect.y = min_y - o->y;
 		struct rei_rect r = { o->x + v->float_rect.x, o->y + v->float_rect.y,
 				      v->float_sized ? v->float_rect.w : 0,
 				      v->float_sized ? v->float_rect.h : 0 };
@@ -342,6 +365,16 @@ void rei_view_destroy(struct rei_view *v)
 		if (s->input->resize_view == v)
 			s->input->resize_view = NULL;
 	}
+
+	if (s->notch_hover_view == v) {
+		s->notch_hover_view = NULL;
+		s->notch_hover_part = REI_NOTCH_NONE;
+	}
+	if (s->input && s->input->notch_view == v) {
+		s->input->notch_view = NULL;
+		s->input->notch_press = REI_NOTCH_NONE;
+	}
+	s->drop_hint.active = false;
 
 	struct rei_workspace *ws = v->ws;
 	detach(v);
@@ -584,6 +617,19 @@ void rei_wm_move_direction(struct rei_server *s, enum rei_direction dir)
 	}
 }
 
+/* Takes a tiled window out of the grid, keeping its size and place. */
+static void make_floating(struct rei_view *v)
+{
+	struct rei_workspace *ws = v->ws;
+	struct rei_rect r = rei_view_rect(v);
+	v->float_rect = (struct rei_rect){ r.x - ws->output->x, r.y - ws->output->y, r.w, r.h };
+	v->float_sized = true;
+	rei_tree_remove_leaf(ws->tree, v->node);
+	v->node = NULL;
+	v->floating = true;
+	wl_list_insert(ws->floating.prev, &v->float_link);
+}
+
 void rei_wm_toggle_floating(struct rei_server *s)
 {
 	struct rei_view *v = rei_wm_active_view(s);
@@ -597,14 +643,7 @@ void rei_wm_toggle_floating(struct rei_server *s)
 		v->floating = false;
 		v->node = rei_tree_add_leaf(ws->tree, insertion_point(ws), v);
 	} else {
-		/* Keep the size it had in the grid, so the window doesn't jump. */
-		struct rei_rect r = rei_view_rect(v);
-		v->float_rect = (struct rei_rect){ r.x - ws->output->x, r.y - ws->output->y, r.w, r.h };
-		v->float_sized = true;
-		rei_tree_remove_leaf(ws->tree, v->node);
-		v->node = NULL;
-		v->floating = true;
-		wl_list_insert(ws->floating.prev, &v->float_link);
+		make_floating(v);
 	}
 	arrange_ws(ws);
 	rei_wm_focus_view(v);
@@ -693,6 +732,10 @@ void rei_wm_float_move(struct rei_view *v, int32_t x, int32_t y)
 		v->float_rect.w = cur.w;
 		v->float_rect.h = cur.h;
 	}
+	/* The pull-back rule: dragging a window up past the point where its notches
+	 * would leave the screen just stops it there. */
+	if (v->server->config->notch_height > 0 && y < min_window_y(o))
+		y = min_window_y(o);
 	v->float_rect.x = x - o->x;
 	v->float_rect.y = y - o->y;
 	v->x = x;
@@ -707,7 +750,7 @@ void rei_wm_float_set_rect(struct rei_view *v, int32_t x, int32_t y, int32_t w, 
 	struct rei_output *o = v->ws->output;
 	v->float_rect = (struct rei_rect){ x - o->x, y - o->y, w, h };
 	v->float_sized = true;
-	arrange(o);
+	arrange(o);  /* Also applies the pull-back rule. */
 }
 
 void rei_wm_float_settle(struct rei_view *v)
@@ -736,6 +779,206 @@ void rei_wm_float_settle(struct rei_view *v)
 		}
 		return;
 	}
+}
+
+/* ------------------------------------------------------------------------ */
+/* Notches                                                                  */
+/* ------------------------------------------------------------------------ */
+
+/* Only the focused window shows notches (and never when fullscreen). */
+static struct rei_view *notch_view(struct rei_server *s)
+{
+	if (s->config->notch_height <= 0)
+		return NULL;
+	struct rei_view *v = rei_wm_active_view(s);
+	return (v && !v->fullscreen && rei_view_visible(v)) ? v : NULL;
+}
+
+static void notch_geom(const struct rei_view *v, struct rei_notch_geometry *g)
+{
+	rei_notch_geometry(rei_view_rect(v), v->server->config->notch_height, g);
+}
+
+bool rei_wm_notch_at(struct rei_server *s, double x, double y,
+		     struct rei_view **view, enum rei_notch_part *part)
+{
+	struct rei_view *v = notch_view(s);
+	if (!v)
+		return false;
+	struct rei_notch_geometry g;
+	notch_geom(v, &g);
+	enum rei_notch_part p = rei_notch_hit(&g, x, y);
+	if (p == REI_NOTCH_NONE)
+		return false;
+	*view = v;
+	*part = p;
+	return true;
+}
+
+void rei_wm_set_notch_hover(struct rei_server *s, struct rei_view *v, enum rei_notch_part part)
+{
+	if (s->notch_hover_view == v && s->notch_hover_part == part)
+		return;
+	s->notch_hover_view = v;
+	s->notch_hover_part = part;
+	rei_server_schedule_damage(s);
+}
+
+void rei_wm_notch_activate(struct rei_server *s, struct rei_view *v, enum rei_notch_part part)
+{
+	switch (part) {
+	case REI_NOTCH_CLOSE:
+		rei_xdg_toplevel_close(v->toplevel);
+		break;
+	case REI_NOTCH_MINIMIZE:
+		rei_debug("notch: minimize is not implemented yet");
+		break;
+	case REI_NOTCH_MAXIMIZE:
+		rei_debug("notch: maximize is not implemented yet");
+		break;
+	default:
+		break;
+	}
+	(void)s;
+}
+
+static void emit_tab(struct rei_scene_snapshot *snap, struct rei_pixbuf *art, struct rei_rect r)
+{
+	if (art)
+		rei_snapshot_add(snap, art, (float)r.x, (float)r.y, (float)r.w, (float)r.h, false);
+}
+
+void rei_wm_emit_decorations(struct rei_server *s, struct rei_scene_snapshot *snap)
+{
+	if (s->drop_hint.active && rei_drop_hint_art()) {
+		const struct rei_rect *r = &s->drop_hint.rect;
+		rei_snapshot_add(snap, rei_drop_hint_art(), (float)r->x, (float)r->y,
+				 (float)r->w, (float)r->h, false);
+	}
+
+	struct rei_view *v = notch_view(s);
+	if (!v)
+		return;
+	struct rei_notch_geometry g;
+	notch_geom(v, &g);
+	int h = s->config->notch_height;
+	int scale = (int)ceil(v->ws->output->scale);
+	enum rei_notch_part hover = s->notch_hover_view == v ? s->notch_hover_part : REI_NOTCH_NONE;
+
+	if (g.has_buttons)
+		emit_tab(snap, rei_notch_art_buttons(h, scale, hover), g.buttons);
+	if (g.has_handle)
+		emit_tab(snap, rei_notch_art_handle(h, scale, hover), g.handle);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Dragging a tiled window by its handle                                    */
+/* ------------------------------------------------------------------------ */
+
+bool rei_wm_drag_float(struct rei_view *v)
+{
+	if (v->floating)
+		return true;
+	if (v->fullscreen || !v->ws || !v->node)
+		return false;
+	struct rei_workspace *ws = v->ws;
+	make_floating(v);
+	v->drag_from_tiled = true;
+	arrange_ws(ws);  /* The others close up around the gap. */
+	rei_wm_focus_view(v);
+	return true;
+}
+
+/* The tiled window under (x, y) and the side of it nearest the pointer. */
+static struct rei_view *find_drop_target(struct rei_server *s, const struct rei_view *dragged,
+					 double x, double y, enum rei_direction *dir,
+					 struct rei_rect *hint)
+{
+	struct rei_output *o;
+	wl_list_for_each(o, &s->outputs, link) {
+		struct rei_rect or = output_rect(o);
+		if (x < or.x || y < or.y || x >= or.x + or.w || y >= or.y + or.h)
+			continue;
+		struct rei_workspace *ws = o->workspace;
+		if (!ws || ws->fullscreen)
+			return NULL;
+
+		size_t n = rei_tree_leaf_count(ws->tree);
+		struct rei_node **leaves = rei_xcalloc(n ? n : 1, sizeof *leaves);
+		rei_tree_leaves(ws->tree, leaves, n);
+		struct rei_view *found = NULL;
+		for (size_t i = 0; i < n && !found; i++) {
+			struct rei_view *tv = leaves[i]->data;
+			struct rei_rect r = leaves[i]->rect;
+			if (tv == dragged || !tv->mapped)
+				continue;
+			if (x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h)
+				continue;
+
+			/* The nearest edge decides the side, measured relative to the size
+			 * so wide and narrow windows behave alike. */
+			double fx = (x - r.x) / r.w, fy = (y - r.y) / r.h;
+			double dl = fx, dr = 1 - fx, dt = fy, db = 1 - fy;
+			double m = fmin(fmin(dl, dr), fmin(dt, db));
+			if (m == dl) { *dir = REI_DIR_LEFT; *hint = (struct rei_rect){ r.x, r.y, r.w / 2, r.h }; }
+			else if (m == dr) { *dir = REI_DIR_RIGHT; *hint = (struct rei_rect){ r.x + r.w / 2, r.y, r.w - r.w / 2, r.h }; }
+			else if (m == dt) { *dir = REI_DIR_UP; *hint = (struct rei_rect){ r.x, r.y, r.w, r.h / 2 }; }
+			else { *dir = REI_DIR_DOWN; *hint = (struct rei_rect){ r.x, r.y + r.h / 2, r.w, r.h - r.h / 2 }; }
+			found = tv;
+		}
+		free(leaves);
+		return found;
+	}
+	return NULL;
+}
+
+void rei_wm_drag_update(struct rei_view *v, double x, double y)
+{
+	struct rei_server *s = v->server;
+	if (!v->drag_from_tiled)
+		return;
+	enum rei_direction dir;
+	struct rei_rect hint;
+	bool was = s->drop_hint.active;
+	struct rei_view *target = find_drop_target(s, v, x, y, &dir, &hint);
+	s->drop_hint.active = target != NULL;
+	if (target)
+		s->drop_hint.rect = hint;
+	if (was || target)
+		rei_server_schedule_damage(s);
+}
+
+void rei_wm_drag_finish(struct rei_view *v, double x, double y)
+{
+	struct rei_server *s = v->server;
+	s->drop_hint.active = false;
+	rei_server_schedule_damage(s);
+
+	if (!v->floating)
+		return;  /* The drag never began (a click), or the window went away. */
+
+	if (v->drag_from_tiled) {
+		v->drag_from_tiled = false;
+		enum rei_direction dir;
+		struct rei_rect hint;
+		struct rei_view *target = find_drop_target(s, v, x, y, &dir, &hint);
+		if (target && target->ws && target->node) {
+			/* Into the grid, beside the window it was dropped on. */
+			struct rei_workspace *old = v->ws, *dest = target->ws;
+			detach(v);
+			v->ws = dest;
+			v->floating = false;
+			wl_list_insert(dest->focus.prev, &v->focus_link);
+			v->node = rei_tree_insert_beside(dest->tree, target->node, v, dir);
+			arrange_ws(old);
+			arrange_ws(dest);
+			s->focused_output = dest->output;
+			rei_wm_focus_view(v);
+			return;
+		}
+		/* Dropped on empty space or a gap: it stays floating where it is. */
+	}
+	rei_wm_float_settle(v);
 }
 
 /* ------------------------------------------------------------------------ */

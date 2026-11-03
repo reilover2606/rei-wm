@@ -6,6 +6,7 @@
 #include <wayland-util.h>
 
 #include "config.h"
+#include "decoration.h"
 #include "output.h"
 #include "util/msgq.h"
 
@@ -55,6 +56,9 @@ struct rei_server {
 	struct wl_list views;       /* every rei_view, in creation order */
 	struct wl_list workspaces;  /* rei_workspace, sorted by number */
 	struct rei_output *focused_output;  /* Where keyboard focus and new windows go. */
+	struct rei_view *notch_hover_view;  /* Notch under the pointer, to highlight it. */
+	enum rei_notch_part notch_hover_part;
+	struct { bool active; struct rei_rect rect; } drop_hint;  /* Where a dragged window would land. */
 	struct wl_list popups;      /* xdg popups, creation order */
 	struct wl_list wl_outputs;  /* rei_wl_output, including ones being retired */
 	struct rei_seat *seat;

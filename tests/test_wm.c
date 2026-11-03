@@ -7,8 +7,8 @@
  * checked from screenshots, so the test sees exactly what a user would.
  *
  * Setup: output OUT is 800x600 at (0,0), OUT2 is 640x480 at (800,0). Gaps are
- * the defaults (10 outer, 10 inner), so a lone window on OUT fills
- * (10,10)-(790,590). Workspace 1 starts on OUT and 2 on OUT2. The pointer is
+ * the defaults (10 outer, 10 inner) and the notch height is 22, so the top gap
+ * is 22: a lone window on OUT fills (10,22)-(790,590). Workspace 1 starts on OUT and 2 on OUT2. The pointer is
  * parked at (795,595), over nothing, so it never steals focus.
  */
 #define SOCKET "rei-wm-test"
@@ -41,129 +41,20 @@
 #define CYAN 0x0000ffff
 #define BG 27, 39, 51  /* the default background colour #1b2733 */
 
-static struct client *g_clients[4];
-static struct window *g_wins[16];
-static int g_nwins;
-
-static void track(struct client *c, struct window *w)
-{
-	(void)c;
-	CHECK(g_nwins < 16);
-	g_wins[g_nwins++] = w;
-}
-
-static void untrack(struct window *w)
-{
-	for (int i = 0; i < g_nwins; i++) {
-		if (g_wins[i] == w) {
-			g_wins[i] = g_wins[--g_nwins];
-			return;
-		}
-	}
-}
-
-static struct client *owner_of(struct window *w) { return w->c; }
-
-/*
- * Waits for the compositor to finish reacting to everything so far, and lets
- * every client answer any new size with a new buffer, until nothing changes.
- */
-static void settle_all(void)
-{
-	for (int round = 0; round < 8; round++) {
-		input_sync();
-		for (int i = 0; g_clients[i]; i++) {
-			CHECK(wl_display_roundtrip(g_clients[i]->d) >= 0);
-			CHECK(wl_display_roundtrip(g_clients[i]->d) >= 0);
-		}
-		bool changed = false;
-		for (int i = 0; i < g_nwins; i++)
-			changed |= window_follow(owner_of(g_wins[i]), g_wins[i]);
-		if (!changed) {
-			for (int i = 0; g_clients[i]; i++)
-				CHECK(wl_display_roundtrip(g_clients[i]->d) >= 0);
-			return;
-		}
-	}
-	fprintf(stderr, "windows never settled\n");
-	exit(1);
-}
-
-/* Presses modifiers and a key together, as one atomic write. */
-static void chord(int mod1, int mod2, int key)
-{
-	char buf[256];
-	int n = 0;
-	n += snprintf(buf + n, sizeof buf - (size_t)n, "key %d 1\n", mod1);
-	if (mod2)
-		n += snprintf(buf + n, sizeof buf - (size_t)n, "key %d 1\n", mod2);
-	n += snprintf(buf + n, sizeof buf - (size_t)n, "key %d 1\nkey %d 0\n", key, key);
-	if (mod2)
-		n += snprintf(buf + n, sizeof buf - (size_t)n, "key %d 0\n", mod2);
-	snprintf(buf + n, sizeof buf - (size_t)n, "key %d 0\n", mod1);
-	inject_lines(buf);
-}
-static void mod(int key) { chord(KEY_SUPER, 0, key); }
-static void mod_shift(int key) { chord(KEY_SUPER, KEY_SHIFT, key); }
-
-static void open_win(struct client *c, struct window *w, const char *title, uint32_t color)
-{
-	toplevel_create(c, w, title);
-	w->color = color;
-	w->natural_w = 200;
-	w->natural_h = 120;
-	track(c, w);
-	window_follow(c, w);
-	settle_all();
-}
-
-static void close_win(struct window *w)
-{
-	struct client *c = w->c;
-	untrack(w);
-	xdg_toplevel_destroy(w->tl);
-	xdg_surface_destroy(w->xs);
-	wl_surface_destroy(w->surface);
-	CHECK(wl_display_roundtrip(c->d) >= 0);
-	settle_all();
-}
-
-static void park_pointer(void)
-{
-	inject("motion_abs 795 595");
-	settle_all();
-}
-
-static void expect_size(const struct window *w, int cw, int ch, bool tiled, const char *what)
-{
-	if (w->cfg_w != cw || w->cfg_h != ch || w->cfg_tiled != tiled) {
-		fprintf(stderr, "%s: configured %dx%d tiled=%d, expected %dx%d tiled=%d\n", what,
-			w->cfg_w, w->cfg_h, w->cfg_tiled, cw, ch, tiled);
-		exit(1);
-	}
-}
-
-static int active_count(void)
-{
-	int n = 0;
-	for (int i = 0; i < g_nwins; i++)
-		n += g_wins[i]->activated;
-	return n;
-}
-
 /* ------------------------------------------------------------------------ */
 
 static void test_tiling(struct client *c, struct window *w1, struct window *w2)
 {
 	open_win(c, w1, "W1", RED);
-	expect_size(w1, 780, 580, true, "lone window fills the area inside the outer gap");
+	expect_size(w1, 780, 568, true, "lone window fills the area inside the outer gap");
 	CHECK(w1->activated);
 
 	struct ppm img = screenshot();
 	expect_px(&img, 400, 100, 255, 0, 0, 0, "window");
-	expect_px(&img, 10, 10, 255, 0, 0, 0, "window's top-left pixel");
+	expect_px(&img, 10, 22, 255, 0, 0, 0, "window's top-left pixel");
+	expect_px(&img, 400, 21, BG, 0, "the gap above the window holds the notches' room");
 	expect_px(&img, 789, 589, 255, 0, 0, 0, "window's bottom-right pixel");
-	expect_px(&img, 9, 9, BG, 0, "outer gap, top-left");
+	expect_px(&img, 9, 22, BG, 0, "outer gap, left");
 	expect_px(&img, 5, 100, BG, 0, "outer gap, left");
 	expect_px(&img, 400, 595, BG, 0, "outer gap, bottom");
 	expect_px(&img, 790, 100, BG, 0, "outer gap, right");
@@ -171,8 +62,8 @@ static void test_tiling(struct client *c, struct window *w1, struct window *w2)
 
 	/* A second window splits the row: equal halves with the inner gap between. */
 	open_win(c, w2, "W2", GREEN);
-	expect_size(w1, 385, 580, true, "W1 after W2 opens");
-	expect_size(w2, 385, 580, true, "W2");
+	expect_size(w1, 385, 568, true, "W1 after W2 opens");
+	expect_size(w2, 385, 568, true, "W2");
 	CHECK(w2->activated && !w1->activated && active_count() == 1);
 
 	img = screenshot();
@@ -213,7 +104,7 @@ static void test_focus_and_move(struct window *w1, struct window *w2)
 	expect_px(&img, 200, 100, 0, 255, 0, 0, "W2 now on the left");
 	expect_px(&img, 600, 100, 255, 0, 0, 0, "W1 now on the right");
 	free(img.rgb);
-	expect_size(w1, 385, 580, true, "W1 after the move");
+	expect_size(w1, 385, 568, true, "W1 after the move");
 }
 
 static void test_split_and_float(struct client *c, struct window *w1, struct window *w2,
@@ -222,22 +113,24 @@ static void test_split_and_float(struct client *c, struct window *w1, struct win
 	/* "split v", then a new window stacks under the active one (W1, on the right). */
 	mod(KEY_V);
 	open_win(c, w3, "W3", BLUE);
-	expect_size(w1, 385, 285, true, "W1 stacked");
-	expect_size(w3, 385, 285, true, "W3 stacked");
-	expect_size(w2, 385, 580, true, "W2 untouched");
+	expect_size(w1, 385, 273, true, "W1 stacked");
+	expect_size(w3, 385, 273, true, "W3 stacked");
+	expect_size(w2, 385, 568, true, "W2 untouched");
 	struct ppm img = screenshot();
 	expect_px(&img, 600, 100, 255, 0, 0, 0, "W1 on top");
 	expect_px(&img, 600, 450, 0, 0, 255, 0, "W3 underneath");
+	/* Stacked windows are 22px apart (room for the lower one's notch): 295..316. */
 	expect_px(&img, 600, 295, BG, 0, "gap between the stacked windows");
-	expect_px(&img, 600, 304, BG, 0, "gap between the stacked windows");
+	expect_px(&img, 600, 316, BG, 0, "gap between the stacked windows");
+	expect_px(&img, 600, 317, 0, 0, 255, 0, "W3 starts below the gap");
 	expect_px(&img, 200, 300, 0, 255, 0, 0, "W2 spans the full height");
 	free(img.rgb);
 
 	/* Float W3: it keeps its size and place, and W1 takes the space back. */
 	mod_shift(KEY_SPACE);
 	settle_all();
-	expect_size(w3, 385, 285, false, "W3 floating keeps its size");
-	expect_size(w1, 385, 580, true, "W1 reclaims the column");
+	expect_size(w3, 385, 273, false, "W3 floating keeps its size");
+	expect_size(w1, 385, 568, true, "W1 reclaims the column");
 	img = screenshot();
 	expect_px(&img, 600, 450, 0, 0, 255, 0, "floating W3 above W1");
 	expect_px(&img, 600, 300, 255, 0, 0, 0, "W1 visible above the floating window");
@@ -246,9 +139,9 @@ static void test_split_and_float(struct client *c, struct window *w1, struct win
 	/* Back into the grid: three columns. */
 	mod_shift(KEY_SPACE);
 	settle_all();
-	expect_size(w3, 253, 580, true, "W3 tiled again");
-	expect_size(w1, 254, 580, true, "W1, three columns (253+254+253 = 760)");
-	expect_size(w2, 253, 580, true, "W2");
+	expect_size(w3, 253, 568, true, "W3 tiled again");
+	expect_size(w1, 254, 568, true, "W1, three columns (253+254+253 = 760)");
+	expect_size(w2, 253, 568, true, "W2");
 	img = screenshot();
 	expect_px(&img, 100, 100, 0, 255, 0, 0, "column 1");
 	expect_px(&img, 268, 100, BG, 0, "gap between columns 1 and 2");
@@ -305,7 +198,7 @@ static void test_workspaces(struct client *c, struct window *w1, struct window *
 
 	mod(KEY_3);
 	settle_all();
-	CHECK(w3->activated && w3->cfg_w == 780 && w3->cfg_h == 580 && w3->cfg_tiled);
+	CHECK(w3->activated && w3->cfg_w == 780 && w3->cfg_h == 568 && w3->cfg_tiled);
 	img = screenshot();
 	expect_px(&img, 400, 100, 0, 0, 255, 0, "W3 alone on workspace 3");
 	free(img.rgb);
@@ -325,7 +218,7 @@ static void test_close_and_dialog(struct client *c, struct window *w1, struct wi
 	settle_all();
 	CHECK(w1->close_requested && !w2->close_requested);
 	close_win(w1);
-	expect_size(w2, 780, 580, true, "the survivor takes the whole area");
+	expect_size(w2, 780, 568, true, "the survivor takes the whole area");
 
 	/* A dialog (fixed size) floats, at its own size, centred. */
 	struct window dlg;
@@ -347,7 +240,7 @@ static void test_close_and_dialog(struct client *c, struct window *w1, struct wi
 	window_follow(c, &dlg);
 	settle_all();
 	expect_size(&dlg, 0, 0, false, "a fixed-size window floats and keeps its own size");
-	expect_size(w2, 780, 580, true, "the tiled window is unaffected by the dialog");
+	expect_size(w2, 780, 568, true, "the tiled window is unaffected by the dialog");
 	struct ppm img = screenshot();
 	expect_px(&img, 260, 210, 255, 255, 0, 0, "dialog, centred at (250,200)");
 	expect_px(&img, 549, 399, 255, 255, 0, 0, "dialog's far corner");
@@ -391,7 +284,7 @@ static void test_two_outputs(struct client *c, struct window *w2, struct window 
 	CHECK(!w2->activated);
 
 	open_win(c, w5, "W5", CYAN);
-	expect_size(w5, OUT2_W - 20, OUT2_H - 20, true, "a window on the smaller output");
+	expect_size(w5, OUT2_W - 20, OUT2_H - 32, true, "a window on the smaller output");
 	struct ppm img2 = screenshot_output("OUT2");
 	CHECK(img2.w == OUT2_W && img2.h == OUT2_H);
 	expect_px(&img2, 300, 200, 0, 255, 255, 0, "W5 on OUT2");
@@ -404,7 +297,7 @@ static void test_two_outputs(struct client *c, struct window *w2, struct window 
 	/* Move it to workspace 1, which is showing on OUT: it changes screens. */
 	mod_shift(KEY_1);
 	settle_all();
-	expect_size(w5, 385, 580, true, "W5 joins workspace 1 on OUT beside W2");
+	expect_size(w5, 385, 568, true, "W5 joins workspace 1 on OUT beside W2");
 	img2 = screenshot_output("OUT2");
 	expect_px(&img2, 300, 200, BG, 0, "OUT2 is empty again");
 	free(img2.rgb);
@@ -461,6 +354,7 @@ int main(int argc, char **argv)
 		 "[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n"
 		 "[[output]]\nname = \"OUT2\"\nwidth = %d\nheight = %d\n",
 		 OUT_W, OUT_H, OUT2_W, OUT2_H);
+	g_n_outputs = 2;
 	start_compositor(argv[1], config, true);
 
 	struct client c;

@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <wayland-util.h>
 
+#include "decoration.h"
 #include "geom.h"
 #include "layout.h"
 #include "snapshot.h"
@@ -52,6 +53,7 @@ struct rei_view {
 	bool mapped;
 	bool floating;
 	bool fullscreen;
+	bool drag_from_tiled;  /* Lifted out of the grid by its drag handle, and not yet dropped. */
 
 	/* Floating geometry, relative to the workspace's output so that windows
 	 * follow their output when the layout changes. w/h are only used once the
@@ -107,7 +109,27 @@ void rei_wm_float_set_rect(struct rei_view *view, int32_t x, int32_t y, int32_t 
 /* After a drag: a window dropped on another output belongs to that output. */
 void rei_wm_float_settle(struct rei_view *view);
 
+/* ---- Notches and dragging ---- */
+/* The notch under (x, y), if the focused window has notches there. */
+bool rei_wm_notch_at(struct rei_server *server, double x, double y,
+		     struct rei_view **view, enum rei_notch_part *part);
+/* Remembers which notch the pointer is over, so it is drawn highlighted. */
+void rei_wm_set_notch_hover(struct rei_server *server, struct rei_view *view,
+			    enum rei_notch_part part);
+/* A notch button was clicked. */
+void rei_wm_notch_activate(struct rei_server *server, struct rei_view *view,
+			   enum rei_notch_part part);
+/* A drag by the handle starts moving a tiled window: lift it out of the grid. */
+bool rei_wm_drag_float(struct rei_view *view);
+/* While dragging, shows where the window would land if dropped here. */
+void rei_wm_drag_update(struct rei_view *view, double x, double y);
+/* The drag ended: drop a lifted window into the slot under the pointer, or leave
+ * it floating where it is. */
+void rei_wm_drag_finish(struct rei_view *view, double x, double y);
+
 /* ---- Scene and hit-testing ---- */
+/* The notches (of the focused window) and the drop hint, above all windows. */
+void rei_wm_emit_decorations(struct rei_server *server, struct rei_scene_snapshot *snap);
 void rei_wm_emit_views(struct rei_server *server, struct rei_output *output,
 		       struct rei_scene_snapshot *snap);
 bool rei_wm_pick(struct rei_server *server, double x, double y,

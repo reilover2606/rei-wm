@@ -139,6 +139,39 @@ from the corner nearest the pointer; clients can also ask via
 workspace. Windows on a workspace that isn't showing get no frame callbacks, so
 clients throttle.
 
+### Window notches (`src/decoration.c`)
+
+Windows have no border or title bar. The *focused* window gets two tabs that hover
+directly above its top edge, drawn by the compositor: a drag handle at the left
+and minimize/maximize/close at the right. `decoration.c` is pure geometry,
+hit-testing and artwork, so it is unit-tested alone: geometry is a function of the
+window rectangle and the notch height, the tabs end exactly at the window's top edge
+and never extend past its sides or overlap (a window too narrow for both drops the
+handle, then everything), and the artwork is rendered procedurally with 4x4
+supersampling, so it is anti-aliased and sharp at any integer output scale (cached
+per size, scale and hover state).
+
+- **They never resize anything.** Notches overlay the space above a window and take
+  nothing from it. To make room, layout reserves at least the notch height above
+  every tiled window whether or not it is focused: the top gap is
+  `max(gap_outer, notch)` and the gap between stacked windows is
+  `max(gap_inner, notch)` (the tree takes separate horizontal and vertical gaps for
+  this). Moving focus therefore changes no sizes.
+- **The pull-back rule.** A floating window's top edge can't go higher than the notch
+  height from the top of its output, so its tabs never leave the screen. Dragging
+  past that just stops there; the corrected position is what is remembered.
+- **Input.** Notches are the compositor's: the pointer over one belongs to no client
+  (the client gets a `leave`), the hovered part is highlighted, and a button
+  counts as clicked only if the press and the release are both on it, so a press can
+  be cancelled by sliding off.
+- **Drag handle.** For a floating window it is an ordinary move. A tiled window waits
+  until the pointer has moved 6px (so a click doesn't disturb it), then lifts out of
+  the tree and follows the pointer while the others close up. The window under the
+  pointer, and which side of it is nearest, pick the drop slot; a translucent hint
+  shows it, and releasing inserts the window beside the target (wrapping it in a new
+  split if needed). Released over empty space, the window stays floating. A window
+  dropped on another output joins that output's workspace.
+
 ## Input (`src/input/`)
 
 Backends feed raw events (evdev key and button codes, absolute or relative
@@ -218,10 +251,13 @@ These are deliberate and tracked by later milestones:
 
 - **Window management is i3-style but partial.** Splits are horizontal or vertical
   only (no tabbed or stacked containers yet); the weights that size tiles are
-  always equal (no resizing tiles from the keyboard); tiled windows can't be
-  dragged to a new slot with the mouse (milestone 6); `maximize` and `minimize`
-  are placeholders until the decorations exist; there are no window rules or
-  urgency hints. Floating windows are not clamped to stay on screen.
+  always equal (no resizing tiles from the keyboard); there are no window rules or
+  urgency hints.
+- **The notch buttons for minimize and maximize are placeholders**: they highlight and
+  click but do nothing yet (close works). Notches are drawn only for windows that
+  use xdg-shell as toplevels, and are not themable yet (the colours are built in).
+  The bigger gap between stacked tiles (the notch height) is the price of keeping
+  the lower window's tabs clear of the one above.
 - **No real hardware input.** libinput arrives with the DRM backend (milestone 8).
   Until then input comes from the nested parent or the headless FIFO.
 - **Interactive move and resize** work for floating windows only. Key repeat is
@@ -261,7 +297,7 @@ changing the core loader. All keybindings will be configurable there.
 | 3 | EGL/GLES renderer: shm upload, alpha blending, wallpaper, software cursor | done |
 | 4 | libxkbcommon, keybinding engine, focus, clipboard, move (libinput moved to 8) | done |
 | 5 | tiling tree (H/V splits), floating, fullscreen, gaps, per-output workspaces | done |
-| 6 | window notches: close/min/max (right), drag handle (left) | |
+| 6 | window notches: close/min/max (right), drag handle (left) | done |
 | 7 | toolbar (any edge): workspaces left, clock right | |
 | 8 | DRM/KMS backend, libseat + libinput, dmabuf, direct scanout, hardware cursor | |
 | 9 | Xwayland window manager, cursor override | |
@@ -282,6 +318,10 @@ changing the core loader. All keybindings will be configurable there.
 - `input`: keyboard, pointer, focus, bindings, popup grabs, move, clipboard between
   two clients and an abrupt client disconnect, all through the headless FIFO and
   observed from real Wayland clients;
+- `decoration`: notch geometry, hit-testing, hover/scale variants and artwork pixels;
+- `notch`: the notches end to end (focus-only, no resizing, hover, click and cancel,
+  handle drag, the pull-back rule, drag-and-drop into a slot with the drop hint,
+  fullscreen), asserted from screenshots;
 - `layout`: the tiling tree (exact rectangles, gaps, weights, split, move, neighbours) plus
   randomised sequences checking its invariants and non-overlap;
 - `wm`: the window manager end to end on two outputs with clients that obey `configure`:
