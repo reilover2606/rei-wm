@@ -79,6 +79,44 @@ fail:
 	return false;
 }
 
+/* Builds what depends on `cfg` (keybindings, and the keymap if the layout changed) and
+ * only then swaps it in, so a bad config leaves everything as it was. The server's own
+ * config pointer is updated by the caller afterwards. */
+bool rei_input_prepare_reload(struct rei_server *server, const struct rei_config *cfg,
+			      struct rei_input_reload *out, char *err, size_t errlen)
+{
+	const struct rei_config *old = server->config;
+	*out = (struct rei_input_reload){ 0 };
+	out->bindings = rei_bindings_from_config(cfg, err, errlen);
+	if (!out->bindings)
+		return false;
+	out->keymap_changed = strcmp(old->kb_rules, cfg->kb_rules) || strcmp(old->kb_model, cfg->kb_model) ||
+			      strcmp(old->kb_layout, cfg->kb_layout) || strcmp(old->kb_variant, cfg->kb_variant) ||
+			      strcmp(old->kb_options, cfg->kb_options);
+	if (out->keymap_changed) {
+		out->xkb = rei_xkb_create(cfg, err, errlen);
+		if (!out->xkb) {
+			rei_bindings_free(out->bindings);
+			out->bindings = NULL;
+			return false;
+		}
+	}
+	return true;
+}
+
+void rei_input_commit_reload(struct rei_server *server, struct rei_input_reload *r)
+{
+	struct rei_input *in = server->input;
+	rei_bindings_free(in->bindings);
+	in->bindings = r->bindings;
+	if (r->xkb) {
+		rei_xkb_destroy(in->xkb);
+		in->xkb = r->xkb;
+	}
+	r->bindings = NULL;
+	r->xkb = NULL;
+}
+
 void rei_input_finish(struct rei_server *server)
 {
 	struct rei_input *in = server->input;

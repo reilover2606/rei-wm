@@ -19,6 +19,7 @@
 #include "proto/surface.h"
 #include "proto/wl_output.h"
 #include "proto/xdg_shell.h"
+#include "reload.h"
 #include "render_thread.h"
 #include "scene.h"
 #include "snapshot.h"
@@ -259,6 +260,24 @@ static void refresh_wallpaper(struct rei_server *s, struct rei_output *o)
 	o->wallpaper = rei_wallpaper_render(s->wallpaper_image,
 					    (enum rei_wallpaper_mode)s->wallpaper_mode,
 					    s->config->background_rgb, o->width, o->height);
+}
+
+void rei_server_reload_look(struct rei_server *s)
+{
+	const struct rei_config *config = s->config;
+	rei_image_free(s->wallpaper_image);
+	s->wallpaper_image = NULL;
+	s->wallpaper_mode = rei_wallpaper_parse_mode(config->wallpaper_mode);
+	if (config->wallpaper_path) {
+		char err[256];
+		s->wallpaper_image = rei_image_load(config->wallpaper_path, err, sizeof err);
+		if (!s->wallpaper_image)
+			rei_warn("wallpaper not loaded: %s", err);
+	}
+	struct rei_output *o;
+	wl_list_for_each(o, &s->outputs, link)
+		refresh_wallpaper(s, o);
+	rei_server_schedule_damage(s);
 }
 
 /*
@@ -570,6 +589,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	}
 
 	rei_xwayland_start(s);
+	rei_reload_start(s);
 
 	rei_info("rei-wm listening on WAYLAND_DISPLAY=%s (backend: %s)",
 		 s->socket_name, s->backend->impl->name);
@@ -625,6 +645,7 @@ void rei_server_destroy(struct rei_server *s)
 		wl_display_destroy_clients(s->display);
 	if (s->display)
 		rei_wl_output_finish(s);
+	rei_reload_stop(s);
 	rei_xwayland_stop(s);
 	rei_linux_dmabuf_finish(s);
 	if (s->protocol_logger)

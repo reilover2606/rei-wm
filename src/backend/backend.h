@@ -25,6 +25,8 @@ struct rei_backend_impl {
 	/* Optional. The pointer moved. Returns true if the backend shows the pointer
 	 * itself on every output (a hardware cursor), so no redraw is needed. */
 	bool (*cursor_moved)(struct rei_backend *backend);
+	/* Optional. The config was reloaded: re-apply device settings. */
+	void (*config_changed)(struct rei_backend *backend);
 	/* Optional. Switch to virtual terminal `vt` (1-12). */
 	void (*switch_vt)(struct rei_backend *backend, unsigned vt);
 };

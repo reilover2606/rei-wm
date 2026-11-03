@@ -18,6 +18,9 @@ struct rei_libinput *rei_libinput_create(struct rei_server *server, const char *
 					 const struct rei_libinput_ops *ops, void *data);
 void rei_libinput_destroy(struct rei_libinput *li);
 
+/* Applies the current [input] settings to every device again (after a config reload). */
+void rei_libinput_reconfigure(struct rei_libinput *li);
+
 /* Stop and resume reading devices around a VT switch. */
 void rei_libinput_suspend(struct rei_libinput *li);
 bool rei_libinput_resume(struct rei_libinput *li);

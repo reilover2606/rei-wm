@@ -34,6 +34,9 @@ struct rei_seat {
 
 bool rei_seat_init(struct rei_server *server);
 void rei_seat_finish(struct rei_server *server);
+/* After a config reload: resends the repeat rate to every keyboard, and the keymap
+ * if the layout changed. */
+void rei_seat_keyboards_reconfigured(struct rei_seat *seat, bool keymap_changed);
 void rei_seat_set_capabilities(struct rei_seat *seat, uint32_t capabilities);
 
 struct rei_surface;

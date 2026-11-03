@@ -27,6 +27,8 @@ struct rei_libinput {
 	void *ops_data;
 	char *seat;
 	int n_keyboards, n_pointers;
+	struct libinput_device *devices[64];  /* Referenced, so settings can be re-applied. */
+	int n_devices;
 };
 
 static int open_restricted(const char *path, int flags, void *data)
@@ -62,19 +64,9 @@ static void update_capabilities(struct rei_libinput *li)
 	rei_seat_set_capabilities(li->server->seat, caps);
 }
 
-static void configure_device(struct rei_libinput *li, struct libinput_device *dev)
+static void apply_settings(struct rei_libinput *li, struct libinput_device *dev)
 {
 	const struct rei_config *cfg = li->server->config;
-	const char *name = libinput_device_get_name(dev);
-
-	bool kb = libinput_device_has_capability(dev, LIBINPUT_DEVICE_CAP_KEYBOARD);
-	bool ptr = libinput_device_has_capability(dev, LIBINPUT_DEVICE_CAP_POINTER);
-	if (kb)
-		li->n_keyboards++;
-	if (ptr)
-		li->n_pointers++;
-	rei_info("input device added: '%s'%s%s", name, kb ? " [keyboard]" : "", ptr ? " [pointer]" : "");
-
 	if (libinput_device_config_tap_get_finger_count(dev) > 0)
 		libinput_device_config_tap_set_enabled(dev, cfg->tap_to_click
 			? LIBINPUT_CONFIG_TAP_ENABLED : LIBINPUT_CONFIG_TAP_DISABLED);
@@ -84,6 +76,23 @@ static void configure_device(struct rei_libinput *li, struct libinput_device *de
 		libinput_device_config_left_handed_set(dev, cfg->left_handed);
 	if (libinput_device_config_accel_is_available(dev))
 		libinput_device_config_accel_set_speed(dev, cfg->pointer_accel);
+}
+
+static void configure_device(struct rei_libinput *li, struct libinput_device *dev)
+{
+	const char *name = libinput_device_get_name(dev);
+	if (li->n_devices < (int)REI_ARRAY_LEN(li->devices))
+		li->devices[li->n_devices++] = libinput_device_ref(dev);
+
+	bool kb = libinput_device_has_capability(dev, LIBINPUT_DEVICE_CAP_KEYBOARD);
+	bool ptr = libinput_device_has_capability(dev, LIBINPUT_DEVICE_CAP_POINTER);
+	if (kb)
+		li->n_keyboards++;
+	if (ptr)
+		li->n_pointers++;
+	rei_info("input device added: '%s'%s%s", name, kb ? " [keyboard]" : "", ptr ? " [pointer]" : "");
+
+	apply_settings(li, dev);
 	update_capabilities(li);
 }
 
@@ -124,6 +133,13 @@ static void handle_event(struct rei_libinput *li, struct libinput_event *ev)
 			li->n_keyboards--;
 		if (libinput_device_has_capability(dev, LIBINPUT_DEVICE_CAP_POINTER))
 			li->n_pointers--;
+		for (int i = 0; i < li->n_devices; i++) {
+			if (li->devices[i] == dev) {
+				libinput_device_unref(dev);
+				li->devices[i] = li->devices[--li->n_devices];
+				break;
+			}
+		}
 		rei_info("input device removed: '%s'", libinput_device_get_name(dev));
 		update_capabilities(li);
 		break;
@@ -236,10 +252,18 @@ fail:
 	return NULL;
 }
 
+void rei_libinput_reconfigure(struct rei_libinput *li)
+{
+	for (int i = 0; i < li->n_devices; i++)
+		apply_settings(li, li->devices[i]);
+}
+
 void rei_libinput_destroy(struct rei_libinput *li)
 {
 	if (!li)
 		return;
+	for (int i = 0; i < li->n_devices; i++)
+		libinput_device_unref(li->devices[i]);
 	if (li->event)
 		event_free(li->event);
 	if (li->li)

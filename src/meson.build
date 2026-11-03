@@ -8,6 +8,7 @@ core_sources = files(
   'desktop.c',
   'output.c',
   'pixbuf.c',
+  'reload.c',
   'render_thread.c',
   'scene.c',
   'toolbar.c',

@@ -86,6 +86,12 @@ if have_xwayland
     timeout: 180)
 endif
 
+reload_test = executable('test_reload', 'test_reload.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('reload', reload_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+
 bar_test = executable('test_bar', 'test_bar.c', xdg_shell_client_h, xdg_shell_code,
   include_directories: inc,
   dependencies: [wayland_client, m_dep],

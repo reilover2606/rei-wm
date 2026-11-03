@@ -75,6 +75,17 @@ struct rei_input {
 	struct rei_rect resize_start;
 };
 
+/* Config hot reload, in two steps so that a bad config changes nothing. */
+struct rei_input_reload {
+	struct rei_bindings *bindings;
+	struct rei_xkb *xkb;  /* NULL unless the keyboard layout changed. */
+	bool keymap_changed;
+};
+struct rei_config;
+bool rei_input_prepare_reload(struct rei_server *server, const struct rei_config *cfg,
+			      struct rei_input_reload *out, char *err, size_t errlen);
+void rei_input_commit_reload(struct rei_server *server, struct rei_input_reload *r);
+
 /* The server's [input]/[keybindings] config must be loaded. */
 bool rei_input_init(struct rei_server *server, char *err, size_t errlen);
 void rei_input_finish(struct rei_server *server);
