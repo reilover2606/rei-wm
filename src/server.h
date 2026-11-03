@@ -14,6 +14,8 @@ struct event_base;
 struct wl_display;
 struct wl_event_loop;
 struct rei_backend;
+struct rei_seat;
+struct rei_image;
 
 /*
  * The compositor core. Everything here lives on the event thread: the
@@ -34,6 +36,10 @@ struct rei_server {
 	struct event *sigint_event;
 	struct event *sigterm_event;
 	struct event *sigusr1_event;
+	struct event *sigusr2_event;
+	struct event *damage_event;  /* Coalesced "scene changed". */
+	bool damage_pending;
+	bool shutting_down;
 
 	struct rei_msgq inbox;  /* render threads -> event thread */
 
@@ -42,6 +48,19 @@ struct rei_server {
 	uint32_t next_output_id;
 	uint64_t scene_serial;
 	int exit_code;
+
+	/* Protocol state. */
+	struct wl_list surfaces;    /* rei_surface */
+	struct wl_list views;       /* rei_view, bottom to top (placeholder WM) */
+	struct wl_list popups;      /* xdg popups, creation order */
+	struct wl_list wl_outputs;  /* rei_wl_output, including ones being retired */
+	struct rei_seat *seat;
+
+	/* Look. */
+	struct rei_image *wallpaper_image;
+	int wallpaper_mode;
+	double cursor_x, cursor_y;  /* Global logical coordinates. */
+	bool cursor_placed;
 };
 
 struct rei_server_options {
@@ -72,8 +91,20 @@ void rei_server_destroy(struct rei_server *server);
  */
 void rei_server_schedule_flush(struct rei_server *server);
 
-/* Marks the scene changed: builds a new snapshot and sends it to every output. */
-void rei_server_damage(struct rei_server *server);
+/*
+ * Marks the scene as changed. A new snapshot is built and sent to every
+ * output once the current batch of events has been handled, so any number of
+ * changes in one pass produce a single snapshot. Accepts NULL.
+ */
+void rei_server_schedule_damage(struct rei_server *server);
+
+/* Builds and sends the snapshot now if one is scheduled. */
+void rei_server_flush_damage(struct rei_server *server);
+
+/* Asks every output to write a PPM of what it is showing to
+ * $REI_SCREENSHOT_DIR (default: $XDG_RUNTIME_DIR). A debugging and testing
+ * aid, also triggered by SIGUSR2. */
+void rei_server_screenshot(struct rei_server *server);
 
 struct rei_output *rei_server_add_output(struct rei_server *server,
 					 const struct rei_output_params *params);

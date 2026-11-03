@@ -8,6 +8,10 @@
 #include <wayland-client.h>
 
 #include "backend/backend.h"
+#include "messages.h"
+#include "render/gles.h"
+#include "render_thread.h"
+#include "util/msgq.h"
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
@@ -18,12 +22,38 @@
  * toplevel window in the parent. This is how the compositor is developed on a
  * machine that is already running a desktop.
  *
- * Milestone 1 scope: windows open, resize and close, and are filled with a
- * solid colour so you can see them. Real rendering arrives with the EGL
- * renderer, which will attach a wl_egl_window per output on the render thread.
+ * Presentation: each output's render thread draws with the OpenGL renderer,
+ * reads the frame back into a shared-memory file and hands it to the event
+ * thread, which attaches it to the parent window as a wl_shm buffer. That keeps
+ * every call on the parent connection on one thread. The readback costs
+ * performance, which is acceptable for a development backend; the DRM backend
+ * will scan the render target out directly.
  */
 
-#define NESTED_FILL_COLOR 0xff1b2733u
+/* Shown until the first real frame arrives, and needed so the window maps. */
+#define NESTED_PLACEHOLDER_COLOR 0xff1b2733u
+
+enum { NMSG_FRAME = 1 };
+
+/* A rendered frame in transit from a render thread to the event thread. */
+struct nested_frame {
+	uint32_t window_id;
+	int fd;  /* memfd holding width*height XRGB8888 pixels */
+	int32_t width, height;
+};
+
+static void nested_frame_destroy(void *p)
+{
+	struct nested_frame *f = p;
+	close(f->fd);
+	free(f);
+}
+
+/* Render-thread state for one window; outlives the window object. */
+struct nested_present {
+	struct nested_backend *nb;
+	uint32_t window_id;
+};
 
 struct nested_backend;
 
@@ -35,6 +65,7 @@ struct nested_buffer {
 
 struct nested_window {
 	struct wl_list link;
+	uint32_t id;
 	struct nested_backend *nb;
 	struct rei_output *output;
 
@@ -59,6 +90,9 @@ struct nested_backend {
 	struct xdg_wm_base *wm_base;
 	struct event *fd_event;
 	struct wl_list windows;
+	struct rei_msgq inbox;  /* frames from render threads */
+	bool inbox_ready;
+	uint32_t next_window_id;
 };
 
 /* ---- drawing ----------------------------------------------------------- */
@@ -80,12 +114,31 @@ static const struct wl_buffer_listener buffer_listener = {
 	.release = buffer_release,
 };
 
-static void window_draw(struct nested_window *w)
+/* Attaches `fd` (XRGB8888, width x height) to the window and commits. Takes the fd. */
+static void window_attach(struct nested_window *w, int fd, int32_t width, int32_t height)
 {
 	struct nested_backend *nb = w->nb;
-	int32_t stride = w->width * 4;
-	size_t size = (size_t)stride * (size_t)w->height;
+	int32_t stride = width * 4;
+	size_t size = (size_t)stride * (size_t)height;
 
+	struct wl_shm_pool *pool = wl_shm_create_pool(nb->shm, fd, (int32_t)size);
+	struct wl_buffer *buf = wl_shm_pool_create_buffer(pool, 0, width, height, stride,
+							  WL_SHM_FORMAT_XRGB8888);
+	wl_shm_pool_destroy(pool);
+	close(fd);
+
+	struct nested_buffer *nbuf = rei_xcalloc(1, sizeof *nbuf);
+	nbuf->buffer = buf;
+	wl_list_insert(&w->buffers, &nbuf->link);
+	wl_buffer_add_listener(buf, &buffer_listener, nbuf);
+	wl_surface_attach(w->surface, buf, 0, 0);
+	wl_surface_damage_buffer(w->surface, 0, 0, width, height);
+	wl_surface_commit(w->surface);
+}
+
+static void window_draw_placeholder(struct nested_window *w)
+{
+	size_t size = (size_t)w->width * 4 * (size_t)w->height;
 	int fd = memfd_create("rei-wm-nested", MFD_CLOEXEC);
 	if (fd < 0 || ftruncate(fd, (off_t)size) < 0) {
 		rei_error("nested: cannot allocate shm buffer: %s", strerror(errno));
@@ -100,22 +153,89 @@ static void window_draw(struct nested_window *w)
 		return;
 	}
 	for (size_t i = 0; i < size / 4; i++)
-		px[i] = NESTED_FILL_COLOR;
+		px[i] = NESTED_PLACEHOLDER_COLOR;
 	munmap(px, size);
+	window_attach(w, fd, w->width, w->height);
+}
 
-	struct wl_shm_pool *pool = wl_shm_create_pool(nb->shm, fd, (int32_t)size);
-	struct wl_buffer *buf = wl_shm_pool_create_buffer(pool, 0, w->width, w->height,
-							  stride, WL_SHM_FORMAT_XRGB8888);
-	wl_shm_pool_destroy(pool);
-	close(fd);
+/* ---- render thread side -------------------------------------------------- */
 
-	struct nested_buffer *nbuf = rei_xcalloc(1, sizeof *nbuf);
-	nbuf->buffer = buf;
-	wl_list_insert(&w->buffers, &nbuf->link);
-	wl_buffer_add_listener(buf, &buffer_listener, nbuf);
-	wl_surface_attach(w->surface, buf, 0, 0);
-	wl_surface_damage_buffer(w->surface, 0, 0, w->width, w->height);
-	wl_surface_commit(w->surface);
+static void present_frame(void *data, struct rei_gles *gles,
+			  const struct rei_scene_snapshot *snap, int32_t width, int32_t height)
+{
+	(void)snap;
+	struct nested_present *np = data;
+	if (!gles || width <= 0 || height <= 0)
+		return;
+
+	size_t size = (size_t)width * (size_t)height * 4;
+	int fd = memfd_create("rei-wm-frame", MFD_CLOEXEC);
+	if (fd < 0 || ftruncate(fd, (off_t)size) < 0) {
+		if (fd >= 0)
+			close(fd);
+		return;
+	}
+	uint8_t *px = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (px == MAP_FAILED) {
+		close(fd);
+		return;
+	}
+	bool ok = rei_gles_read_pixels(gles, px);
+	if (ok) {
+		/* GL gives R,G,B,A; XRGB8888 is B,G,R,X in memory. */
+		for (size_t i = 0; i < size; i += 4) {
+			uint8_t r = px[i];
+			px[i] = px[i + 2];
+			px[i + 2] = r;
+			px[i + 3] = 0xff;
+		}
+	}
+	munmap(px, size);
+	if (!ok) {
+		close(fd);
+		return;
+	}
+
+	struct nested_frame *f = rei_xcalloc(1, sizeof *f);
+	f->window_id = np->window_id;
+	f->fd = fd;
+	f->width = width;
+	f->height = height;
+	rei_msgq_post(&np->nb->inbox, NMSG_FRAME, f, nested_frame_destroy);
+}
+
+static void present_fini(void *data)
+{
+	free(data);
+}
+
+/* ---- event thread side --------------------------------------------------- */
+
+static struct nested_window *window_by_id(struct nested_backend *nb, uint32_t id)
+{
+	struct nested_window *w;
+	wl_list_for_each(w, &nb->windows, link) {
+		if (w->id == id)
+			return w;
+	}
+	return NULL;
+}
+
+static void on_nested_message(struct rei_msg *m, void *userdata)
+{
+	struct nested_backend *nb = userdata;
+	if (m->type != NMSG_FRAME)
+		return;
+	struct nested_frame *f = m->data;
+	struct nested_window *w = window_by_id(nb, f->window_id);
+	if (w && w->configured && !w->close_requested) {
+		window_attach(w, f->fd, f->width, f->height);
+		wl_display_flush(nb->parent);
+	} else {
+		close(f->fd);
+	}
+	free(f);
+	m->data = NULL;
 }
 
 /* ---- xdg-shell listeners ----------------------------------------------- */
@@ -166,7 +286,10 @@ static void xdg_surface_configure(void *data, struct xdg_surface *xs, uint32_t s
 		resized = true;
 	}
 
-	window_draw(w);
+	/* The first buffer is what maps the window; later ones come from the
+	 * renderer. */
+	if (!w->configured)
+		window_draw_placeholder(w);
 	w->configured = true;
 
 	if (resized && w->output)
@@ -204,6 +327,7 @@ static struct nested_window *window_create(struct nested_backend *nb, size_t ind
 
 	struct nested_window *w = rei_xcalloc(1, sizeof *w);
 	w->nb = nb;
+	w->id = ++nb->next_window_id;
 	w->width = p.width;
 	w->height = p.height;
 	wl_list_init(&w->buffers);
@@ -235,11 +359,19 @@ static struct nested_window *window_create(struct nested_backend *nb, size_t ind
 		return NULL;
 	}
 
+	struct nested_present *np = rei_xcalloc(1, sizeof *np);
+	np->nb = nb;
+	np->window_id = w->id;
+
 	p.width = w->width;
 	p.height = w->height;
 	p.backend_data = w;
+	p.render_ops.present = present_frame;
+	p.render_ops.fini = present_fini;
+	p.render_ops_data = np;
 	w->output = rei_server_add_output(nb->base.server, &p);
 	if (!w->output) {
+		free(np);
 		window_destroy(w);
 		return NULL;
 	}
@@ -338,6 +470,12 @@ static bool nested_start(struct rei_backend *b)
 		return false;
 	}
 
+	if (!rei_msgq_init(&nb->inbox, b->server->base, on_nested_message, nb)) {
+		rei_error("nested: cannot create frame queue");
+		return false;
+	}
+	nb->inbox_ready = true;
+
 	size_t n = rei_backend_output_count(b->server);
 	for (size_t i = 0; i < n; i++) {
 		if (!window_create(nb, i))
@@ -361,6 +499,13 @@ static void nested_destroy(struct rei_backend *b)
 	struct nested_window *w, *tmp;
 	wl_list_for_each_safe(w, tmp, &nb->windows, link)
 		window_destroy(w);
+
+	/* Windows are gone, so every render thread has been joined and nothing can
+	 * post here any more. Frames already queued carry fds that must be closed. */
+	if (nb->inbox_ready) {
+		rei_msgq_close(&nb->inbox);
+		rei_msgq_finish(&nb->inbox);
+	}
 
 	if (nb->wm_base)
 		xdg_wm_base_destroy(nb->wm_base);

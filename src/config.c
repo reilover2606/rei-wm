@@ -122,6 +122,36 @@ static const struct toml_table *get_table(struct reader *r, const struct toml_ta
 
 /* ------------------------------------------------------------------------ */
 
+/* "~/pic.png" -> "$HOME/pic.png". */
+static char *expand_home(const char *path)
+{
+	const char *home = getenv("HOME");
+	if (path[0] == '~' && (path[1] == '/' || path[1] == '\0') && home) {
+		char *out = NULL;
+		if (asprintf(&out, "%s%s", home, path + 1) >= 0)
+			return out;
+	}
+	return rei_xstrdup(path);
+}
+
+static bool parse_color(const char *s, uint32_t *out)
+{
+	if (s[0] != '#' || strlen(s) != 7)
+		return false;
+	uint32_t v = 0;
+	for (int i = 1; i < 7; i++) {
+		char c = s[i];
+		int d;
+		if (c >= '0' && c <= '9') d = c - '0';
+		else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+		else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+		else return false;
+		v = v * 16 + (uint32_t)d;
+	}
+	*out = v;
+	return true;
+}
+
 static void read_output(struct reader *r, const struct toml_table *t, size_t index,
 			struct rei_output_config *out)
 {
@@ -167,6 +197,8 @@ struct rei_config *rei_config_defaults(void)
 	cfg->composition_key = rei_xstrdup("super");
 	cfg->gap_outer = 10;
 	cfg->gap_inner = 10;
+	cfg->wallpaper_mode = rei_xstrdup("fill");
+	cfg->background_rgb = 0x1b2733;
 	cfg->root = toml_parse("", NULL, 0);
 	return cfg;
 }
@@ -199,6 +231,18 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 	if (layout) {
 		read_int(&r, layout, "layout.", "gap_outer", &cfg->gap_outer, 0, 500);
 		read_int(&r, layout, "layout.", "gap_inner", &cfg->gap_inner, 0, 500);
+	}
+
+	const struct toml_table *wp = get_table(&r, root, "wallpaper");
+	if (wp) {
+		static const char *const modes[] = { "fill", "fit", "stretch", "center", "tile", NULL };
+		const struct toml_value *path = get(&r, wp, "wallpaper.", "path", TOML_STRING);
+		if (path && path->u.s[0])
+			cfg->wallpaper_path = expand_home(path->u.s);
+		read_choice(&r, wp, "wallpaper.", "mode", &cfg->wallpaper_mode, modes);
+		const struct toml_value *color = get(&r, wp, "wallpaper.", "color", TOML_STRING);
+		if (color && !parse_color(color->u.s, &cfg->background_rgb))
+			fail(&r, "wallpaper.color: '%s' is not a colour like \"#1b2733\"", color->u.s);
 	}
 
 	const struct toml_value *outs = get(&r, root, "", "output", TOML_ARRAY);
@@ -350,6 +394,8 @@ void rei_config_free(struct rei_config *cfg)
 	free(cfg->path);
 	free(cfg->backend);
 	free(cfg->composition_key);
+	free(cfg->wallpaper_path);
+	free(cfg->wallpaper_mode);
 	for (size_t i = 0; i < cfg->n_outputs; i++)
 		free(cfg->outputs[i].name);
 	free(cfg->outputs);

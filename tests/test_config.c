@@ -36,6 +36,9 @@ static void test_defaults(void)
 	CHECK_STR(c->composition_key, "super");
 	CHECK(c->gap_outer == 10 && c->gap_inner == 10);
 	CHECK(c->n_outputs == 0);
+	CHECK(c->wallpaper_path == NULL);
+	CHECK_STR(c->wallpaper_mode, "fill");
+	CHECK(c->background_rgb == 0x1b2733);
 	rei_config_free(c);
 
 	/* An empty file means all defaults. */
@@ -76,6 +79,28 @@ static void test_overrides(void)
 	CHECK(c->outputs[1].has_position && c->outputs[1].x == 3000 && c->outputs[1].y == -200);
 	CHECK(toml_lookup(c->root, "layout.gap_outer") != NULL);  /* raw doc retained */
 	rei_config_free(c);
+}
+
+static void test_wallpaper(void)
+{
+	setenv("HOME", "/home/tester", 1);
+	struct rei_config *c = parse_ok(
+		"[wallpaper]\npath = \"~/Pictures/w.png\"\nmode = \"tile\"\ncolor = \"#FF00aa\"\n");
+	CHECK_STR(c->wallpaper_path, "/home/tester/Pictures/w.png");
+	CHECK_STR(c->wallpaper_mode, "tile");
+	CHECK(c->background_rgb == 0xff00aa);
+	rei_config_free(c);
+
+	/* An empty path means "no wallpaper", as the shipped default says. */
+	c = parse_ok("[wallpaper]\npath = \"\"\n");
+	CHECK(c->wallpaper_path == NULL);
+	rei_config_free(c);
+
+	parse_fails("[wallpaper]\nmode = \"zoom\"\n", "wallpaper.mode");
+	parse_fails("[wallpaper]\ncolor = \"red\"\n", "wallpaper.color");
+	parse_fails("[wallpaper]\ncolor = \"#12345\"\n", "wallpaper.color");
+	parse_fails("[wallpaper]\ncolor = \"#12345g\"\n", "wallpaper.color");
+	parse_fails("[wallpaper]\npath = 3\n", "wallpaper.path");
 }
 
 static void test_validation(void)
@@ -151,6 +176,7 @@ int main(void)
 	test_defaults();
 	test_shipped_default_text_parses();
 	test_overrides();
+	test_wallpaper();
 	test_validation();
 	test_first_run_creates_default_file();
 	puts("test_config: ok");

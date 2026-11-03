@@ -12,7 +12,8 @@
 /* event thread -> render thread */
 enum rei_render_msg {
 	REI_RMSG_SNAPSHOT = 1,  /* data: struct rei_scene_snapshot * (one ref) */
-	REI_RMSG_RESIZE,        /* data: struct rei_resize_msg * */
+	REI_RMSG_GEOMETRY,      /* data: struct rei_geometry_msg * */
+	REI_RMSG_SCREENSHOT,    /* data: char * path (PPM), malloc'd */
 	REI_RMSG_STOP,          /* no data */
 };
 
@@ -20,20 +21,29 @@ enum rei_render_msg {
 enum rei_event_msg {
 	REI_EMSG_FRAME = 1,     /* data: struct rei_frame_event * */
 	REI_EMSG_RENDER_FAILED, /* data: struct rei_frame_event * (output_id only) */
+	REI_EMSG_SCREENSHOT,    /* data: struct rei_screenshot_event * */
 };
 
-struct rei_resize_msg {
-	int32_t width, height;
+/* Where an output sits and how big it is. Sent whenever any of it changes. */
+struct rei_geometry_msg {
+	int32_t width, height;  /* Physical pixels. */
+	int32_t x, y;           /* Position in the global logical layout. */
+	double scale;
 };
 
-/* A frame reached the screen. This is what later drives wl_surface frame
- * callbacks and wp_presentation feedback, and what returns wl_buffers to
- * their clients. */
+/* A frame reached the screen. This is what drives wl_surface frame callbacks
+ * and, later, presentation feedback. */
 struct rei_frame_event {
 	uint32_t output_id;
 	uint64_t seq;           /* Per-output frame counter. */
 	uint64_t present_ns;    /* CLOCK_MONOTONIC. */
 	uint64_t scene_serial;  /* Serial of the snapshot that was presented. */
+};
+
+struct rei_screenshot_event {
+	uint32_t output_id;
+	int ok;
+	char path[256];
 };
 
 #endif

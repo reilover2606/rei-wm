@@ -1,13 +1,16 @@
 #include "render_thread.h"
 
+#include <errno.h>
 #include <event2/event.h>
 #include <event2/thread.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "messages.h"
+#include "render/gles.h"
 #include "server.h"
 #include "util/log.h"
 #include "util/msgq.h"
@@ -20,10 +23,11 @@ struct rei_render {
 	char log_name[80];
 
 	/* Touched only by the render thread once it starts. */
-	int32_t width, height;
+	struct rei_gles_target target;
 	struct rei_render_ops ops;
 	void *ops_data;
 	bool ops_ready;
+	struct rei_gles *gles;
 
 	struct event_base *base;
 	struct rei_msgq inbox;
@@ -38,9 +42,6 @@ struct rei_render {
 
 	pthread_t thread;
 };
-
-static void free_resize(void *p) { free(p); }
-static void free_snapshot(void *p) { rei_snapshot_unref(p); }
 
 /* Arms the vblank timer for the next refresh boundary, if work is waiting. */
 static void arm_timer(struct rei_render *r)
@@ -62,6 +63,13 @@ static void arm_timer(struct rei_render *r)
 	r->timer_armed = true;
 }
 
+static bool draw_pending(struct rei_render *r)
+{
+	if (!r->gles || !r->pending)
+		return false;
+	return rei_gles_draw(r->gles, r->pending, &r->target);
+}
+
 static void on_vblank(evutil_socket_t fd, short what, void *arg)
 {
 	(void)fd;
@@ -73,8 +81,10 @@ static void on_vblank(evutil_socket_t fd, short what, void *arg)
 		return;
 
 	struct rei_scene_snapshot *snap = r->pending;
-	if (r->ops.present && r->ops_ready)
-		r->ops.present(r->ops_data, snap, r->width, r->height);
+	bool drawn = draw_pending(r);
+	if (r->ops.present && r->ops_ready && (drawn || !r->gles))
+		r->ops.present(r->ops_data, drawn ? r->gles : NULL, snap,
+			       r->target.width, r->target.height);
 	r->dirty = false;
 
 	struct rei_frame_event *ev = rei_xcalloc(1, sizeof *ev);
@@ -83,6 +93,44 @@ static void on_vblank(evutil_socket_t fd, short what, void *arg)
 	ev->present_ns = rei_now_ns();
 	ev->scene_serial = snap->serial;
 	rei_msgq_post(&r->server->inbox, REI_EMSG_FRAME, ev, free);
+}
+
+static bool write_ppm(const char *path, const uint8_t *rgba, int32_t w, int32_t h)
+{
+	char tmp[300];
+	snprintf(tmp, sizeof tmp, "%s.tmp", path);
+	FILE *f = fopen(tmp, "wb");
+	if (!f)
+		return false;
+	fprintf(f, "P6\n%d %d\n255\n", w, h);
+	for (int32_t i = 0; i < w * h; i++)
+		fwrite(rgba + (size_t)i * 4, 1, 3, f);
+	bool ok = fflush(f) == 0 && !ferror(f);
+	ok = (fclose(f) == 0) && ok;
+	/* Rename last so a reader polling for the file never sees a partial one. */
+	if (ok && rename(tmp, path) != 0)
+		ok = false;
+	if (!ok)
+		unlink(tmp);
+	return ok;
+}
+
+static void do_screenshot(struct rei_render *r, const char *path)
+{
+	bool ok = false;
+	if (r->gles && r->pending && draw_pending(r)) {
+		size_t bytes = (size_t)r->target.width * (size_t)r->target.height * 4;
+		uint8_t *px = malloc(bytes);
+		if (px && rei_gles_read_pixels(r->gles, px))
+			ok = write_ppm(path, px, r->target.width, r->target.height);
+		free(px);
+	}
+
+	struct rei_screenshot_event *ev = rei_xcalloc(1, sizeof *ev);
+	ev->output_id = r->output_id;
+	ev->ok = ok;
+	snprintf(ev->path, sizeof ev->path, "%s", path);
+	rei_msgq_post(&r->server->inbox, REI_EMSG_SCREENSHOT, ev, free);
 }
 
 static void on_message(struct rei_msg *m, void *userdata)
@@ -98,14 +146,20 @@ static void on_message(struct rei_msg *m, void *userdata)
 		r->dirty = true;
 		arm_timer(r);
 		break;
-	case REI_RMSG_RESIZE: {
-		struct rei_resize_msg *rs = m->data;
-		r->width = rs->width;
-		r->height = rs->height;
+	case REI_RMSG_GEOMETRY: {
+		const struct rei_geometry_msg *g = m->data;
+		r->target.width = g->width;
+		r->target.height = g->height;
+		r->target.origin_x = g->x;
+		r->target.origin_y = g->y;
+		r->target.scale = g->scale;
 		r->dirty = r->pending != NULL;
 		arm_timer(r);
 		break;
 	}
+	case REI_RMSG_SCREENSHOT:
+		do_screenshot(r, m->data);
+		break;
 	case REI_RMSG_STOP:
 		event_base_loopbreak(r->base);
 		break;
@@ -117,16 +171,21 @@ static void *render_main(void *arg)
 	struct rei_render *r = arg;
 	rei_log_set_thread_name(r->log_name);
 
-	if (r->ops.init) {
-		r->ops_ready = r->ops.init(r->ops_data);
-		if (!r->ops_ready) {
-			rei_error("render init failed for %s", r->name);
-			struct rei_frame_event *ev = rei_xcalloc(1, sizeof *ev);
-			ev->output_id = r->output_id;
-			rei_msgq_post(&r->server->inbox, REI_EMSG_RENDER_FAILED, ev, free);
-		}
+	r->gles = rei_gles_create();
+	if (r->gles) {
+		rei_info("output %s: rendering with %s", r->name, rei_gles_renderer_name(r->gles));
 	} else {
-		r->ops_ready = true;
+		rei_error("output %s: OpenGL ES unavailable; frames will be paced but not drawn",
+			  r->name);
+		struct rei_frame_event *ev = rei_xcalloc(1, sizeof *ev);
+		ev->output_id = r->output_id;
+		rei_msgq_post(&r->server->inbox, REI_EMSG_RENDER_FAILED, ev, free);
+	}
+
+	r->ops_ready = true;
+	if (r->ops.init && !r->ops.init(r->ops_data)) {
+		rei_error("output %s: backend render init failed", r->name);
+		r->ops_ready = false;
 	}
 
 	r->clock_origin_ns = rei_now_ns();
@@ -137,6 +196,7 @@ static void *render_main(void *arg)
 
 	if (r->ops.fini && r->ops_ready)
 		r->ops.fini(r->ops_data);
+	rei_gles_destroy(r->gles);
 	return NULL;
 }
 
@@ -148,8 +208,11 @@ struct rei_render *rei_render_create(struct rei_server *server,
 	r->output_id = params->output_id;
 	snprintf(r->name, sizeof r->name, "%s", params->name);
 	snprintf(r->log_name, sizeof r->log_name, "render:%s", r->name);
-	r->width = params->width;
-	r->height = params->height;
+	r->target = (struct rei_gles_target){
+		.width = params->width, .height = params->height,
+		.origin_x = params->x, .origin_y = params->y,
+		.scale = params->scale > 0 ? params->scale : 1.0,
+	};
 	r->ops = params->ops;
 	r->ops_data = params->ops_data;
 
@@ -180,17 +243,24 @@ struct rei_render *rei_render_create(struct rei_server *server,
 	return r;
 }
 
+static void free_snapshot(void *p) { rei_snapshot_unref(p); }
+
 void rei_render_submit(struct rei_render *r, struct rei_scene_snapshot *snap)
 {
 	rei_msgq_post(&r->inbox, REI_RMSG_SNAPSHOT, rei_snapshot_ref(snap), free_snapshot);
 }
 
-void rei_render_resize(struct rei_render *r, int32_t width, int32_t height)
+void rei_render_set_geometry(struct rei_render *r, int32_t width, int32_t height,
+			     int32_t x, int32_t y, double scale)
 {
-	struct rei_resize_msg *m = rei_xcalloc(1, sizeof *m);
-	m->width = width;
-	m->height = height;
-	rei_msgq_post(&r->inbox, REI_RMSG_RESIZE, m, free_resize);
+	struct rei_geometry_msg *m = rei_xcalloc(1, sizeof *m);
+	*m = (struct rei_geometry_msg){ width, height, x, y, scale };
+	rei_msgq_post(&r->inbox, REI_RMSG_GEOMETRY, m, free);
+}
+
+void rei_render_screenshot(struct rei_render *r, const char *path)
+{
+	rei_msgq_post(&r->inbox, REI_RMSG_SCREENSHOT, rei_xstrdup(path), free);
 }
 
 void rei_render_destroy(struct rei_render *r)
