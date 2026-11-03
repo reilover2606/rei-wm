@@ -126,9 +126,34 @@ static void test_notch_height(void)
 	rei_config_free(c);
 }
 
+static void test_drm_options(void)
+{
+	struct rei_config *c = parse_ok("[general]\nbackend = \"drm\"\n"
+		"[input]\ntap_to_click = false\nnatural_scroll = true\nleft_handed = true\npointer_accel = -0.5\n"
+		"[[output]]\nname = \"DP-1\"\nmode = \"2560x1440@144\"\n"
+		"[[output]]\nname = \"HDMI-A-1\"\nenabled = false\n"
+		"[[output]]\nname = \"eDP-1\"\nwidth = 1280\nheight = 720\n");
+	CHECK_STR(c->backend, "drm");
+	CHECK(!c->tap_to_click && c->natural_scroll && c->left_handed && c->pointer_accel == -0.5);
+	CHECK(c->n_outputs == 3);
+	CHECK(c->outputs[0].has_mode && c->outputs[0].width == 2560 && c->outputs[0].height == 1440 &&
+	      c->outputs[0].refresh_mhz == 144000 && c->outputs[0].enabled);
+	CHECK(!c->outputs[1].has_mode && !c->outputs[1].enabled);
+	CHECK(c->outputs[2].has_mode && c->outputs[2].width == 1280);
+	rei_config_free(c);
+
+	c = parse_ok("");
+	CHECK(c->tap_to_click && !c->natural_scroll && c->pointer_accel == 0.0);
+	rei_config_free(c);
+
+	parse_fails("[[output]]\nmode = \"big\"\n", "output[0].mode");
+	parse_fails("[input]\npointer_accel = 2.0\n", "pointer_accel");
+	parse_fails("[[output]]\nenabled = \"no\"\n", "expected bool");
+}
+
 static void test_validation(void)
 {
-	parse_fails("[general]\nbackend = \"drm\"\n", "general.backend");
+	parse_fails("[general]\nbackend = \"bogus\"\n", "general.backend");
 	parse_fails("[general]\nbackend = 3\n", "expected string");
 	parse_fails("[general]\ncomposition_key = \"hyper\"\n", "general.composition_key");
 	parse_fails("[layout]\ngap_inner = -1\n", "out of range");
@@ -202,6 +227,7 @@ int main(void)
 	test_wallpaper();
 	test_notch_height();
 	test_validation();
+	test_drm_options();
 	test_first_run_creates_default_file();
 	puts("test_config: ok");
 	return 0;

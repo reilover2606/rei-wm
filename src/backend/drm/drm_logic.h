@@ -36,10 +36,6 @@ struct rei_drm_mode {
 int32_t rei_drm_refresh_mhz(uint32_t clock_khz, uint32_t htotal, uint32_t vtotal,
 			    bool interlaced, bool doublescan, uint32_t vscan);
 
-/* Parses "1920x1080", "1920x1080@60" or "2560x1440@143.912". Returns false
- * on anything else. `refresh_mhz` is 0 when no rate was given. */
-bool rei_drm_parse_mode(const char *text, int32_t *width, int32_t *height, int32_t *refresh_mhz);
-
 /*
  * Chooses a mode. With width == 0 that is the preferred mode (else the largest,
  * fastest one). Otherwise it is the mode with exactly that size and the nearest

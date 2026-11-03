@@ -62,35 +62,6 @@ int32_t rei_drm_refresh_mhz(uint32_t clock_khz, uint32_t htotal, uint32_t vtotal
 	return (int32_t)((num + den / 2) / den);
 }
 
-bool rei_drm_parse_mode(const char *text, int32_t *width, int32_t *height, int32_t *refresh_mhz)
-{
-	if (!text)
-		return false;
-	char *end;
-	long w = strtol(text, &end, 10);
-	if (end == text || *end != 'x' || w <= 0 || w > 32768)
-		return false;
-	const char *p = end + 1;
-	long h = strtol(p, &end, 10);
-	if (end == p || h <= 0 || h > 32768)
-		return false;
-
-	int32_t mhz = 0;
-	if (*end == '@') {
-		p = end + 1;
-		double hz = strtod(p, &end);
-		if (end == p || hz <= 0 || hz > 1000)
-			return false;
-		mhz = (int32_t)llround(hz * 1000.0);
-	}
-	if (*end != '\0')
-		return false;
-	*width = (int32_t)w;
-	*height = (int32_t)h;
-	*refresh_mhz = mhz;
-	return true;
-}
-
 int rei_drm_pick_mode(const struct rei_drm_mode *modes, size_t n,
 		      int32_t width, int32_t height, int32_t refresh_mhz)
 {

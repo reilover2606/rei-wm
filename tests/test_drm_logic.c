@@ -3,6 +3,7 @@
 
 #include "backend/drm/drm_logic.h"
 #include "check.h"
+#include "util/util.h"
 
 static void test_names(void)
 {
@@ -33,17 +34,17 @@ static void test_refresh(void)
 static void test_parse(void)
 {
 	int32_t w, h, r;
-	CHECK(rei_drm_parse_mode("1920x1080", &w, &h, &r) && w == 1920 && h == 1080 && r == 0);
-	CHECK(rei_drm_parse_mode("2560x1440@144", &w, &h, &r) && w == 2560 && h == 1440 && r == 144000);
-	CHECK(rei_drm_parse_mode("1920x1080@59.94", &w, &h, &r) && r == 59940);
-	CHECK(!rei_drm_parse_mode("", &w, &h, &r));
-	CHECK(!rei_drm_parse_mode("1920", &w, &h, &r));
-	CHECK(!rei_drm_parse_mode("1920x", &w, &h, &r));
-	CHECK(!rei_drm_parse_mode("1920x1080@", &w, &h, &r));
-	CHECK(!rei_drm_parse_mode("1920x1080@60hz", &w, &h, &r));
-	CHECK(!rei_drm_parse_mode("0x1080", &w, &h, &r));
-	CHECK(!rei_drm_parse_mode("-5x10", &w, &h, &r));
-	CHECK(!rei_drm_parse_mode(NULL, &w, &h, &r));
+	CHECK(rei_parse_mode("1920x1080", &w, &h, &r) && w == 1920 && h == 1080 && r == 0);
+	CHECK(rei_parse_mode("2560x1440@144", &w, &h, &r) && w == 2560 && h == 1440 && r == 144000);
+	CHECK(rei_parse_mode("1920x1080@59.94", &w, &h, &r) && r == 59940);
+	CHECK(!rei_parse_mode("", &w, &h, &r));
+	CHECK(!rei_parse_mode("1920", &w, &h, &r));
+	CHECK(!rei_parse_mode("1920x", &w, &h, &r));
+	CHECK(!rei_parse_mode("1920x1080@", &w, &h, &r));
+	CHECK(!rei_parse_mode("1920x1080@60hz", &w, &h, &r));
+	CHECK(!rei_parse_mode("0x1080", &w, &h, &r));
+	CHECK(!rei_parse_mode("-5x10", &w, &h, &r));
+	CHECK(!rei_parse_mode(NULL, &w, &h, &r));
 }
 
 static void test_pick_mode(void)

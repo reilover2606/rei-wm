@@ -12,6 +12,8 @@ struct rei_output_config {
 	char *name;
 	int32_t width, height;
 	int32_t refresh_mhz;  /* Millihertz: 60000 == 60 Hz. */
+	bool has_mode;        /* width/height/refresh/mode was given (else: the display's own choice). */
+	bool enabled;         /* false: leave this monitor off (DRM only). */
 	double scale;
 	bool has_position;
 	int32_t x, y;
@@ -26,7 +28,7 @@ struct rei_config {
 	char *path;  /* File the config was loaded from (NULL for defaults). */
 
 	/* [general] */
-	char *backend;          /* "auto", "headless" or "nested". */
+	char *backend;          /* "auto", "headless", "nested" or "drm". */
 	char *composition_key;  /* "super", "alt", "ctrl" or "shift". */
 
 	bool focus_follows_mouse;  /* Moving the pointer onto a window focuses it. */
@@ -40,6 +42,11 @@ struct rei_config {
 	char *kb_rules, *kb_model, *kb_layout, *kb_variant, *kb_options;
 	int32_t repeat_rate;   /* Key repeats per second; 0 disables repeat. */
 	int32_t repeat_delay;  /* Milliseconds before repeating starts. */
+	/* Pointing devices (libinput, i.e. the DRM backend). */
+	bool tap_to_click;
+	bool natural_scroll;
+	bool left_handed;
+	double pointer_accel;  /* -1.0 (slowest) to 1.0 (fastest); 0 is the default curve. */
 
 	/* [keybindings]: overrides on top of the built-in defaults. */
 	struct rei_binding_config *bindings;
