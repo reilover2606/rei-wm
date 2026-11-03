@@ -71,3 +71,10 @@ bool rei_parse_mode(const char *text, int32_t *width, int32_t *height, int32_t *
 	*refresh_mhz = mhz;
 	return true;
 }
+
+char *rei_xstrndup(const char *s, size_t n)
+{
+	char *out = rei_xcalloc(n + 1, 1);
+	memcpy(out, s, n);
+	return out;
+}

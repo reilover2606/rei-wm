@@ -13,19 +13,20 @@
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
+#include "xwayland.h"
 
 extern char **environ;
 
 /* A copy of the environment with WAYLAND_DISPLAY set to our socket and DISPLAY removed. Built before
  * forking because the child of a multithreaded process may only call
  * async-signal-safe functions, and setenv() is not one of them. */
-static char **build_environment(const char *socket_name)
+static char **build_environment(struct rei_server *server, const char *socket_name)
 {
 	size_t n = 0;
 	while (environ[n])
 		n++;
 
-	char **env = rei_xcalloc(n + 3, sizeof *env);
+	char **env = rei_xcalloc(n + 4, sizeof *env);
 	size_t out = 0;
 	for (size_t i = 0; i < n; i++) {
 		/* DISPLAY would point X11 programs at some other X server (e.g. your
@@ -41,6 +42,13 @@ static char **build_environment(const char *socket_name)
 	env[out++] = wd;
 	/* WAYLAND_DISPLAY is relative to this directory; a program that lacks it
 	 * cannot find our socket and would fall back to some other display. */
+	const char *xdisplay = rei_xwayland_display_name(server);
+	if (xdisplay) {
+		char *xd = NULL;
+		if (asprintf(&xd, "DISPLAY=%s", xdisplay) < 0)
+			abort();
+		env[out++] = xd;
+	}
 	const char *rt = getenv("XDG_RUNTIME_DIR");
 	if (rt && rt[0]) {
 		char *xr = NULL;
@@ -60,7 +68,7 @@ static void free_environment(char **env)
 
 bool rei_spawn(struct rei_server *s, const char *command)
 {
-	char **env = build_environment(s->socket_name);
+	char **env = build_environment(s, s->socket_name);
 	bool ok = false;
 
 	pid_t pid = fork();
@@ -105,7 +113,7 @@ void rei_actions_run(struct rei_server *s, const struct rei_action *action)
 	case REI_ACTION_CLOSE: {
 		struct rei_view *v = rei_wm_active_view(s);
 		if (v)
-			rei_xdg_toplevel_close(v->toplevel);
+			rei_wm_close_view(v);
 		break;
 	}
 	case REI_ACTION_QUIT:

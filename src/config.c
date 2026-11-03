@@ -257,6 +257,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->repeat_rate = 25;
 	cfg->repeat_delay = 600;
 	cfg->tap_to_click = true;
+	cfg->xwayland = true;
 	cfg->wallpaper_mode = rei_xstrdup("fill");
 	cfg->background_rgb = 0x1b2733;
 	cfg->root = toml_parse("", NULL, 0);
@@ -285,6 +286,9 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		read_choice(&r, general, "general.", "backend", &cfg->backend, backends);
 		read_choice(&r, general, "general.", "composition_key",
 			    &cfg->composition_key, mod_keys);
+		const struct toml_value *xw = get(&r, general, "general.", "xwayland", TOML_BOOL);
+		if (xw)
+			cfg->xwayland = xw->u.b;
 		const struct toml_value *ffm = get(&r, general, "general.", "focus_follows_mouse", TOML_BOOL);
 		if (ffm)
 			cfg->focus_follows_mouse = ffm->u.b;

@@ -15,6 +15,7 @@ uint64_t rei_now_ns(void);
  * to continue without memory, and checking every call site adds noise. */
 void *rei_xcalloc(size_t n, size_t size);
 void *rei_xrealloc(void *ptr, size_t size);
+char *rei_xstrndup(const char *s, size_t n);
 char *rei_xstrdup(const char *s);
 
 /* Parses "1920x1080", "1920x1080@60" or "2560x1440@143.912". Returns false

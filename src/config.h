@@ -31,6 +31,7 @@ struct rei_config {
 	char *backend;          /* "auto", "headless", "nested" or "drm". */
 	char *composition_key;  /* "super", "alt", "ctrl" or "shift". */
 
+	bool xwayland;             /* Run Xwayland so X11 programs work. */
 	bool focus_follows_mouse;  /* Moving the pointer onto a window focuses it. */
 
 	/* [layout] */

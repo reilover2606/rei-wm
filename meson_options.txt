@@ -1,2 +1,4 @@
 option('drm', type: 'feature', value: 'auto',
   description: 'DRM/KMS backend (needs libdrm, gbm, libseat, libinput and libudev)')
+option('xwayland', type: 'feature', value: 'auto',
+  description: 'Xwayland support, to run X11 programs (needs libxcb)')

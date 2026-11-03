@@ -132,6 +132,7 @@ int main(int argc, char **argv)
 		unsetenv("WAYLAND_DISPLAY");
 		int fd = open(logpath, O_WRONLY | O_CREAT | O_TRUNC, 0600);
 		dup2(fd, STDERR_FILENO);
+		setenv("REI_NO_XWAYLAND", "1", 1);
 		execl(binary, binary, "-c", cfg, "-b", "headless", "-s", SOCKET, "-v", (char *)NULL);
 		_exit(127);
 	}

@@ -24,6 +24,7 @@
 #include "snapshot.h"
 #include "toolbar.h"
 #include "wallpaper.h"
+#include "xwayland.h"
 #include "util/log.h"
 #include "util/util.h"
 
@@ -117,9 +118,9 @@ static void fire_frame_callbacks(struct rei_server *s, const struct rei_output *
 
 		struct rei_rect r;
 		bool fire = true;
-		if (rei_xdg_surface_hidden(rei_surface_root(surf)))
+		if (rei_wm_surface_hidden(rei_surface_root(surf)))
 			continue;  /* On a workspace that isn't showing: clients throttle. */
-		if (rei_xdg_surface_rect(rei_surface_root(surf), &r)) {
+		if (rei_wm_surface_rect(rei_surface_root(surf), &r)) {
 			bool here = rects_intersect(&r, out->x, out->y, ow, oh);
 			bool anywhere = here;
 			const struct rei_output *o;
@@ -486,7 +487,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	s->display = wl_display_create();
 	if (s->display) {
 		wl_display_add_client_created_listener(s->display, &client_created_listener);
-		wl_display_add_protocol_logger(s->display, protocol_logger, s);
+		s->protocol_logger = wl_display_add_protocol_logger(s->display, protocol_logger, s);
 	}
 	if (!s->display) {
 		rei_error("cannot create wl_display");
@@ -568,6 +569,8 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 		goto fail;
 	}
 
+	rei_xwayland_start(s);
+
 	rei_info("rei-wm listening on WAYLAND_DISPLAY=%s (backend: %s)",
 		 s->socket_name, s->backend->impl->name);
 	return s;
@@ -622,7 +625,11 @@ void rei_server_destroy(struct rei_server *s)
 		wl_display_destroy_clients(s->display);
 	if (s->display)
 		rei_wl_output_finish(s);
+	rei_xwayland_stop(s);
 	rei_linux_dmabuf_finish(s);
+	if (s->protocol_logger)
+		wl_protocol_logger_destroy(s->protocol_logger);
+	s->protocol_logger = NULL;
 
 	if (s->inbox.wake)
 		rei_msgq_finish(&s->inbox);

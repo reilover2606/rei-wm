@@ -32,6 +32,7 @@ enum rei_surface_role {
 	REI_ROLE_XDG_POPUP,
 	REI_ROLE_SUBSURFACE,
 	REI_ROLE_CURSOR,
+	REI_ROLE_XWAYLAND,
 };
 
 struct rei_frame_cb {

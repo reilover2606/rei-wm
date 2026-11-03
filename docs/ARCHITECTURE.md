@@ -293,6 +293,26 @@ its objects in id order, so a parent object can die before the role object that
 refers to it. Every cross-object pointer is therefore either guarded by a
 destroy listener or cleared by the object that dies first.
 
+## Xwayland (`src/xwayland.c`, `src/proto/xwayland_shell.c`)
+
+rei-wm starts Xwayland itself (`-rootless`, with `-listenfd` sockets it created, so it owns
+the `:N` display) and acts as its window manager over a libxcb connection that Xwayland hands
+it (`-wm`). Notes from getting it to work:
+
+- Xwayland does not accept X11 clients until the window manager has claimed the `WM_S0`
+  selection (and redirected the root's subwindows with Composite); until then clients hang
+  silently in connect. Composite's one request is sent by hand to avoid libxcb-composite.
+- A managed X11 window (`MapRequest`) is shown once three things are true: it is mapped on the
+  X side, its `wl_surface` has been matched to it, and that surface has content. The match uses
+  `xwayland_shell_v1`: the surface gets a serial, the X window sends the same serial in a
+  `WL_SURFACE_SERIAL` client message. Only the Xwayland client may bind that global.
+- `rei_view` has either an `xdg` toplevel or an `xwin`; `desktop.c` dispatches through small
+  `view_*` helpers, so X11 windows tile, float, go fullscreen and get notches like native ones.
+- X11 coordinates are the global layout coordinates, 1:1 (no scaling for X11 windows).
+- Override-redirect windows (menus, tooltips) are not managed: drawn where X11 put them, above
+  all windows, and hit-tested before windows.
+- Programs launched by keybindings get `DISPLAY` for it. `[general] xwayland = false` turns it off.
+
 ## Known gaps and placeholders
 
 These are deliberate and tracked by later milestones:
@@ -320,6 +340,9 @@ These are deliberate and tracked by later milestones:
   redraws the whole output; damage tracking is future work.
 - **The toolbar is workspaces and a clock.** No other modules (volume, battery, tray) yet and
   no urgency highlighting; its colours and font are configurable but there are no themes.
+- **Xwayland**: no X11 clipboard/selection bridging beyond what Xwayland does itself via
+  `wl_data_device` (untested), no HiDPI scaling for X11 windows, no restart if Xwayland dies,
+  and `_NET_WM_STATE` is only handled for fullscreen.
 - **No server-side decorations** (`xdg-decoration`), `viewporter`
   or fractional scale yet. `linux-dmabuf` exists only on the DRM backend.
 
@@ -350,7 +373,7 @@ changing the core loader. All keybindings will be configurable there.
 | 6 | window notches: close/min/max (right), drag handle (left) | done |
 | 7 | toolbar (any edge): workspaces at the start, clock at the end | done |
 | 8 | DRM/KMS backend, libseat + libinput, dmabuf, direct scanout, hardware cursor | written; awaiting hardware testing |
-| 9 | Xwayland window manager, cursor override | |
+| 9 | Xwayland window manager | done |
 | 10 | Qt settings application, config hot reload | |
 | 11 | PipeWire volume widget and media keys | |
 

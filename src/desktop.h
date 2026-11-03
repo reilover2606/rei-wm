@@ -14,6 +14,7 @@ struct rei_server;
 struct rei_output;
 struct rei_surface;
 struct rei_xdg_toplevel;
+struct rei_xwindow;
 
 /*
  * The window manager.
@@ -44,7 +45,8 @@ struct rei_workspace {
 struct rei_view {
 	struct wl_list link;         /* rei_server.views: every window */
 	struct rei_server *server;
-	struct rei_xdg_toplevel *toplevel;
+	struct rei_xdg_toplevel *toplevel;  /* A native Wayland window... */
+	struct rei_xwindow *xwin;           /* ...or an X11 one. Exactly one is set. */
 
 	struct rei_workspace *ws;    /* NULL if no output existed to put it on */
 	struct rei_node *node;       /* Its leaf in ws->tree when tiled. */
@@ -81,7 +83,15 @@ struct rei_view *rei_view_create(struct rei_server *server, struct rei_xdg_tople
 void rei_wm_add_view(struct rei_view *view);
 /* The window now has content: show it and give it the focus. */
 void rei_view_map(struct rei_view *view);
+/* The same for an X11 window (src/xwayland.c). */
+struct rei_view *rei_view_create_x(struct rei_server *server, struct rei_xwindow *xwin);
 void rei_view_destroy(struct rei_view *view);
+
+/* Asks the window to close (a polite request, as the notch's close button does). */
+void rei_wm_close_view(struct rei_view *view);
+/* Where a surface is on screen, for either kind of window; for frame callbacks. */
+bool rei_wm_surface_rect(struct rei_surface *root, struct rei_rect *out);
+bool rei_wm_surface_hidden(struct rei_surface *root);
 
 /* ---- Focus ---- */
 struct rei_view *rei_wm_active_view(struct rei_server *server);

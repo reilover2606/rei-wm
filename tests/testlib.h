@@ -122,6 +122,8 @@ static void start_compositor(const char *binary, const char *config_text, bool w
 			setenv("REI_HEADLESS_INPUT", g_fifo, 1);
 		int fd = open(g_log, O_WRONLY | O_CREAT | O_TRUNC, 0600);
 		dup2(fd, STDERR_FILENO);
+		if (!getenv("REI_TEST_XWAYLAND"))
+			setenv("REI_NO_XWAYLAND", "1", 1);
 		execl(binary, binary, "-c", cfg, "-b", "headless", "-s", SOCKET, "-v", (char *)NULL);
 		_exit(127);
 	}

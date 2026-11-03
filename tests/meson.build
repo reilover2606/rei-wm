@@ -77,6 +77,15 @@ test('notch', notch_test,
   timeout: 120,
 )
 
+if have_xwayland
+  xwayland_test = executable('test_xwayland', 'test_xwayland.c', xdg_shell_client_h, xdg_shell_code,
+    include_directories: inc,
+    dependencies: [wayland_client, m_dep, xcb],
+  )
+  test('xwayland', xwayland_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env,
+    timeout: 180)
+endif
+
 bar_test = executable('test_bar', 'test_bar.c', xdg_shell_client_h, xdg_shell_code,
   include_directories: inc,
   dependencies: [wayland_client, m_dep],

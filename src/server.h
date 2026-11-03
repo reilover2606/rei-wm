@@ -19,6 +19,8 @@ struct rei_backend;
 struct rei_seat;
 struct rei_input;
 struct rei_image;
+struct rei_xwayland;
+struct wl_protocol_logger;
 
 /*
  * The compositor core. Everything here lives on the event thread: the
@@ -74,6 +76,11 @@ struct rei_server {
 	struct wl_list buffer_leases;
 	struct rei_seat *seat;
 	struct rei_input *input;
+
+	/* Xwayland (src/xwayland.c). */
+	struct wl_protocol_logger *protocol_logger;
+	struct rei_xwayland *xwayland;
+	struct wl_client *xwayland_client;  /* The only client allowed xwayland_shell_v1. */
 
 	/* Look. */
 	struct rei_image *wallpaper_image;
