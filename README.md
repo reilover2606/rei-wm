@@ -3,7 +3,7 @@
 A Wayland compositor, tiling/floating window manager and small desktop
 environment, written in C11. MIT licensed.
 
-**Status: early development.** Milestones 0–10 are done (the DRM/KMS backend
+**Status: early development.** Milestones 0–11 are done (the DRM/KMS backend
 is written but still untested on real hardware: see [docs/DRM.md](docs/DRM.md)): the build, config,
 event loop and threading model, the core Wayland protocols, an OpenGL ES
 renderer, keyboard/pointer input with a configurable keybinding engine, the
@@ -13,7 +13,8 @@ minimize/maximize/close tabs on the focused window), and a built-in toolbar with
 workspace buttons and a clock. Real applications can connect, be tiled, and be
 driven from the keyboard or mouse. On real hardware it drives displays through
 DRM/KMS with libinput, dma-buf clients, direct scanout and a hardware cursor. X11 programs run through Xwayland, tiled and floated like native windows. The config
-reloads live, and a Qt settings app edits it. PipeWire is still to come: see the roadmap in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+reloads live, and a Qt settings app edits it. The toolbar shows the PipeWire volume (click to mute, wheel to change) and the media keys
+work. Screen capture through PipeWire is still to come: see the roadmap in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ![Two unmodified Weston demo clients tiled by rei-wm under the toolbar](docs/images/milestone-7-toolbar.png)
 
@@ -31,6 +32,8 @@ meson ninja-build pkg-config libwayland-dev wayland-protocols libevent-dev
 libegl-dev libgles-dev libxkbcommon-dev xkb-data
 libcairo2-dev libpango1.0-dev fontconfig libxcb1-dev
 ```
+
+For the volume widget and media keys (optional): `libpipewire-0.3-dev`.
 
 For the settings app (optional): Qt 6 (`qt6-base-dev`).
 

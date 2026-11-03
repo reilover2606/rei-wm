@@ -372,6 +372,21 @@ clients with the repeat rate), the wallpaper, libinput device settings (through 
 `config_changed` hook), and the window layout (`rei_wm_arrange_all`). `[[output]]` and the backend
 choice need a restart, and the log says so.
 
+## Audio (`src/audio.c`)
+
+rei-wm is a native PipeWire client (libpipewire, driven from the libevent loop by watching the
+PipeWire loop's fd). It follows the default audio sink: the `default` metadata object that
+WirePlumber maintains names it (`default.audio.sink`); without one it uses the highest-priority
+`Audio/Sink`. It subscribes to the sink node's `Props` for `channelVolumes` and `mute`, and writes
+the same two properties to change them. Volume is on the perceptual (cubic) scale that wpctl and
+pavucontrol use, so 50% is a linear gain of 0.125; raising the volume un-mutes. The toolbar's
+volume text sits just before the clock (its rectangle is computed by the same Pango layout code
+that draws it, so click and wheel hit-testing cannot drift): a click toggles mute, the wheel
+changes the volume. `volume_up`, `volume_down [percent]` and `volume_mute` are keybinding actions,
+bound to the XF86Audio keys by default. If PipeWire is not running the widget is hidden and
+rei-wm retries every 5 seconds. Without libpipewire at build time, `audio_stub.c` makes all of it
+inert. Screen capture through PipeWire is not implemented yet.
+
 ## Settings app (`settings/`)
 
 Qt 6 Widgets. `TomlDoc` keeps the file as lines and edits values in place, so comments survive;
@@ -396,7 +411,7 @@ missing config is started from `rei-wm --print-default-config`.
 | 8 | DRM/KMS backend, libseat + libinput, dmabuf, direct scanout, hardware cursor | written; awaiting hardware testing |
 | 9 | Xwayland window manager | done |
 | 10 | Qt settings application, config hot reload | done |
-| 11 | PipeWire volume widget and media keys | |
+| 11 | PipeWire volume widget and media keys | done (screencast: later) |
 
 ## Testing
 
@@ -424,6 +439,8 @@ missing config is started from `rei-wm --print-default-config`.
 - `reload`: config hot reload end to end (gaps, keybindings, toolbar, an invalid file, SIGHUP);
   `settings-tomldoc` and `settings-window`: the settings app's in-place TOML editor and its window,
   driven offscreen against the real `rei-wm --check-config`;
+- `audio`: against a real PipeWire daemon the test starts itself, with a null sink: the media keys
+  change volume and mute, raising un-mutes, the volume stops at `max_volume`, and the toolbar redraws;
 - `decoration`: notch geometry, hit-testing, hover/scale variants and artwork pixels;
 - `notch`: the notches end to end (focus-only, no resizing, hover, click and cancel,
   handle drag, the pull-back rule, drag-and-drop into a slot with the drop hint,

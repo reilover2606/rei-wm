@@ -106,6 +106,87 @@ static void draw_centered(cairo_t *cr, const PangoFontDescription *font, const c
 	g_object_unref(layout);
 }
 
+/* ---- The volume text: a fixed place just before the clock ---- */
+
+static const double BAR_PAD = 8, VOLUME_GAP = 14;
+
+/* Size of the clock's text block, for placing the volume next to it. */
+static void clock_extent(cairo_t *cr, PangoFontDescription *font, const struct rei_bar_state *st,
+			 double *w, double *h, double *line_h)
+{
+	*w = *h = *line_h = 0;
+	if (!st->clock[0])
+		return;
+	if (!rei_bar_vertical(st->position)) {
+		PangoLayout *l = make_layout(cr, font, st->clock);
+		int iw, ih;
+		pango_layout_get_pixel_size(l, &iw, &ih);
+		g_object_unref(l);
+		*w = iw;
+		*h = *line_h = ih;
+		return;
+	}
+	char copy[64];
+	snprintf(copy, sizeof copy, "%s", st->clock);
+	int n = 0;
+	for (char *tok = strtok(copy, ": "); tok && n < 4; tok = strtok(NULL, ": ")) {
+		PangoLayout *l = make_layout(cr, font, tok);
+		int iw, ih;
+		pango_layout_get_pixel_size(l, &iw, &ih);
+		g_object_unref(l);
+		*w = iw > *w ? iw : *w;
+		*line_h = ih > *line_h ? ih : *line_h;
+		n++;
+	}
+	*h = *line_h * n;
+}
+
+/* Where the volume text goes, and its size. */
+static void volume_layout(cairo_t *cr, PangoFontDescription *font, const struct rei_bar_state *st,
+			  double *x, double *y, double *w, double *h)
+{
+	bool vertical = rei_bar_vertical(st->position);
+	int lw = vertical ? st->thickness : st->length;
+	int lh = vertical ? st->length : st->thickness;
+	double cw, ch, cl;
+	clock_extent(cr, font, st, &cw, &ch, &cl);
+
+	PangoLayout *l = make_layout(cr, font, st->volume);
+	int iw, ih;
+	pango_layout_get_pixel_size(l, &iw, &ih);
+	g_object_unref(l);
+	*w = iw;
+	*h = ih;
+	if (!vertical) {
+		*x = lw - BAR_PAD - cw - (cw > 0 ? VOLUME_GAP : 0) - iw;
+		*y = (lh - ih) / 2.0;
+	} else {
+		*x = (lw - iw) / 2.0;
+		*y = lh - BAR_PAD - ch - (ch > 0 ? VOLUME_GAP : 0) - ih;
+	}
+}
+
+bool rei_bar_volume_rect(const struct rei_bar_state *st, struct rei_rect *out)
+{
+	if (!st->volume[0])
+		return false;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
+	cairo_t *cr = cairo_create(surface);
+	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
+	double x, y, w, h;
+	volume_layout(cr, font, st, &x, &y, &w, &h);
+	pango_font_description_free(font);
+	cairo_destroy(cr);
+	cairo_surface_destroy(surface);
+
+	/* A generous target: the whole height (or width) of the bar, a little wider than the text. */
+	if (!rei_bar_vertical(st->position))
+		*out = (struct rei_rect){ (int)floor(x) - 6, 0, (int)ceil(w) + 12, st->thickness };
+	else
+		*out = (struct rei_rect){ 0, (int)floor(y) - 3, st->thickness, (int)ceil(h) + 6 };
+	return true;
+}
+
 struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 {
 	bool vertical = rei_bar_vertical(st->position);
@@ -158,6 +239,17 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 		snprintf(label, sizeof label, "%d", b->number);
 		set_color(cr, st->foreground);
 		draw_centered(cr, font, label, cell.x + cell.w / 2.0, cell.y + cell.h / 2.0);
+	}
+
+	/* The volume, just before the clock. */
+	if (st->volume[0]) {
+		double vx, vy, vw, vh;
+		volume_layout(cr, font, st, &vx, &vy, &vw, &vh);
+		set_color(cr, st->volume_muted ? rei_bar_mix(st->background, st->foreground, 0.5) : st->foreground);
+		PangoLayout *layout = make_layout(cr, font, st->volume);
+		cairo_move_to(cr, vx, vy);
+		pango_cairo_show_layout(cr, layout);
+		g_object_unref(layout);
 	}
 
 	/* The clock, at the end. A vertical bar is too narrow for "14:32", so it is

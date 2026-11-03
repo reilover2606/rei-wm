@@ -1,3 +1,4 @@
+#include "audio.h"
 #include "input/input.h"
 
 #include <math.h>
@@ -464,6 +465,7 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 		int ws;
 		if (rei_toolbar_hit(s, s->cursor_x, s->cursor_y, &bo, &ws)) {
 			in->bar_press = true;
+			in->bar_press_volume = ws == 0 && rei_toolbar_volume_at(s, s->cursor_x, s->cursor_y);
 			in->bar_press_ws = ws;
 			in->bar_press_output = bo;
 			rei_server_schedule_flush(s);
@@ -541,9 +543,15 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 			bool bar_clicked = in->bar_press;
 			int bar_ws = in->bar_press_ws;
 			struct rei_output *bar_output = in->bar_press_output;
+			bool volume_press = in->bar_press_volume;
 			in->bar_press = false;
+			in->bar_press_volume = false;
 			in->bar_press_ws = 0;
 			in->bar_press_output = NULL;
+
+			/* The volume text: a click toggles mute. */
+			if (bar_clicked && volume_press && rei_toolbar_volume_at(s, s->cursor_x, s->cursor_y))
+				rei_audio_toggle_mute(s);
 
 			/* A workspace button is clicked if the press and release are on it. */
 			if (bar_clicked && bar_ws > 0) {
@@ -594,7 +602,10 @@ void rei_input_pointer_axis(struct rei_server *s, uint32_t time_ms, bool horizon
 	int bar_ws;
 	if (!in->pointer_focus && !in->grab_surface && !horizontal && value != 0 &&
 	    rei_toolbar_hit(s, s->cursor_x, s->cursor_y, &bar_output, &bar_ws)) {
-		rei_toolbar_scroll(s, bar_output, value > 0 ? 1 : -1);
+		if (rei_toolbar_volume_at(s, s->cursor_x, s->cursor_y))
+			rei_audio_change_volume(s, value > 0 ? -s->config->volume_step : s->config->volume_step);
+		else
+			rei_toolbar_scroll(s, bar_output, value > 0 ? 1 : -1);
 		return;
 	}
 	struct rei_surface *to = in->grab_surface ? in->grab_surface : in->pointer_focus;

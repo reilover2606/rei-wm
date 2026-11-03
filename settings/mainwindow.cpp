@@ -234,6 +234,11 @@ QWidget *MainWindow::buildGeneralTab()
 	addField(f, tr("Focus follows the mouse"), "general", "focus_follows_mouse", Bool, false);
 	addField(f, tr("Run Xwayland (X11 programs)"), "general", "xwayland", Bool, true,
 		 {}, 0, 0, 1, tr("Needs a restart of rei-wm to change."));
+	addField(f, tr("Volume control (PipeWire)"), "audio", "enabled", Bool, true, {}, 0, 0, 1,
+		 tr("The toolbar's volume text and the media keys. Needs a restart to change."));
+	addField(f, tr("Volume step (percent)"), "audio", "volume_step", Int, 5, {}, 1, 100);
+	addField(f, tr("Maximum volume (percent)"), "audio", "max_volume", Int, 100, {}, 10, 150, 1,
+		 tr("Above 100 amplifies and may distort."));
 	return w;
 }
 

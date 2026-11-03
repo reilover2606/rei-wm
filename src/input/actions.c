@@ -13,6 +13,7 @@
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
+#include "audio.h"
 #include "xwayland.h"
 
 extern char **environ;
@@ -105,6 +106,15 @@ void rei_actions_run(struct rei_server *s, const struct rei_action *action)
 {
 	switch (action->type) {
 	case REI_ACTION_NONE:
+		break;
+	case REI_ACTION_VOLUME_UP:
+		rei_audio_change_volume(s, action->value);
+		break;
+	case REI_ACTION_VOLUME_DOWN:
+		rei_audio_change_volume(s, -(action->value ? action->value : s->config->volume_step));
+		break;
+	case REI_ACTION_VOLUME_MUTE:
+		rei_audio_toggle_mute(s);
 		break;
 	case REI_ACTION_EXEC:
 		rei_info("exec: %s", action->arg);

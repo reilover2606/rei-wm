@@ -53,6 +53,11 @@ struct rei_config {
 	struct rei_binding_config *bindings;
 	size_t n_bindings;
 
+	/* [audio] */
+	bool audio_enabled;
+	int32_t volume_step;  /* Percent per key press or wheel notch. */
+	int32_t max_volume;   /* Percent. */
+
 	/* [toolbar] */
 	bool toolbar_enabled;
 	enum rei_bar_position toolbar_position;

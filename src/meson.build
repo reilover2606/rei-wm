@@ -52,6 +52,12 @@ else
   core_sources += files('xwayland_stub.c')
 endif
 
+if have_audio
+  core_sources += files('audio.c')
+else
+  core_sources += files('audio_stub.c')
+endif
+
 # Third-party single-header code, compiled without our warning flags.
 stb = static_library('stb',
   '../third_party/stb_impl.c',
@@ -63,7 +69,8 @@ generated = [xdg_shell_client_h, xdg_shell_server_h, xdg_shell_code,
 
 drm_deps = have_drm ? [libdrm, gbm, libseat, libinput, libudev] : []
 xcb_deps = have_xwayland ? [xcb] : []
-core_deps = drm_deps + xcb_deps + [wayland_server, wayland_client, egl, glesv2, xkbcommon, cairo, pangocairo, fontconfig, libevent, libevent_pthreads, threads, m_dep]
+audio_deps = have_audio ? [libpipewire] : []
+core_deps = drm_deps + xcb_deps + audio_deps + [wayland_server, wayland_client, egl, glesv2, xkbcommon, cairo, pangocairo, fontconfig, libevent, libevent_pthreads, threads, m_dep]
 
 rei_core = static_library('rei-core',
   core_sources, generated,

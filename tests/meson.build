@@ -92,6 +92,14 @@ reload_test = executable('test_reload', 'test_reload.c', xdg_shell_client_h, xdg
 )
 test('reload', reload_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
 
+if have_audio
+  audio_test = executable('test_audio', 'test_audio.c', xdg_shell_client_h, xdg_shell_code,
+    include_directories: inc,
+    dependencies: [wayland_client, m_dep],
+  )
+  test('audio', audio_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+endif
+
 bar_test = executable('test_bar', 'test_bar.c', xdg_shell_client_h, xdg_shell_code,
   include_directories: inc,
   dependencies: [wayland_client, m_dep],

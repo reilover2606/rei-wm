@@ -47,6 +47,10 @@ if have_xwayland
   add_project_arguments('-DREI_HAVE_XWAYLAND=1', language: 'c')
 endif
 
+# Volume control through PipeWire: the toolbar's volume widget and the media keys.
+libpipewire = dependency('libpipewire-0.3', required: get_option('audio'))
+have_audio = libpipewire.found()
+
 wayland_scanner_dep = dependency('wayland-scanner', native: true)
 wayland_scanner = find_program(wayland_scanner_dep.get_variable(pkgconfig: 'wayland_scanner'))
 protocols_dir = wayland_protocols.get_variable(pkgconfig: 'pkgdatadir')

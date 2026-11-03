@@ -258,6 +258,9 @@ struct rei_config *rei_config_defaults(void)
 	cfg->repeat_delay = 600;
 	cfg->tap_to_click = true;
 	cfg->xwayland = true;
+	cfg->audio_enabled = true;
+	cfg->volume_step = 5;
+	cfg->max_volume = 100;
 	cfg->wallpaper_mode = rei_xstrdup("fill");
 	cfg->background_rgb = 0x1b2733;
 	cfg->root = toml_parse("", NULL, 0);
@@ -354,6 +357,15 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 			cfg->bindings[cfg->n_bindings].action = rei_xstrdup(e->val->u.s);
 			cfg->n_bindings++;
 		}
+	}
+
+	const struct toml_table *audio = get_table(&r, root, "audio");
+	if (audio) {
+		const struct toml_value *en = get(&r, audio, "audio.", "enabled", TOML_BOOL);
+		if (en)
+			cfg->audio_enabled = en->u.b;
+		read_int(&r, audio, "audio.", "volume_step", &cfg->volume_step, 1, 100);
+		read_int(&r, audio, "audio.", "max_volume", &cfg->max_volume, 10, 150);
 	}
 
 	const struct toml_table *tb = get_table(&r, root, "toolbar");

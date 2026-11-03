@@ -20,6 +20,7 @@ struct rei_seat;
 struct rei_input;
 struct rei_image;
 struct rei_xwayland;
+struct rei_audio;
 struct wl_protocol_logger;
 
 /*
@@ -80,6 +81,7 @@ struct rei_server {
 	/* Xwayland (src/xwayland.c). */
 	struct wl_protocol_logger *protocol_logger;
 	struct rei_xwayland *xwayland;
+	struct rei_audio *audio;
 
 	/* Config hot reload (src/reload.c). Superseded configs are kept until exit, since
 	 * a few places may still hold a string from one for a moment. */

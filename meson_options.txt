@@ -4,3 +4,5 @@ option('xwayland', type: 'feature', value: 'auto',
   description: 'Xwayland support, to run X11 programs (needs libxcb)')
 option('settings', type: 'feature', value: 'auto',
   description: 'The Qt settings application (needs Qt 6 Widgets)')
+option('audio', type: 'feature', value: 'auto',
+  description: 'Volume widget and media keys through PipeWire (needs libpipewire-0.3)')

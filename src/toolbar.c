@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include "audio.h"
 #include "desktop.h"
 #include "server.h"
 #include "util/log.h"
@@ -84,6 +85,12 @@ static void build_state(struct rei_server *s, struct rei_output *o, struct rei_b
 	}
 	snprintf(st->clock, sizeof st->clock, "%s", s->clock_text);
 	snprintf(st->font, sizeof st->font, "%s", cfg->toolbar_font);
+	struct rei_audio_state audio = rei_audio_state(s);
+	rei_audio_label(&audio, st->volume, sizeof st->volume);
+	/* A narrow vertical bar has no room for the word. */
+	if (audio.muted && rei_bar_vertical(st->position))
+		snprintf(st->volume, sizeof st->volume, "mute");
+	st->volume_muted = audio.muted;
 	st->background = cfg->toolbar_background;
 	st->foreground = cfg->toolbar_foreground;
 	st->highlight = cfg->toolbar_highlight;
@@ -148,6 +155,28 @@ bool rei_toolbar_hit(struct rei_server *s, double x, double y, struct rei_output
 		*out = o;
 		*workspace = i >= 0 ? buttons[i].number : 0;
 		return true;
+	}
+	return false;
+}
+
+bool rei_toolbar_volume_at(struct rei_server *s, double x, double y)
+{
+	if (!bar_enabled(s))
+		return false;
+	struct rei_output *o;
+	wl_list_for_each(o, &s->outputs, link) {
+		if (o->workspace && o->workspace->fullscreen)
+			continue;
+		struct rei_rect r = bar_rect(s, o);
+		if (x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h)
+			continue;
+		struct rei_bar_state st;
+		build_state(s, o, &st);
+		struct rei_rect v;
+		if (!rei_bar_volume_rect(&st, &v))
+			return false;
+		double lx = x - r.x, ly = y - r.y;
+		return lx >= v.x && ly >= v.y && lx < v.x + v.w && ly < v.y + v.h;
 	}
 	return false;
 }

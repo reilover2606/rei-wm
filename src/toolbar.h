@@ -74,8 +74,14 @@ struct rei_bar_state {
 	int hover;      /* Button under the pointer, or -1. */
 	char clock[64];
 	char font[96];  /* Pango font description, e.g. "Sans 11". */
+	char volume[16];  /* "73%", "muted"; empty when there is no audio sink. */
+	bool volume_muted;
 	uint32_t background, foreground, highlight;  /* 0xRRGGBB */
 };
+
+/* Where the volume text sits in the bar (bar-local logical pixels), for hit-testing.
+ * False when the bar shows no volume. */
+bool rei_bar_volume_rect(const struct rei_bar_state *state, struct rei_rect *out);
 
 /* An opaque pixbuf of the bar at its physical resolution; NULL on failure. */
 struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *state);
@@ -110,6 +116,9 @@ bool rei_toolbar_hit(struct rei_server *server, double x, double y,
 		     struct rei_output **output, int *workspace);
 
 /* Highlights the button for `workspace` on `output` (0 / NULL for none). */
+/* Whether (x, y) is on the volume text of an output's toolbar. */
+bool rei_toolbar_volume_at(struct rei_server *server, double x, double y);
+
 void rei_toolbar_set_hover(struct rei_server *server, struct rei_output *output, int workspace);
 
 /* Mouse wheel over a bar: steps to the next (+1) or previous (-1) workspace of

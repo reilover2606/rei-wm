@@ -50,6 +50,9 @@ const struct rei_default_binding rei_default_bindings[] = {
 	{ "Mod+Shift+8", "move_to_workspace 8" },
 	{ "Mod+Shift+9", "move_to_workspace 9" },
 	{ "Mod+Shift+0", "move_to_workspace 10" },
+	{ "XF86AudioRaiseVolume", "volume_up" },
+	{ "XF86AudioLowerVolume", "volume_down" },
+	{ "XF86AudioMute", "volume_mute" },
 	{ NULL, NULL },
 };
 
@@ -128,7 +131,7 @@ out:
 }
 
 /* What follows the action's name. */
-enum arg_kind { ARG_NONE, ARG_TEXT, ARG_DIR, ARG_SPLIT, ARG_WORKSPACE };
+enum arg_kind { ARG_NONE, ARG_TEXT, ARG_DIR, ARG_SPLIT, ARG_WORKSPACE, ARG_OPT_PERCENT };
 
 bool rei_action_parse(const char *text, struct rei_action *out, char *err, size_t errlen)
 {
@@ -158,6 +161,9 @@ bool rei_action_parse(const char *text, struct rei_action *out, char *err, size_
 		{ "fullscreen", REI_ACTION_FULLSCREEN, ARG_NONE },
 		{ "workspace", REI_ACTION_WORKSPACE, ARG_WORKSPACE },
 		{ "move_to_workspace", REI_ACTION_MOVE_TO_WORKSPACE, ARG_WORKSPACE },
+		{ "volume_up", REI_ACTION_VOLUME_UP, ARG_OPT_PERCENT },
+		{ "volume_down", REI_ACTION_VOLUME_DOWN, ARG_OPT_PERCENT },
+		{ "volume_mute", REI_ACTION_VOLUME_MUTE, ARG_NONE },
 	};
 
 	for (size_t i = 0; i < REI_ARRAY_LEN(actions); i++) {
@@ -201,6 +207,16 @@ bool rei_action_parse(const char *text, struct rei_action *out, char *err, size_
 				return false;
 			}
 			return true;
+		case ARG_OPT_PERCENT: {
+			char *end = NULL;
+			long n = arg[0] ? strtol(arg, &end, 10) : 0;
+			if (arg[0] && (*end || n < 1 || n > 100)) {
+				snprintf(err, errlen, "'%s' takes an optional step from 1 to 100 (percent)", name);
+				return false;
+			}
+			out->value = (int)n;
+			return true;
+		}
 		case ARG_WORKSPACE: {
 			char *end = NULL;
 			long n = strtol(arg, &end, 10);
@@ -216,7 +232,7 @@ bool rei_action_parse(const char *text, struct rei_action *out, char *err, size_
 
 	snprintf(err, errlen, "unknown action '%.*s' (known: none, exec, close, quit, focus_next, "
 		 "focus_prev, focus, move, split, toggle_floating, fullscreen, workspace, "
-		 "move_to_workspace)", (int)name_len, text);
+		 "move_to_workspace, volume_up, volume_down, volume_mute)", (int)name_len, text);
 	return false;
 }
 
