@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "theme.h"
 #include "toolbar.h"
 #include "util/toml.h"
 
@@ -63,9 +64,14 @@ struct rei_config {
 	enum rei_bar_position toolbar_position;
 	int32_t toolbar_thickness;   /* Pixels. */
 	enum rei_tray_mode toolbar_tray;  /* The application tray in the middle of the bar. */
+	enum rei_tray_scope toolbar_tray_scope;
+	int32_t toolbar_tray_min_width;   /* Percent of its natural width a tile may shrink to. */
 	char *toolbar_font;          /* Pango font description. */
 	char *toolbar_clock_format;  /* strftime; empty means no clock. */
 	uint32_t toolbar_background, toolbar_foreground, toolbar_highlight;  /* 0xRRGGBB */
+
+	/* [theme]: the look of the UI, from the base colours above plus the [theme.*] overrides. */
+	struct rei_theme theme;
 
 	/* [decoration] */
 	int32_t notch_height;  /* Pixels; 0 turns the window notches off. */

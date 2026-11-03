@@ -249,11 +249,14 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_position = REI_BAR_TOP;
 	cfg->toolbar_thickness = 28;
 	cfg->toolbar_tray = REI_TRAY_ICONS_NAMES;
+	cfg->toolbar_tray_scope = REI_TRAY_SCOPE_WORKSPACE;
+	cfg->toolbar_tray_min_width = 50;
 	cfg->toolbar_font = rei_xstrdup("Sans 11");
 	cfg->toolbar_clock_format = rei_xstrdup("%H:%M:%S");
 	cfg->toolbar_background = 0x161c26;
 	cfg->toolbar_foreground = 0xd6dde8;
 	cfg->toolbar_highlight = 0x3c6ebe;
+	rei_theme_defaults(&cfg->theme, cfg->toolbar_background, cfg->toolbar_foreground, cfg->toolbar_highlight);
 	cfg->notch_height = 22;
 	cfg->repeat_rate = 25;
 	cfg->repeat_delay = 600;
@@ -391,11 +394,24 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 				cfg->toolbar_tray = (enum rei_tray_mode)i;
 		}
 		free(tray);
+		static const char *const scopes[] = { "workspace", "output", NULL };
+		char *scope = rei_xstrdup("workspace");
+		read_choice(&r, tb, "toolbar.", "tray_scope", &scope, scopes);
+		cfg->toolbar_tray_scope = strcmp(scope, "output") == 0 ? REI_TRAY_SCOPE_OUTPUT : REI_TRAY_SCOPE_WORKSPACE;
+		free(scope);
+		read_int(&r, tb, "toolbar.", "tray_min_width", &cfg->toolbar_tray_min_width, 10, 100);
 		read_string(&r, tb, "toolbar.", "font", &cfg->toolbar_font);
 		read_string(&r, tb, "toolbar.", "clock_format", &cfg->toolbar_clock_format);
 		read_color(&r, tb, "toolbar.", "background", &cfg->toolbar_background);
 		read_color(&r, tb, "toolbar.", "foreground", &cfg->toolbar_foreground);
 		read_color(&r, tb, "toolbar.", "highlight", &cfg->toolbar_highlight);
+	}
+
+	rei_theme_defaults(&cfg->theme, cfg->toolbar_background, cfg->toolbar_foreground, cfg->toolbar_highlight);
+	if (!r.failed) {
+		char theme_err[300];
+		if (!rei_theme_read(&cfg->theme, root, theme_err, sizeof theme_err))
+			fail(&r, "%s", theme_err);
 	}
 
 	const struct toml_table *deco = get_table(&r, root, "decoration");

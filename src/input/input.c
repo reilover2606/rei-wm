@@ -411,7 +411,7 @@ static void update_pointer(struct rei_input *in, uint32_t time_ms, bool send_mot
 
 static void pointer_moved(struct rei_input *in, uint32_t time_ms)
 {
-	rei_tray_menu_motion(in->server, in->server->cursor_x, in->server->cursor_y);
+	rei_tray_pointer_moved(in->server, in->server->cursor_x, in->server->cursor_y);
 	rei_input_clamp_cursor(in->server);
 	update_pointer(in, time_ms, true);
 	rei_server_cursor_moved(in->server);  /* Drawn in the scene unless a hardware cursor shows it. */
@@ -495,6 +495,9 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 			    rei_toolbar_tray_at(s, s->cursor_x, s->cursor_y, &tray_output, &tray_index)) {
 				in->bar_press_tray = tray_index;
 				bo = tray_output;
+				char key[96];
+				if (rei_tray_key_for(s, tray_output, tray_index, key, sizeof key))
+					rei_tray_press(s, tray_output, key, s->cursor_x, s->cursor_y);
 			}
 			in->bar_press_ws = ws;
 			in->bar_press_output = bo;
@@ -589,7 +592,9 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 			if (bar_clicked && tray_press >= 0) {
 				struct rei_output *to;
 				int ti;
-				if (rei_toolbar_tray_at(s, s->cursor_x, s->cursor_y, &to, &ti) && to == bar_output &&
+				if (rei_tray_release(s)) {
+					/* It was a drag: the tile was moved, not clicked. */
+				} else if (rei_toolbar_tray_at(s, s->cursor_x, s->cursor_y, &to, &ti) && to == bar_output &&
 				    ti == tray_press)
 					rei_toolbar_tray_click(s, to, ti);
 			}
