@@ -16,7 +16,7 @@
 
 extern char **environ;
 
-/* A copy of the environment with WAYLAND_DISPLAY set to our socket. Built before
+/* A copy of the environment with WAYLAND_DISPLAY set to our socket and DISPLAY removed. Built before
  * forking because the child of a multithreaded process may only call
  * async-signal-safe functions, and setenv() is not one of them. */
 static char **build_environment(const char *socket_name)
@@ -28,7 +28,10 @@ static char **build_environment(const char *socket_name)
 	char **env = rei_xcalloc(n + 2, sizeof *env);
 	size_t out = 0;
 	for (size_t i = 0; i < n; i++) {
-		if (strncmp(environ[i], "WAYLAND_DISPLAY=", 16) != 0)
+		/* DISPLAY would point X11 programs at some other X server (e.g. your
+		 * desktop's) until rei-wm runs its own Xwayland. */
+		if (strncmp(environ[i], "WAYLAND_DISPLAY=", 16) != 0 &&
+		    strncmp(environ[i], "DISPLAY=", 8) != 0)
 			env[out++] = rei_xstrdup(environ[i]);
 	}
 	char *wd = NULL;
