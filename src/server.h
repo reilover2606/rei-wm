@@ -117,6 +117,9 @@ void rei_server_schedule_flush(struct rei_server *server);
  */
 void rei_server_schedule_damage(struct rei_server *server);
 
+/* The pointer moved: redraw, unless the backend shows it with a hardware cursor. */
+void rei_server_cursor_moved(struct rei_server *server);
+
 /* Builds and sends the snapshot now if one is scheduled. */
 void rei_server_flush_damage(struct rei_server *server);
 

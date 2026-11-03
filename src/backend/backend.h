@@ -22,6 +22,11 @@ struct rei_backend_impl {
 	bool (*start)(struct rei_backend *backend);
 	/* Removes its outputs and frees the backend. */
 	void (*destroy)(struct rei_backend *backend);
+	/* Optional. The pointer moved. Returns true if the backend shows the pointer
+	 * itself on every output (a hardware cursor), so no redraw is needed. */
+	bool (*cursor_moved)(struct rei_backend *backend);
+	/* Optional. Switch to virtual terminal `vt` (1-12). */
+	void (*switch_vt)(struct rei_backend *backend, unsigned vt);
 };
 
 struct rei_backend {
@@ -29,11 +34,13 @@ struct rei_backend {
 	struct rei_server *server;
 };
 
-/* "headless" or "nested"; NULL for an unknown name or if setup fails. */
+/* "headless", "nested" or "drm"; NULL for an unknown name or if setup fails. */
 struct rei_backend *rei_backend_create(const char *name, struct rei_server *server);
 
 struct rei_backend *rei_headless_backend_create(struct rei_server *server);
 struct rei_backend *rei_nested_backend_create(struct rei_server *server);
+/* Only exists when built with the DRM backend (REI_HAVE_DRM). */
+struct rei_backend *rei_drm_backend_create(struct rei_server *server);
 
 /*
  * Fills `p` for the index-th configured output, or the built-in default

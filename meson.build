@@ -36,6 +36,10 @@ libinput = dependency('libinput', required: get_option('drm'))
 libudev = dependency('libudev', required: get_option('drm'))
 have_drm = libdrm.found() and gbm.found() and libseat.found() and libinput.found() and libudev.found()
 
+if have_drm
+  add_project_arguments('-DREI_HAVE_DRM=1', language: 'c')
+endif
+
 wayland_scanner_dep = dependency('wayland-scanner', native: true)
 wayland_scanner = find_program(wayland_scanner_dep.get_variable(pkgconfig: 'wayland_scanner'))
 protocols_dir = wayland_protocols.get_variable(pkgconfig: 'pkgdatadir')

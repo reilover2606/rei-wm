@@ -4,6 +4,9 @@
 #include <string.h>
 
 #include "config.h"
+#ifdef REI_HAVE_DRM
+#include "backend/drm/drm.h"
+#endif
 #include "server.h"
 #include "util/log.h"
 
@@ -16,10 +19,11 @@ static void usage(FILE *out)
 "\n"
 "  -c, --config PATH    config file (default: ~/.config/rei-wm/config.toml,\n"
 "                       created on first run)\n"
-"  -b, --backend NAME   auto, headless or nested (overrides the config)\n"
+"  -b, --backend NAME   auto, drm, headless or nested (overrides the config)\n"
 "  -s, --socket NAME    Wayland socket name (default: first free wayland-N)\n"
 "  -v, --verbose        debug logging (same as REI_LOG=debug)\n"
 "      --check-config   validate the config and exit\n"
+"      --drm-info       list the displays, modes and planes the DRM backend would see\n"
 "  -h, --help           show this help\n"
 "  -V, --version        show the version\n"
 "\n"
@@ -36,6 +40,7 @@ int main(int argc, char **argv)
 		{ "socket", required_argument, NULL, 's' },
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "check-config", no_argument, NULL, 1000 },
+		{ "drm-info", no_argument, NULL, 1001 },
 		{ "help", no_argument, NULL, 'h' },
 		{ "version", no_argument, NULL, 'V' },
 		{ 0 },
@@ -61,7 +66,7 @@ int main(int argc, char **argv)
 		case 'c': config_path = optarg; break;
 		case 'b':
 			if (strcmp(optarg, "auto") && strcmp(optarg, "headless") &&
-			    strcmp(optarg, "nested")) {
+			    strcmp(optarg, "nested") && strcmp(optarg, "drm")) {
 				fprintf(stderr, "rei-wm: unknown backend '%s'\n", optarg);
 				return 2;
 			}
@@ -70,6 +75,13 @@ int main(int argc, char **argv)
 		case 's': opts.socket_name = optarg; break;
 		case 'v': verbose = true; break;
 		case 1000: check_only = true; break;
+		case 1001:
+#ifdef REI_HAVE_DRM
+			return rei_drm_print_info();
+#else
+			fprintf(stderr, "rei-wm: this build has no DRM backend\n");
+			return 1;
+#endif
 		case 'h': usage(stdout); return 0;
 		case 'V': puts("rei-wm " REI_VERSION); return 0;
 		default: usage(stderr); return 2;

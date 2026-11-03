@@ -38,6 +38,10 @@ core_sources = files(
 if have_drm
   core_sources += files(
     'backend/drm/drm_logic.c',
+    'backend/drm/drm.c',
+    'backend/drm/drm_info.c',
+    'backend/drm/session.c',
+    'input/libinput_input.c',
   )
 endif
 

@@ -181,6 +181,13 @@ void rei_server_schedule_damage(struct rei_server *s)
 	event_active(s->damage_event, 0, 0);
 }
 
+void rei_server_cursor_moved(struct rei_server *s)
+{
+	if (s->backend && s->backend->impl->cursor_moved && s->backend->impl->cursor_moved(s->backend))
+		return;
+	rei_server_schedule_damage(s);
+}
+
 void rei_server_flush_damage(struct rei_server *s)
 {
 	if (!s->damage_pending)
@@ -393,8 +400,12 @@ static const char *resolve_backend(const struct rei_server *s,
 	if (parent && parent[0])
 		return "nested";
 
-	rei_warn("no parent Wayland session and no DRM backend yet: running headless");
+#ifdef REI_HAVE_DRM
+	return "drm";
+#else
+	rei_warn("no parent Wayland session and this build has no DRM backend: running headless");
 	return "headless";
+#endif
 }
 
 struct rei_server *rei_server_create(const struct rei_config *config,

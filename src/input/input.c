@@ -13,6 +13,7 @@
 #include "proto/seat.h"
 #include "proto/surface.h"
 #include "proto/xdg_shell.h"
+#include "backend/backend.h"
 #include "server.h"
 #include "toolbar.h"
 #include "util/log.h"
@@ -168,6 +169,17 @@ void rei_input_key(struct rei_server *server, uint32_t time_ms, uint32_t code, b
 		return;
 
 	bool mods_changed = rei_xkb_update_key(in->xkb, code, pressed);
+
+	/* Ctrl+Alt+F1..F12 produce XF86Switch_VT_n, which only the compositor can act on. */
+	if (pressed && server->backend && server->backend->impl->switch_vt) {
+		xkb_keysym_t sym = rei_xkb_sym(in->xkb, code);
+		if (sym >= XKB_KEY_XF86Switch_VT_1 && sym <= XKB_KEY_XF86Switch_VT_12) {
+			set_add(in->swallowed, &in->n_swallowed, REI_MAX_PRESSED, code);
+			server->backend->impl->switch_vt(server->backend,
+				(unsigned)(sym - XKB_KEY_XF86Switch_VT_1) + 1);
+			return;
+		}
+	}
 
 	if (pressed) {
 		uint32_t mods = rei_xkb_mods(in->xkb);
@@ -353,7 +365,7 @@ static void pointer_moved(struct rei_input *in, uint32_t time_ms)
 {
 	rei_input_clamp_cursor(in->server);
 	update_pointer(in, time_ms, true);
-	rei_server_schedule_damage(in->server);  /* The cursor is drawn in the scene. */
+	rei_server_cursor_moved(in->server);  /* Drawn in the scene unless a hardware cursor shows it. */
 	rei_server_schedule_flush(in->server);
 }
 
