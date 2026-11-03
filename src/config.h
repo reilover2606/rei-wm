@@ -16,6 +16,11 @@ struct rei_output_config {
 	int32_t x, y;
 };
 
+struct rei_binding_config {
+	char *combo;   /* "Mod+Shift+q" */
+	char *action;  /* "close", "exec foot", ... */
+};
+
 struct rei_config {
 	char *path;  /* File the config was loaded from (NULL for defaults). */
 
@@ -26,6 +31,15 @@ struct rei_config {
 	/* [layout] */
 	int32_t gap_outer;  /* Between windows and the edge of the desktop. */
 	int32_t gap_inner;  /* Between adjacent windows. */
+
+	/* [input] — empty strings mean "library default". */
+	char *kb_rules, *kb_model, *kb_layout, *kb_variant, *kb_options;
+	int32_t repeat_rate;   /* Key repeats per second; 0 disables repeat. */
+	int32_t repeat_delay;  /* Milliseconds before repeating starts. */
+
+	/* [keybindings]: overrides on top of the built-in defaults. */
+	struct rei_binding_config *bindings;
+	size_t n_bindings;
 
 	/* [wallpaper] */
 	char *wallpaper_path;     /* NULL: no image, just the background colour. */

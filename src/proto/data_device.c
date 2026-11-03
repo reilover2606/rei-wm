@@ -5,10 +5,13 @@
 #include <unistd.h>
 #include <wayland-server-protocol.h>
 
+#include "input/input.h"
 #include "proto/seat.h"
+#include "proto/surface.h"
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
+#include "util/wlsignal.h"
 
 struct rei_data_source {
 	struct wl_resource *resource;
@@ -112,7 +115,7 @@ static const struct wl_data_source_interface source_impl = {
 static void source_resource_destroy(struct wl_resource *r)
 {
 	struct rei_data_source *src = wl_resource_get_user_data(r);
-	wl_signal_emit(&src->destroy_signal, src);
+	rei_signal_emit(&src->destroy_signal, src);
 	wl_array_release(&src->mime_types);
 	free(src);
 }
@@ -141,10 +144,18 @@ static void selection_on_source_destroyed(struct wl_listener *l, void *data)
 static void device_set_selection(struct wl_client *c, struct wl_resource *r,
 				 struct wl_resource *source_res, uint32_t serial)
 {
-	(void)c; (void)serial;
+	(void)serial;
 	struct rei_seat *seat = wl_resource_get_user_data(r);
 	struct rei_data_source *src = source_res ? wl_resource_get_user_data(source_res) : NULL;
 
+	/* Only the client being typed into may take the clipboard; otherwise any
+	 * background program could silently replace what the user copied. */
+	struct rei_surface *focus = seat->server->input ? seat->server->input->keyboard_focus : NULL;
+	if (!focus || wl_resource_get_client(focus->resource) != c) {
+		if (src)
+			wl_data_source_send_cancelled(source_res);
+		return;
+	}
 	if (seat->selection == src)
 		return;
 	if (seat->selection) {
@@ -157,6 +168,10 @@ static void device_set_selection(struct wl_client *c, struct wl_resource *r,
 		seat->selection_destroy.notify = selection_on_source_destroyed;
 		wl_signal_add(&src->destroy_signal, &seat->selection_destroy);
 	}
+	/* Everyone with a data device learns of the change only through focus, so
+	 * tell the focused client (which is the one that set it, and any others it
+	 * shares a connection with) right away. */
+	rei_data_device_send_selection(seat->server, c);
 }
 
 static void device_resource_destroy(struct wl_resource *r)

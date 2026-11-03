@@ -1,0 +1,8 @@
+# ThreadSanitizer suppressions for the test suite.
+#
+# Mesa's llvmpipe (the software OpenGL driver used on machines without a GPU,
+# including CI) has a shutdown race entirely inside libgallium: its rasteriser
+# worker threads can still be taking a mutex while eglDestroyContext() destroys
+# it. No rei-wm memory is involved. Races whose stacks are in that library are
+# ignored; races in rei-wm's own code are still reported.
+race:libgallium

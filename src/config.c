@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#include "input/keybindings.h"
 #include "util/log.h"
 #include "util/util.h"
 
@@ -88,6 +89,16 @@ static bool read_double(struct reader *r, const struct toml_table *t, const char
 	}
 	*out = d;
 	return true;
+}
+
+static void read_string(struct reader *r, const struct toml_table *t, const char *prefix,
+			const char *key, char **out)
+{
+	const struct toml_value *v = get(r, t, prefix, key, TOML_STRING);
+	if (!v)
+		return;
+	free(*out);
+	*out = rei_xstrdup(v->u.s);
 }
 
 static void read_choice(struct reader *r, const struct toml_table *t, const char *prefix,
@@ -197,6 +208,13 @@ struct rei_config *rei_config_defaults(void)
 	cfg->composition_key = rei_xstrdup("super");
 	cfg->gap_outer = 10;
 	cfg->gap_inner = 10;
+	cfg->kb_rules = rei_xstrdup("");
+	cfg->kb_model = rei_xstrdup("");
+	cfg->kb_layout = rei_xstrdup("");
+	cfg->kb_variant = rei_xstrdup("");
+	cfg->kb_options = rei_xstrdup("");
+	cfg->repeat_rate = 25;
+	cfg->repeat_delay = 600;
 	cfg->wallpaper_mode = rei_xstrdup("fill");
 	cfg->background_rgb = 0x1b2733;
 	cfg->root = toml_parse("", NULL, 0);
@@ -231,6 +249,47 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 	if (layout) {
 		read_int(&r, layout, "layout.", "gap_outer", &cfg->gap_outer, 0, 500);
 		read_int(&r, layout, "layout.", "gap_inner", &cfg->gap_inner, 0, 500);
+	}
+
+	const struct toml_table *input = get_table(&r, root, "input");
+	if (input) {
+		read_string(&r, input, "input.", "keyboard_rules", &cfg->kb_rules);
+		read_string(&r, input, "input.", "keyboard_model", &cfg->kb_model);
+		read_string(&r, input, "input.", "keyboard_layout", &cfg->kb_layout);
+		read_string(&r, input, "input.", "keyboard_variant", &cfg->kb_variant);
+		read_string(&r, input, "input.", "keyboard_options", &cfg->kb_options);
+		read_int(&r, input, "input.", "repeat_rate", &cfg->repeat_rate, 0, 1000);
+		read_int(&r, input, "input.", "repeat_delay", &cfg->repeat_delay, 0, 10000);
+	}
+
+	const struct toml_table *kb = get_table(&r, root, "keybindings");
+	if (kb && !r.failed) {
+		cfg->bindings = rei_xcalloc(kb->len ? kb->len : 1, sizeof *cfg->bindings);
+		for (size_t i = 0; i < kb->len && !r.failed; i++) {
+			const struct toml_entry *e = &kb->entries[i];
+			if (e->val->type != TOML_STRING) {
+				fail(&r, "keybindings.\"%s\": expected a string like \"close\" or "
+				     "\"exec foot\", got %s", e->key, toml_type_name(e->val->type));
+				break;
+			}
+			/* Validate now so a typo is reported at startup, naming the entry. */
+			uint32_t mods;
+			xkb_keysym_t sym;
+			struct rei_action action;
+			char detail[200];
+			if (!rei_combo_parse(e->key, cfg->composition_key, &mods, &sym, detail, sizeof detail)) {
+				fail(&r, "keybindings: %s", detail);
+				break;
+			}
+			if (!rei_action_parse(e->val->u.s, &action, detail, sizeof detail)) {
+				fail(&r, "keybindings.\"%s\": %s", e->key, detail);
+				break;
+			}
+			rei_action_free(&action);
+			cfg->bindings[cfg->n_bindings].combo = rei_xstrdup(e->key);
+			cfg->bindings[cfg->n_bindings].action = rei_xstrdup(e->val->u.s);
+			cfg->n_bindings++;
+		}
 	}
 
 	const struct toml_table *wp = get_table(&r, root, "wallpaper");
@@ -394,6 +453,16 @@ void rei_config_free(struct rei_config *cfg)
 	free(cfg->path);
 	free(cfg->backend);
 	free(cfg->composition_key);
+	free(cfg->kb_rules);
+	free(cfg->kb_model);
+	free(cfg->kb_layout);
+	free(cfg->kb_variant);
+	free(cfg->kb_options);
+	for (size_t i = 0; i < cfg->n_bindings; i++) {
+		free(cfg->bindings[i].combo);
+		free(cfg->bindings[i].action);
+	}
+	free(cfg->bindings);
 	free(cfg->wallpaper_path);
 	free(cfg->wallpaper_mode);
 	for (size_t i = 0; i < cfg->n_outputs; i++)

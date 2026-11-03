@@ -75,6 +75,7 @@ struct rei_surface {
 	int32_t scale, transform;
 	int32_t width, height;  /* Surface-local size = buffer size / scale. */
 	struct rei_rects opaque, input;
+	bool input_default;  /* No input region set: the whole surface takes input. */
 	struct wl_list frames;
 
 	enum rei_surface_role role;
@@ -120,6 +121,14 @@ bool rei_surface_set_role(struct rei_surface *surface, enum rei_surface_role rol
  * top-left at (ox, oy) in global coordinates. */
 void rei_surface_emit(const struct rei_surface *surface, float ox, float oy,
 		      struct rei_scene_snapshot *snap);
+
+/*
+ * Finds the topmost surface in this surface's subsurface tree that accepts input
+ * at global point (x, y), given the tree's top-left at (ox, oy). On a hit,
+ * returns true with the surface and the point in its own coordinates.
+ */
+bool rei_surface_pick(const struct rei_surface *surface, double ox, double oy,
+		      double x, double y, struct rei_surface **out, double *sx, double *sy);
 
 /* The surface at the top of a subsurface chain. */
 struct rei_surface *rei_surface_root(struct rei_surface *surface);

@@ -10,6 +10,7 @@
 
 #include "backend/backend.h"
 #include "desktop.h"
+#include "input/input.h"
 #include "messages.h"
 #include "proto/seat.h"
 #include "proto/surface.h"
@@ -265,6 +266,7 @@ static void sync_output_geometry(struct rei_server *s)
 		rei_render_set_geometry(o->render, o->width, o->height, o->x, o->y, o->scale);
 		rei_wl_output_update(o);
 	}
+	rei_input_clamp_cursor(s);
 	rei_server_schedule_flush(s);
 }
 
@@ -440,6 +442,11 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 		rei_error("cannot register Wayland globals");
 		goto fail;
 	}
+	char input_err[256];
+	if (!rei_input_init(s, input_err, sizeof input_err)) {
+		rei_error("input: %s", input_err);
+		goto fail;
+	}
 
 	s->wl_event = event_new(s->base, wl_event_loop_get_fd(s->wl_loop),
 				EV_READ | EV_PERSIST, on_wayland_readable, s);
@@ -558,6 +565,7 @@ void rei_server_destroy(struct rei_server *s)
 
 	if (s->display)
 		wl_display_destroy(s->display);
+	rei_input_finish(s);
 	rei_seat_finish(s);
 	rei_image_free(s->wallpaper_image);
 	if (s->base)

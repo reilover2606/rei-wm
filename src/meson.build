@@ -13,6 +13,10 @@ core_sources = files(
   'backend/backend.c',
   'backend/headless.c',
   'backend/nested.c',
+  'input/actions.c',
+  'input/input.c',
+  'input/keybindings.c',
+  'input/xkb.c',
   'proto/data_device.c',
   'proto/seat.c',
   'proto/surface.c',
@@ -33,7 +37,7 @@ stb = static_library('stb',
 
 generated = [xdg_shell_client_h, xdg_shell_server_h, xdg_shell_code]
 
-core_deps = [wayland_server, wayland_client, egl, glesv2, libevent, libevent_pthreads, threads, m_dep]
+core_deps = [wayland_server, wayland_client, egl, glesv2, xkbcommon, libevent, libevent_pthreads, threads, m_dep]
 
 rei_core = static_library('rei-core',
   core_sources, generated,

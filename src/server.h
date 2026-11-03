@@ -15,6 +15,7 @@ struct wl_display;
 struct wl_event_loop;
 struct rei_backend;
 struct rei_seat;
+struct rei_input;
 struct rei_image;
 
 /*
@@ -55,6 +56,7 @@ struct rei_server {
 	struct wl_list popups;      /* xdg popups, creation order */
 	struct wl_list wl_outputs;  /* rei_wl_output, including ones being retired */
 	struct rei_seat *seat;
+	struct rei_input *input;
 
 	/* Look. */
 	struct rei_image *wallpaper_image;
