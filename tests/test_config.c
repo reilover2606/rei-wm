@@ -103,6 +103,29 @@ static void test_wallpaper(void)
 	parse_fails("[wallpaper]\npath = 3\n", "wallpaper.path");
 }
 
+static void test_notch_height(void)
+{
+	struct rei_config *c = rei_config_defaults();
+	CHECK(c->notch_height == 22);
+	rei_config_free(c);
+
+	c = parse_ok("[decoration]\nnotch_height = 30\n");
+	CHECK(c->notch_height == 30);
+	rei_config_free(c);
+	c = parse_ok("[decoration]\nnotch_height = 0\n");   /* 0 turns the notches off */
+	CHECK(c->notch_height == 0);
+	rei_config_free(c);
+
+	parse_fails("[decoration]\nnotch_height = 65\n", "decoration.notch_height");
+	parse_fails("[decoration]\nnotch_height = -1\n", "decoration.notch_height");
+	parse_fails("[decoration]\nnotch_height = \"tall\"\n", "expected integer");
+
+	/* The file written on first run lists the default explicitly. */
+	c = parse_ok(rei_config_default_text());
+	CHECK(c->notch_height == 22);
+	rei_config_free(c);
+}
+
 static void test_validation(void)
 {
 	parse_fails("[general]\nbackend = \"drm\"\n", "general.backend");
@@ -177,6 +200,7 @@ int main(void)
 	test_shipped_default_text_parses();
 	test_overrides();
 	test_wallpaper();
+	test_notch_height();
 	test_validation();
 	test_first_run_creates_default_file();
 	puts("test_config: ok");

@@ -80,6 +80,19 @@ bool rei_tree_move(struct rei_tree *tree, struct rei_node *leaf, enum rei_direct
  */
 void rei_tree_layout(struct rei_tree *tree, struct rei_rect area, int gap);
 
+/* The same with separate gaps: `gap_x` between windows side by side, `gap_y`
+ * between windows stacked. (Stacked windows need room for the focused one's
+ * notch, which sits in the gap above it.) */
+void rei_tree_layout_xy(struct rei_tree *tree, struct rei_rect area, int gap_x, int gap_y);
+
+/*
+ * Adds a window beside `target`, on the side given by `dir` (left of it, right of
+ * it, above it or below it), by creating a split around `target` if needed. This
+ * is what dropping a dragged window onto another one does.
+ */
+struct rei_node *rei_tree_insert_beside(struct rei_tree *tree, struct rei_node *target,
+					void *data, enum rei_direction dir);
+
 /* The leaf nearest to `from` in a direction (by position on screen), or NULL. */
 struct rei_node *rei_tree_neighbor(struct rei_tree *tree, struct rei_node *from,
 				   enum rei_direction dir);

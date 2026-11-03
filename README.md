@@ -3,19 +3,22 @@
 A Wayland compositor, tiling/floating window manager and small desktop
 environment, written in C11. MIT licensed.
 
-**Status: early development.** Milestones 0–5 are done: the build, config,
+**Status: early development.** Milestones 0–6 are done: the build, config,
 event loop and threading model, the core Wayland protocols, an OpenGL ES
-renderer, keyboard/pointer input with a configurable keybinding engine, and now
-the window manager: an i3-style tiling tree with configurable gaps, floating
-windows, fullscreen, and per-output workspaces. Real applications can connect, be
-tiled, and be driven from the keyboard. There are **no window decorations or
+renderer, keyboard/pointer input with a configurable keybinding engine, the
+window manager (an i3-style tiling tree with configurable gaps, floating windows,
+fullscreen, per-output workspaces), and the window notches (a drag handle and
+minimize/maximize/close tabs on the focused window). Real applications can
+connect, be tiled, and be driven from the keyboard or mouse. There is **no
 toolbar** yet, and no real hardware input (libinput arrives with the DRM
 backend): see the roadmap in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-![Three unmodified Weston demo clients tiled by rei-wm](docs/images/milestone-5-tiling.png)
+![Three unmodified Weston demo clients tiled by rei-wm, the focused one showing its notches](docs/images/milestone-6-notches.png)
 
 *Three unmodified Weston demo clients (one of them OpenGL) tiled by rei-wm over a
-wallpaper, with 16px gaps: one column, and a second column split vertically.*
+wallpaper. Windows have no border; the focused one (bottom right) shows its drag
+handle and minimize/maximize/close tabs hovering above it, with the pointer over
+close.*
 
 ## Building
 
@@ -88,6 +91,19 @@ In the headless backend nothing is visible, so ask rei-wm for a screenshot:
 | `Mod+Tab` / `Mod+Shift+Tab` | cycle focus |
 | `Mod+Shift+e` | quit |
 | `Mod`+left-drag / right-drag | move / resize a floating window |
+
+**The notches.** The focused window shows two small tabs hovering directly above
+its top edge: a drag handle on the left, and minimize, maximize and close on the
+right. They are drawn over the space above the window, so showing or hiding them
+never resizes anything. Click a button (press and release on it) to use it:
+close works; minimize and maximize are placeholders for now. Press and hold the
+handle to drag: a floating window just moves, and a tiled one lifts out of the
+grid. Drop it on another window to join the grid on the side nearest the pointer
+(a blue hint shows where it will land), or on empty space to leave it floating.
+Because the tabs hover above the window, tiled windows always keep that much room
+above them (the top gap, and the gap between stacked windows, is at least the notch
+height), and a floating window can't be dragged so high that its tabs leave the
+screen. `notch_height` in `[decoration]` sets the size; 0 turns them off.
 
 Workspaces belong to an output and are numbered globally, like i3's. An empty
 one disappears when you leave it. Gaps (`gap_outer`, `gap_inner`) and the other

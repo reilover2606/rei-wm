@@ -262,9 +262,22 @@ static void update_pointer(struct rei_input *in, uint32_t time_ms, bool send_mot
 	struct rei_server *s = in->server;
 
 	if (in->move_view) {
-		rei_wm_float_move(in->move_view,
-				  in->move_view_x + (int32_t)lround(s->cursor_x - in->move_cursor_x),
+		struct rei_view *v = in->move_view;
+		if (!v->floating) {
+			/* A tiled window dragged by its handle stays put until the pointer
+			 * has really moved, so a plain click doesn't pull it out of the grid. */
+			if (hypot(s->cursor_x - in->drag_start_x, s->cursor_y - in->drag_start_y) < 6.0)
+				return;
+			if (!rei_wm_drag_float(v)) {
+				in->move_view = NULL;
+				return;
+			}
+			in->move_view_x = v->x;
+			in->move_view_y = v->y;
+		}
+		rei_wm_float_move(v, in->move_view_x + (int32_t)lround(s->cursor_x - in->move_cursor_x),
 				  in->move_view_y + (int32_t)lround(s->cursor_y - in->move_cursor_y));
+		rei_wm_drag_update(v, s->cursor_x, s->cursor_y);
 		return;
 	}
 
@@ -294,6 +307,16 @@ static void update_pointer(struct rei_input *in, uint32_t time_ms, bool send_mot
 		double sx = s->cursor_x - in->grab_origin_x, sy = s->cursor_y - in->grab_origin_y;
 		if (send_motion)
 			rei_seat_pointer_motion(s->seat, in->grab_surface, time_ms, sx, sy);
+		return;
+	}
+
+	/* The notches belong to the compositor: over one, no client has the pointer. */
+	struct rei_view *nv = NULL;
+	enum rei_notch_part part = REI_NOTCH_NONE;
+	bool over_notch = rei_wm_notch_at(s, s->cursor_x, s->cursor_y, &nv, &part);
+	rei_wm_set_notch_hover(s, over_notch ? nv : NULL, over_notch ? part : REI_NOTCH_NONE);
+	if (over_notch) {
+		set_pointer_focus(in, NULL, 0, 0);
 		return;
 	}
 
@@ -350,6 +373,29 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 		    : !set_remove(in->buttons, &in->n_buttons, button))
 		return;
 
+	if (pressed && in->n_buttons == 1 && button == 272 && !in->move_view && !in->resize_view) {
+		/* A press on a notch is the compositor's, not the client's. */
+		struct rei_view *nv;
+		enum rei_notch_part part;
+		if (rei_wm_notch_at(s, s->cursor_x, s->cursor_y, &nv, &part)) {
+			in->notch_press = part;
+			in->notch_view = nv;
+			if (part == REI_NOTCH_HANDLE) {
+				/* Press and hold to drag. A tiled window waits for the pointer
+				 * to move (see update_pointer) before leaving the grid. */
+				in->move_view = nv;
+				in->move_cursor_x = s->cursor_x;
+				in->move_cursor_y = s->cursor_y;
+				in->drag_start_x = s->cursor_x;
+				in->drag_start_y = s->cursor_y;
+				in->move_view_x = nv->x;
+				in->move_view_y = nv->y;
+			}
+			rei_server_schedule_flush(s);
+			return;
+		}
+	}
+
 	if (pressed && in->n_buttons == 1 && !in->move_view && !in->resize_view) {
 		/* First button down: this click decides focus. */
 		struct rei_surface *target = in->pointer_focus;
@@ -404,13 +450,31 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 		}
 	}
 
-	if (in->move_view || in->resize_view) {
-		/* The move or resize owns the pointer; the client sees no buttons. */
+	if (in->move_view || in->resize_view || in->notch_press != REI_NOTCH_NONE) {
+		/* A move, resize or notch click owns the pointer; the client sees no buttons. */
 		if (in->n_buttons == 0) {
-			if (in->move_view)
-				rei_wm_float_settle(in->move_view);  /* May now belong to another output. */
+			/* End the grab FIRST. What follows (dropping a window, closing one)
+			 * changes focus, which re-evaluates the pointer and would otherwise
+			 * find a grab still in progress and act on it. */
+			struct rei_view *moved = in->move_view;
+			struct rei_view *clicked = in->notch_view;
+			enum rei_notch_part pressed_part = in->notch_press;
 			in->move_view = NULL;
 			in->resize_view = NULL;
+			in->notch_press = REI_NOTCH_NONE;
+			in->notch_view = NULL;
+
+			if (moved)  /* Drops a lifted window into place, or settles a floating one. */
+				rei_wm_drag_finish(moved, s->cursor_x, s->cursor_y);
+
+			/* A button counts as clicked if it is released while still over it. */
+			if (clicked && pressed_part != REI_NOTCH_NONE && pressed_part != REI_NOTCH_HANDLE) {
+				struct rei_view *nv;
+				enum rei_notch_part part;
+				if (rei_wm_notch_at(s, s->cursor_x, s->cursor_y, &nv, &part) &&
+				    nv == clicked && part == pressed_part)
+					rei_wm_notch_activate(s, nv, part);
+			}
 			update_pointer(in, time_ms, false);  /* Pick whatever is under the cursor now. */
 		}
 		rei_server_schedule_flush(s);
@@ -433,7 +497,7 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 void rei_input_pointer_axis(struct rei_server *s, uint32_t time_ms, bool horizontal, double value)
 {
 	struct rei_input *in = s->input;
-	if (!in || in->move_view || in->resize_view)
+	if (!in || in->move_view || in->resize_view || in->notch_press != REI_NOTCH_NONE)
 		return;
 	struct rei_surface *to = in->grab_surface ? in->grab_surface : in->pointer_focus;
 	if (!to)

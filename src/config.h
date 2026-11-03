@@ -44,6 +44,9 @@ struct rei_config {
 	struct rei_binding_config *bindings;
 	size_t n_bindings;
 
+	/* [decoration] */
+	int32_t notch_height;  /* Pixels; 0 turns the window notches off. */
+
 	/* [wallpaper] */
 	char *wallpaper_path;     /* NULL: no image, just the background colour. */
 	char *wallpaper_mode;     /* "fill", "fit", "stretch", "center" or "tile". */

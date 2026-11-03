@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <wayland-server-protocol.h>
 
+#include "desktop.h"
 #include "input/input.h"
 #include "input/xkb.h"
 #include "proto/data_device.h"
@@ -76,6 +77,23 @@ static void seat_get_pointer(struct wl_client *client, struct wl_resource *seat_
 	struct rei_seat *seat = wl_resource_get_user_data(seat_res);
 	wl_resource_set_implementation(r, &pointer_impl, seat, device_resource_destroy);
 	wl_list_insert(&seat->pointers, wl_resource_get_link(r));
+
+	/* A client that binds its pointer while the pointer is already over its
+	 * window still needs the enter event, or it would never see the pointer
+	 * until it crossed a boundary. */
+	struct rei_server *server = seat->server;
+	struct rei_surface *focus = server->input ? server->input->pointer_focus : NULL;
+	if (focus && wl_resource_get_client(focus->resource) == client) {
+		struct rei_surface *hit = NULL;
+		double sx = 0, sy = 0;
+		if (rei_wm_pick(server, server->cursor_x, server->cursor_y, &hit, &sx, &sy) && hit == focus) {
+			uint32_t serial = wl_display_next_serial(server->display);
+			wl_pointer_send_enter(r, serial, focus->resource,
+					      wl_fixed_from_double(sx), wl_fixed_from_double(sy));
+			if (wl_resource_get_version(r) >= WL_POINTER_FRAME_SINCE_VERSION)
+				wl_pointer_send_frame(r);
+		}
+	}
 }
 
 static void seat_get_keyboard(struct wl_client *client, struct wl_resource *seat_res, uint32_t id)

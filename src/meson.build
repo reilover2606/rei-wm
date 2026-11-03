@@ -2,6 +2,7 @@ core_sources = files(
   'config.c',
   'config_default.c',
   'cursor.c',
+  'decoration.c',
   'layout.c',
   'desktop.c',
   'output.c',

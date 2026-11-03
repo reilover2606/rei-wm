@@ -213,6 +213,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->kb_layout = rei_xstrdup("");
 	cfg->kb_variant = rei_xstrdup("");
 	cfg->kb_options = rei_xstrdup("");
+	cfg->notch_height = 22;
 	cfg->repeat_rate = 25;
 	cfg->repeat_delay = 600;
 	cfg->wallpaper_mode = rei_xstrdup("fill");
@@ -299,6 +300,10 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 			cfg->n_bindings++;
 		}
 	}
+
+	const struct toml_table *deco = get_table(&r, root, "decoration");
+	if (deco)
+		read_int(&r, deco, "decoration.", "notch_height", &cfg->notch_height, 0, 64);
 
 	const struct toml_table *wp = get_table(&r, root, "wallpaper");
 	if (wp) {

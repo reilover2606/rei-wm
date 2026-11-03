@@ -31,6 +31,10 @@
 #include "check.h"
 #include "xdg-shell-client-protocol.h"
 
+/* evdev codes the shared helpers need (tests define their own others). */
+#define KEY_SHIFT 42
+#define KEY_SUPER 125
+
 #define OUT_W 800
 #define OUT_H 600
 
@@ -172,18 +176,38 @@ struct ppm {
 	uint8_t *rgb;
 };
 
-/* A screenshot of the named output (the compositor writes one per output). */
+static int log_count(const char *needle)
+{
+	char *log = slurp(g_log);
+	int n = 0;
+	for (const char *p = log; log && (p = strstr(p, needle)); p += strlen(needle))
+		n++;
+	free(log);
+	return n;
+}
+
+/* How many outputs the compositor has: one SIGUSR2 writes a screenshot for each
+ * of them. Tests with more than one output set this. */
+static int g_n_outputs = 1;
+
+/* A screenshot of the named output. */
 static struct ppm screenshot_output(const char *name)
 {
 	char path[256];
 	snprintf(path, sizeof path, "%s/rei-wm-%s.ppm", g_dir, name);
+
+	/* One request makes every output write its picture. Wait for all of them, or
+	 * a slow output's write from this request could land after the next request
+	 * has removed the file, and we would read a stale image. */
+	int before = log_count("screenshot written");
 	unlink(path);
 	CHECK(kill(g_pid, SIGUSR2) == 0);
-	struct stat st;
-	for (int t = 0; stat(path, &st) != 0; t += 20) {
-		CHECK(t < 5000);
-		sleep_ms(20);
+	for (int t = 0; log_count("screenshot written") < before + g_n_outputs; t += 10) {
+		CHECK(t < 8000);
+		sleep_ms(10);
 	}
+	struct stat st;
+	CHECK(stat(path, &st) == 0);
 	FILE *f = fopen(path, "rb");
 	CHECK(f);
 	struct ppm img;
@@ -752,6 +776,118 @@ static bool window_follow(struct client *c, struct window *w)
 	w->buf_h = bh;
 	w->has_buffer = true;
 	return true;
+}
+
+/* ---- multi-window harness: clients that follow configure, keyboard chords ---- */
+
+static struct client *g_clients[4];
+static struct window *g_wins[16];
+static int g_nwins;
+
+static void track(struct client *c, struct window *w)
+{
+	(void)c;
+	CHECK(g_nwins < 16);
+	g_wins[g_nwins++] = w;
+}
+
+static void untrack(struct window *w)
+{
+	for (int i = 0; i < g_nwins; i++) {
+		if (g_wins[i] == w) {
+			g_wins[i] = g_wins[--g_nwins];
+			return;
+		}
+	}
+}
+
+static struct client *owner_of(struct window *w) { return w->c; }
+
+/*
+ * Waits for the compositor to finish reacting to everything so far, and lets
+ * every client answer any new size with a new buffer, until nothing changes.
+ */
+static void settle_all(void)
+{
+	for (int round = 0; round < 8; round++) {
+		input_sync();
+		for (int i = 0; g_clients[i]; i++) {
+			CHECK(wl_display_roundtrip(g_clients[i]->d) >= 0);
+			CHECK(wl_display_roundtrip(g_clients[i]->d) >= 0);
+		}
+		bool changed = false;
+		for (int i = 0; i < g_nwins; i++)
+			changed |= window_follow(owner_of(g_wins[i]), g_wins[i]);
+		if (!changed) {
+			for (int i = 0; g_clients[i]; i++)
+				CHECK(wl_display_roundtrip(g_clients[i]->d) >= 0);
+			return;
+		}
+	}
+	fprintf(stderr, "windows never settled\n");
+	exit(1);
+}
+
+/* Presses modifiers and a key together, as one atomic write. */
+static void chord(int mod1, int mod2, int key)
+{
+	char buf[256];
+	int n = 0;
+	n += snprintf(buf + n, sizeof buf - (size_t)n, "key %d 1\n", mod1);
+	if (mod2)
+		n += snprintf(buf + n, sizeof buf - (size_t)n, "key %d 1\n", mod2);
+	n += snprintf(buf + n, sizeof buf - (size_t)n, "key %d 1\nkey %d 0\n", key, key);
+	if (mod2)
+		n += snprintf(buf + n, sizeof buf - (size_t)n, "key %d 0\n", mod2);
+	snprintf(buf + n, sizeof buf - (size_t)n, "key %d 0\n", mod1);
+	inject_lines(buf);
+}
+static void mod(int key) { chord(KEY_SUPER, 0, key); }
+static void mod_shift(int key) { chord(KEY_SUPER, KEY_SHIFT, key); }
+
+static void open_win(struct client *c, struct window *w, const char *title, uint32_t color)
+{
+	toplevel_create(c, w, title);
+	w->color = color;
+	w->natural_w = 200;
+	w->natural_h = 120;
+	track(c, w);
+	window_follow(c, w);
+	settle_all();
+}
+
+static void close_win(struct window *w)
+{
+	struct client *c = w->c;
+	untrack(w);
+	xdg_toplevel_destroy(w->tl);
+	xdg_surface_destroy(w->xs);
+	wl_surface_destroy(w->surface);
+	CHECK(wl_display_roundtrip(c->d) >= 0);
+	settle_all();
+}
+
+static void park_pointer(void)
+{
+	inject("motion_abs 795 595");
+	settle_all();
+}
+
+static void expect_size(const struct window *w, int cw, int ch, bool tiled, const char *what)
+{
+	if (w->cfg_w != cw || w->cfg_h != ch || w->cfg_tiled != tiled) {
+		fprintf(stderr, "%s: configured %dx%d tiled=%d, expected %dx%d tiled=%d\n", what,
+			w->cfg_w, w->cfg_h, w->cfg_tiled, cw, ch, tiled);
+		exit(1);
+	}
+}
+
+static int active_count(void)
+{
+	int n = 0;
+	for (int i = 0; i < g_nwins; i++)
+		n += g_wins[i]->activated;
+	return n;
 }
 
 #endif

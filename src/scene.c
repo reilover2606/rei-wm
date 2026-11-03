@@ -27,6 +27,7 @@ struct rei_scene_snapshot *rei_scene_build(struct rei_server *s, uint64_t serial
 	/* Each output draws its own workspace's windows. */
 	wl_list_for_each(o, &s->outputs, link)
 		rei_wm_emit_views(s, o, snap);
+	rei_wm_emit_decorations(s, snap);
 	rei_xdg_emit_popups(s, snap);
 
 	const struct rei_cursor_image *cur = rei_cursor_default();

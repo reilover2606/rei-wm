@@ -192,6 +192,60 @@ static void test_move(void)
 	rei_tree_destroy(t);
 }
 
+static void test_separate_gaps(void)
+{
+	/* Side-by-side windows use gap_x, stacked ones use gap_y. */
+	struct rei_tree *t = rei_tree_create(REI_LAYOUT_SPLIT_H);
+	struct rei_node *a = add(t, NULL, 'a');
+	struct rei_node *b = add(t, a, 'b');
+	rei_tree_split(t, b, REI_LAYOUT_SPLIT_V);
+	struct rei_node *c = add(t, b, 'c');   /* a | [b / c] */
+	rei_tree_layout_xy(t, R(0, 0, 210, 150), 10, 30);
+	expect_rect(a, 0, 0, 100, 150);
+	expect_rect(b, 110, 0, 100, 60);       /* (150 - 30) / 2 */
+	expect_rect(c, 110, 90, 100, 60);
+	/* The single-gap form is the same thing with equal gaps. */
+	rei_tree_layout(t, R(0, 0, 210, 150), 10);
+	expect_rect(b, 110, 0, 100, 70);
+	expect_rect(c, 110, 80, 100, 70);
+	rei_tree_destroy(t);
+}
+
+static void test_insert_beside(void)
+{
+	/* Next to a window in a row of the same direction: just beside it. */
+	struct rei_tree *t = rei_tree_create(REI_LAYOUT_SPLIT_H);
+	struct rei_node *a = add(t, NULL, 'a');
+	struct rei_node *b = add(t, a, 'b');
+	struct rei_node *c = rei_tree_insert_beside(t, a, (void *)(intptr_t)'c', REI_DIR_RIGHT);
+	CHECK(c && rei_tree_check(t));
+	expect_order(t, "acb");
+	struct rei_node *d = rei_tree_insert_beside(t, a, (void *)(intptr_t)'d', REI_DIR_LEFT);
+	CHECK(d);
+	expect_order(t, "dacb");
+
+	/* Across the row's direction: the target gets a container, stacked. */
+	struct rei_node *e = rei_tree_insert_beside(t, b, (void *)(intptr_t)'e', REI_DIR_DOWN);
+	CHECK(e && rei_tree_check(t));
+	expect_order(t, "dacbe");
+	rei_tree_layout(t, R(0, 0, 400, 210), 10);
+	CHECK(b->rect.x == e->rect.x && b->rect.w == e->rect.w);   /* same column */
+	CHECK(b->rect.y < e->rect.y);                               /* e below b */
+	struct rei_node *f = rei_tree_insert_beside(t, b, (void *)(intptr_t)'f', REI_DIR_UP);
+	CHECK(f && rei_tree_check(t));
+	expect_order(t, "dacfbe");
+
+	/* A lone window just changes its container's direction. */
+	rei_tree_destroy(t);
+	t = rei_tree_create(REI_LAYOUT_SPLIT_H);
+	a = add(t, NULL, 'a');
+	b = rei_tree_insert_beside(t, a, (void *)(intptr_t)'b', REI_DIR_DOWN);
+	CHECK(b && rei_tree_check(t));
+	rei_tree_layout(t, R(0, 0, 100, 210), 10);
+	CHECK(a->rect.w == 100 && b->rect.w == 100 && a->rect.y < b->rect.y);
+	rei_tree_destroy(t);
+}
+
 static void test_neighbor(void)
 {
 	struct rei_tree *t = rei_tree_create(REI_LAYOUT_SPLIT_H);
@@ -295,6 +349,11 @@ static void test_random(int gap)
 		} else if (op < 7 && count) {
 			rei_tree_split(t, leaves[rnd((unsigned)count)],
 				       rnd(2) ? REI_LAYOUT_SPLIT_H : REI_LAYOUT_SPLIT_V);
+		} else if (op < 8 && count && count < 40) {
+			struct rei_node *target = leaves[rnd((unsigned)count)];
+			leaves[count] = rei_tree_insert_beside(t, target, (void *)(intptr_t)1,
+							       (enum rei_direction)rnd(4));
+			count++;
 		} else if (count) {
 			rei_tree_move(t, leaves[rnd((unsigned)count)], (enum rei_direction)rnd(4));
 		}
@@ -318,6 +377,8 @@ int main(void)
 	test_remove_and_collapse();
 	test_split_semantics();
 	test_move();
+	test_separate_gaps();
+	test_insert_beside();
 	test_neighbor();
 	test_random(0);
 	test_random(10);
