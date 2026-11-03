@@ -19,11 +19,14 @@
 #include "proto/surface.h"
 #include "proto/wl_output.h"
 #include "proto/xdg_shell.h"
+#include "audio.h"
+#include "reload.h"
 #include "render_thread.h"
 #include "scene.h"
 #include "snapshot.h"
 #include "toolbar.h"
 #include "wallpaper.h"
+#include "xwayland.h"
 #include "util/log.h"
 #include "util/util.h"
 
@@ -117,9 +120,9 @@ static void fire_frame_callbacks(struct rei_server *s, const struct rei_output *
 
 		struct rei_rect r;
 		bool fire = true;
-		if (rei_xdg_surface_hidden(rei_surface_root(surf)))
+		if (rei_wm_surface_hidden(rei_surface_root(surf)))
 			continue;  /* On a workspace that isn't showing: clients throttle. */
-		if (rei_xdg_surface_rect(rei_surface_root(surf), &r)) {
+		if (rei_wm_surface_rect(rei_surface_root(surf), &r)) {
 			bool here = rects_intersect(&r, out->x, out->y, ow, oh);
 			bool anywhere = here;
 			const struct rei_output *o;
@@ -258,6 +261,24 @@ static void refresh_wallpaper(struct rei_server *s, struct rei_output *o)
 	o->wallpaper = rei_wallpaper_render(s->wallpaper_image,
 					    (enum rei_wallpaper_mode)s->wallpaper_mode,
 					    s->config->background_rgb, o->width, o->height);
+}
+
+void rei_server_reload_look(struct rei_server *s)
+{
+	const struct rei_config *config = s->config;
+	rei_image_free(s->wallpaper_image);
+	s->wallpaper_image = NULL;
+	s->wallpaper_mode = rei_wallpaper_parse_mode(config->wallpaper_mode);
+	if (config->wallpaper_path) {
+		char err[256];
+		s->wallpaper_image = rei_image_load(config->wallpaper_path, err, sizeof err);
+		if (!s->wallpaper_image)
+			rei_warn("wallpaper not loaded: %s", err);
+	}
+	struct rei_output *o;
+	wl_list_for_each(o, &s->outputs, link)
+		refresh_wallpaper(s, o);
+	rei_server_schedule_damage(s);
 }
 
 /*
@@ -486,7 +507,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	s->display = wl_display_create();
 	if (s->display) {
 		wl_display_add_client_created_listener(s->display, &client_created_listener);
-		wl_display_add_protocol_logger(s->display, protocol_logger, s);
+		s->protocol_logger = wl_display_add_protocol_logger(s->display, protocol_logger, s);
 	}
 	if (!s->display) {
 		rei_error("cannot create wl_display");
@@ -568,6 +589,10 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 		goto fail;
 	}
 
+	rei_xwayland_start(s);
+	rei_reload_start(s);
+	rei_audio_start(s);
+
 	rei_info("rei-wm listening on WAYLAND_DISPLAY=%s (backend: %s)",
 		 s->socket_name, s->backend->impl->name);
 	return s;
@@ -622,7 +647,13 @@ void rei_server_destroy(struct rei_server *s)
 		wl_display_destroy_clients(s->display);
 	if (s->display)
 		rei_wl_output_finish(s);
+	rei_audio_stop(s);
+	rei_reload_stop(s);
+	rei_xwayland_stop(s);
 	rei_linux_dmabuf_finish(s);
+	if (s->protocol_logger)
+		wl_protocol_logger_destroy(s->protocol_logger);
+	s->protocol_logger = NULL;
 
 	if (s->inbox.wake)
 		rei_msgq_finish(&s->inbox);

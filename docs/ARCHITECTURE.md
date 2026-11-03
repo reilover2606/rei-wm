@@ -293,6 +293,26 @@ its objects in id order, so a parent object can die before the role object that
 refers to it. Every cross-object pointer is therefore either guarded by a
 destroy listener or cleared by the object that dies first.
 
+## Xwayland (`src/xwayland.c`, `src/proto/xwayland_shell.c`)
+
+rei-wm starts Xwayland itself (`-rootless`, with `-listenfd` sockets it created, so it owns
+the `:N` display) and acts as its window manager over a libxcb connection that Xwayland hands
+it (`-wm`). Notes from getting it to work:
+
+- Xwayland does not accept X11 clients until the window manager has claimed the `WM_S0`
+  selection (and redirected the root's subwindows with Composite); until then clients hang
+  silently in connect. Composite's one request is sent by hand to avoid libxcb-composite.
+- A managed X11 window (`MapRequest`) is shown once three things are true: it is mapped on the
+  X side, its `wl_surface` has been matched to it, and that surface has content. The match uses
+  `xwayland_shell_v1`: the surface gets a serial, the X window sends the same serial in a
+  `WL_SURFACE_SERIAL` client message. Only the Xwayland client may bind that global.
+- `rei_view` has either an `xdg` toplevel or an `xwin`; `desktop.c` dispatches through small
+  `view_*` helpers, so X11 windows tile, float, go fullscreen and get notches like native ones.
+- X11 coordinates are the global layout coordinates, 1:1 (no scaling for X11 windows).
+- Override-redirect windows (menus, tooltips) are not managed: drawn where X11 put them, above
+  all windows, and hit-tested before windows.
+- Programs launched by keybindings get `DISPLAY` for it. `[general] xwayland = false` turns it off.
+
 ## Known gaps and placeholders
 
 These are deliberate and tracked by later milestones:
@@ -320,6 +340,9 @@ These are deliberate and tracked by later milestones:
   redraws the whole output; damage tracking is future work.
 - **The toolbar is workspaces and a clock.** No other modules (volume, battery, tray) yet and
   no urgency highlighting; its colours and font are configurable but there are no themes.
+- **Xwayland**: no X11 clipboard/selection bridging beyond what Xwayland does itself via
+  `wl_data_device` (untested), no HiDPI scaling for X11 windows, no restart if Xwayland dies,
+  and `_NET_WM_STATE` is only handled for fullscreen.
 - **No server-side decorations** (`xdg-decoration`), `viewporter`
   or fractional scale yet. `linux-dmabuf` exists only on the DRM backend.
 
@@ -337,6 +360,61 @@ ignored. The parsed document is retained in `rei_config.root` so later
 subsystems (keybindings, toolbar, wallpaper) read their own sections without
 changing the core loader. All keybindings will be configurable there.
 
+## Config hot reload (`src/reload.c`)
+
+An inotify watch on the config file's *directory* (so a save-by-rename is seen) plus `SIGHUP`
+trigger a reload after a 150 ms settle. A reload parses the whole new file, builds everything
+that can fail (keybindings, and the keymap if the layout changed) and only then commits, so an
+invalid file changes nothing. Most code reads `server->config` on every use, so swapping the
+pointer is enough; superseded configs are kept until exit because a few places may briefly hold
+a string from one. Things that cache are refreshed explicitly: bindings and keymap (resent to
+clients with the repeat rate), the wallpaper, libinput device settings (through the backend's
+`config_changed` hook), and the window layout (`rei_wm_arrange_all`). `[[output]]` and the backend
+choice need a restart, and the log says so.
+
+## The application tray and minimize (`src/tray.c`, `src/icons.c`, `src/desktop.c`)
+
+`rei_tray_collect` groups the mapped windows of an output's workspaces by app id (an X11 window's
+WM_CLASS; a title stands in when there is none), in order of first appearance. The groups become part
+of `rei_bar_state`, so the bar redraws only when a title, count, focus or minimized state changes. The
+tile layout (`rei_bar_tray_layout`) is pure and shared by the renderer and by hit-testing: tiles are
+centred on the bar between the workspace buttons and the volume/clock, names shrink before tiles are
+dropped, and a stack is drawn as up to four tiles peeking out 4 px each. A click on a one-window tile
+focuses, restores or (if focused) minimizes it; on a stack it opens a compositor-drawn list
+(`rei_tray_menu_*`) that takes the next press, closes on Escape, and is rendered like the bar.
+
+Minimizing keeps a window in its workspace's focus list (so the workspace does not vanish) but takes it
+out of the tiling tree and every draw, pick and navigation path (`SHOWN()` in `desktop.c`). A tiled
+window records its nearest sibling leaf and the side, and `rei_tree_insert_beside` puts it back there;
+if that tile is gone it goes next to the focused window as usual. A floating window just keeps its
+`float_rect`. `Mod+m`, the notch button and a client's `xdg_toplevel.set_minimized` all minimize.
+Icons: desktop entries are indexed lazily by file name, `StartupWMClass` and the program in `Exec=`;
+`Icon=` is looked up in themes as PNG (stb_image), else a hashed-colour letter tile.
+
+## Audio (`src/audio.c`)
+
+rei-wm is a native PipeWire client (libpipewire, driven from the libevent loop by watching the
+PipeWire loop's fd). It follows the default audio sink: the `default` metadata object that
+WirePlumber maintains names it (`default.audio.sink`); without one it uses the highest-priority
+`Audio/Sink`. It subscribes to the sink node's `Props` for `channelVolumes` and `mute`, and writes
+the same two properties to change them. Volume is on the perceptual (cubic) scale that wpctl and
+pavucontrol use, so 50% is a linear gain of 0.125; raising the volume un-mutes. The toolbar's
+volume text sits just before the clock (its rectangle is computed by the same Pango layout code
+that draws it, so click and wheel hit-testing cannot drift): a click toggles mute, the wheel
+changes the volume. `volume_up`, `volume_down [percent]` and `volume_mute` are keybinding actions,
+bound to the XF86Audio keys by default. If PipeWire is not running the widget is hidden and
+rei-wm retries every 5 seconds. Without libpipewire at build time, `audio_stub.c` makes all of it
+inert. Screen capture through PipeWire is not implemented yet.
+
+## Settings app (`settings/`)
+
+Qt 6 Widgets. `TomlDoc` keeps the file as lines and edits values in place, so comments survive;
+it understands only the TOML subset the config uses. Each simple option is a widget bound to
+`[section] key`; only fields the user changed are written, and `[[output]]` blocks are rewritten
+only if the monitors table changed. Before saving, the candidate file is checked by running
+`rei-wm --check-config`, so the app can never write something the compositor would refuse. A
+missing config is started from `rei-wm --print-default-config`.
+
 ## Roadmap
 
 | # | milestone | state |
@@ -350,9 +428,9 @@ changing the core loader. All keybindings will be configurable there.
 | 6 | window notches: close/min/max (right), drag handle (left) | done |
 | 7 | toolbar (any edge): workspaces at the start, clock at the end | done |
 | 8 | DRM/KMS backend, libseat + libinput, dmabuf, direct scanout, hardware cursor | written; awaiting hardware testing |
-| 9 | Xwayland window manager, cursor override | |
-| 10 | Qt settings application, config hot reload | |
-| 11 | PipeWire volume widget and media keys | |
+| 9 | Xwayland window manager | done |
+| 10 | Qt settings application, config hot reload | done |
+| 11 | PipeWire volume widget and media keys | done (screencast: later) |
 
 ## Testing
 
@@ -377,6 +455,14 @@ changing the core loader. All keybindings will be configurable there.
   output;
 - `drm_logic`: the DRM backend's pure decisions (see above); `*-vsync`: the render, input, wm, notch and
   bar tests again with `REI_HEADLESS_VSYNC=1`, exercising the vsync-driven frame path;
+- `reload`: config hot reload end to end (gaps, keybindings, toolbar, an invalid file, SIGHUP);
+  `settings-tomldoc` and `settings-window`: the settings app's in-place TOML editor and its window,
+  driven offscreen against the real `rei-wm --check-config`;
+- `audio`: against a real PipeWire daemon the test starts itself, with a null sink: the media keys
+  change volume and mute, raising un-mutes, the volume stops at `max_volume`, and the toolbar redraws;
+- `tray`: tiles per application and a stack for several windows, click to focus/hide/restore, the window
+  list and Escape, minimize from the keyboard, a restored tile returning to its slot in the grid and a floating
+  window to its position; `icons`: desktop-entry and icon-theme lookup; the tray layout is covered in `toolbar`;
 - `decoration`: notch geometry, hit-testing, hover/scale variants and artwork pixels;
 - `notch`: the notches end to end (focus-only, no resizing, hover, click and cancel,
   handle drag, the pull-back rule, drag-and-drop into a slot with the drop hint,

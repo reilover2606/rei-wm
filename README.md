@@ -3,7 +3,7 @@
 A Wayland compositor, tiling/floating window manager and small desktop
 environment, written in C11. MIT licensed.
 
-**Status: early development.** Milestones 0–8 are done (the DRM/KMS backend
+**Status: early development.** Milestones 0–11 are done (the DRM/KMS backend
 is written but still untested on real hardware: see [docs/DRM.md](docs/DRM.md)): the build, config,
 event loop and threading model, the core Wayland protocols, an OpenGL ES
 renderer, keyboard/pointer input with a configurable keybinding engine, the
@@ -12,8 +12,9 @@ fullscreen, per-output workspaces), the window notches (a drag handle and
 minimize/maximize/close tabs on the focused window), and a built-in toolbar with
 workspace buttons and a clock. Real applications can connect, be tiled, and be
 driven from the keyboard or mouse. On real hardware it drives displays through
-DRM/KMS with libinput, dma-buf clients, direct scanout and a hardware cursor. The
-Qt settings app, Xwayland and PipeWire are still to come: see the roadmap in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+DRM/KMS with libinput, dma-buf clients, direct scanout and a hardware cursor. X11 programs run through Xwayland, tiled and floated like native windows. The config
+reloads live, and a Qt settings app edits it. The toolbar shows the PipeWire volume (click to mute, wheel to change) and the media keys
+work. Screen capture through PipeWire is still to come: see the roadmap in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ![Two unmodified Weston demo clients tiled by rei-wm under the toolbar](docs/images/milestone-7-toolbar.png)
 
@@ -29,8 +30,14 @@ Dependencies (Debian/Ubuntu package names):
 ```
 meson ninja-build pkg-config libwayland-dev wayland-protocols libevent-dev
 libegl-dev libgles-dev libxkbcommon-dev xkb-data
-libcairo2-dev libpango1.0-dev fontconfig
+libcairo2-dev libpango1.0-dev fontconfig libxcb1-dev
 ```
+
+For the volume widget and media keys (optional): `libpipewire-0.3-dev`.
+
+For the settings app (optional): Qt 6 (`qt6-base-dev`).
+
+For X11 programs, install `xwayland` (the binary is found at run time).
 
 For the DRM backend (optional): `libdrm-dev libgbm-dev libseat-dev libinput-dev
 libudev-dev`.
@@ -45,6 +52,33 @@ Mesa (or other) GLES driver but no display server; software rendering
 meson setup build
 ninja -C build
 meson test -C build
+```
+
+## The toolbar's application tray
+
+The middle of the toolbar lists every open window, one tile per application (icon and name, or just
+the icon: `[toolbar] tray = "icon_and_name" | "icon" | "off"`). Several windows of one application
+show as a stack of tiles; clicking it opens a list to pick from. A single window's tile focuses the
+window, and hides it again if it already has the focus. Hide windows with the notch's minimize
+button or `Mod+m`; a restored window goes back to the same place in the tiling grid (next to the same
+neighbour) or, if floating, to the same position. Only what is running is shown: nothing is pinned.
+Icons come from your desktop entries and icon theme (PNG; SVG-only themes are not read), with a
+coloured letter tile when none is found. The clock format is `[toolbar] clock_format` (any
+`strftime` string; default `%H:%M:%S`).
+
+## Settings
+
+`rei-settings` is a Qt app for everything in `~/.config/rei-wm/config.toml`: input, windows and
+gaps, the toolbar, wallpaper, keybindings and monitors. It edits the file in place (your
+comments and layout survive; only the values you change move), checks the result with
+`rei-wm --check-config`, and saves atomically. A running rei-wm watches the file and applies
+most changes at once (gaps, notch, toolbar, wallpaper, keybindings, keyboard layout, repeat
+rate, touchpad settings); `[[output]]` and the backend need a restart. The compositor also
+reloads on `SIGHUP`, and keeps the old settings (logging why) if the new file is invalid.
+
+```bash
+./build/settings/rei-settings                 # edits ~/.config/rei-wm/config.toml
+./build/settings/rei-settings --config my.toml
 ```
 
 ## Running

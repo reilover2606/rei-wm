@@ -31,6 +31,7 @@ struct rei_config {
 	char *backend;          /* "auto", "headless", "nested" or "drm". */
 	char *composition_key;  /* "super", "alt", "ctrl" or "shift". */
 
+	bool xwayland;             /* Run Xwayland so X11 programs work. */
 	bool focus_follows_mouse;  /* Moving the pointer onto a window focuses it. */
 
 	/* [layout] */
@@ -52,10 +53,16 @@ struct rei_config {
 	struct rei_binding_config *bindings;
 	size_t n_bindings;
 
+	/* [audio] */
+	bool audio_enabled;
+	int32_t volume_step;  /* Percent per key press or wheel notch. */
+	int32_t max_volume;   /* Percent. */
+
 	/* [toolbar] */
 	bool toolbar_enabled;
 	enum rei_bar_position toolbar_position;
 	int32_t toolbar_thickness;   /* Pixels. */
+	enum rei_tray_mode toolbar_tray;  /* The application tray in the middle of the bar. */
 	char *toolbar_font;          /* Pango font description. */
 	char *toolbar_clock_format;  /* strftime; empty means no clock. */
 	uint32_t toolbar_background, toolbar_foreground, toolbar_highlight;  /* 0xRRGGBB */

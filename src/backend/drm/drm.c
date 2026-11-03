@@ -1401,11 +1401,19 @@ static void drm_destroy(struct rei_backend *b)
 	free(be);
 }
 
+static void drm_config_changed(struct rei_backend *b)
+{
+	struct drm_backend *be = (struct drm_backend *)b;
+	if (be->libinput)
+		rei_libinput_reconfigure(be->libinput);
+}
+
 static const struct rei_backend_impl drm_impl = {
 	.name = "drm",
 	.start = drm_start,
 	.destroy = drm_destroy,
 	.cursor_moved = drm_cursor_moved,
+	.config_changed = drm_config_changed,
 	.switch_vt = drm_switch_vt,
 };
 

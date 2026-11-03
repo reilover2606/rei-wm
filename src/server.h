@@ -19,6 +19,10 @@ struct rei_backend;
 struct rei_seat;
 struct rei_input;
 struct rei_image;
+struct rei_xwayland;
+struct rei_audio;
+struct rei_tray_menu;
+struct wl_protocol_logger;
 
 /*
  * The compositor core. Everything here lives on the event thread: the
@@ -75,6 +79,20 @@ struct rei_server {
 	struct rei_seat *seat;
 	struct rei_input *input;
 
+	/* Xwayland (src/xwayland.c). */
+	struct wl_protocol_logger *protocol_logger;
+	struct rei_xwayland *xwayland;
+	struct rei_audio *audio;
+	struct rei_tray_menu *tray_menu;
+
+	/* Config hot reload (src/reload.c). Superseded configs are kept until exit, since
+	 * a few places may still hold a string from one for a moment. */
+	struct rei_config **old_configs;
+	size_t n_old_configs;
+	int inotify_fd;
+	struct event *inotify_event, *reload_timer, *sighup_event;
+	struct wl_client *xwayland_client;  /* The only client allowed xwayland_shell_v1. */
+
 	/* Look. */
 	struct rei_image *wallpaper_image;
 	int wallpaper_mode;
@@ -127,6 +145,9 @@ void rei_server_flush_damage(struct rei_server *server);
  * $REI_SCREENSHOT_DIR (default: $XDG_RUNTIME_DIR). A debugging and testing
  * aid, also triggered by SIGUSR2. */
 void rei_server_screenshot(struct rei_server *server);
+
+/* Re-reads the wallpaper image and background colour from the config in effect. */
+void rei_server_reload_look(struct rei_server *server);
 
 struct rei_output *rei_server_add_output(struct rei_server *server,
 					 const struct rei_output_params *params);

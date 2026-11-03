@@ -23,6 +23,7 @@ static void usage(FILE *out)
 "  -s, --socket NAME    Wayland socket name (default: first free wayland-N)\n"
 "  -v, --verbose        debug logging (same as REI_LOG=debug)\n"
 "      --check-config   validate the config and exit\n"
+"      --print-default-config  write the default config file text to stdout\n"
 "      --drm-info       list the displays, modes and planes the DRM backend would see\n"
 "  -h, --help           show this help\n"
 "  -V, --version        show the version\n"
@@ -41,6 +42,7 @@ int main(int argc, char **argv)
 		{ "verbose", no_argument, NULL, 'v' },
 		{ "check-config", no_argument, NULL, 1000 },
 		{ "drm-info", no_argument, NULL, 1001 },
+		{ "print-default-config", no_argument, NULL, 1002 },
 		{ "help", no_argument, NULL, 'h' },
 		{ "version", no_argument, NULL, 'V' },
 		{ 0 },
@@ -75,6 +77,7 @@ int main(int argc, char **argv)
 		case 's': opts.socket_name = optarg; break;
 		case 'v': verbose = true; break;
 		case 1000: check_only = true; break;
+		case 1002: fputs(rei_config_default_text(), stdout); return 0;
 		case 1001:
 #ifdef REI_HAVE_DRM
 			return rei_drm_print_info();

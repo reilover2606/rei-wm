@@ -38,12 +38,16 @@ enum rei_action_type {
 	REI_ACTION_FULLSCREEN,
 	REI_ACTION_WORKSPACE,        /* workspace N */
 	REI_ACTION_MOVE_TO_WORKSPACE,  /* move_to_workspace N */
+	REI_ACTION_MINIMIZE,         /* minimize the focused window into the tray */
+	REI_ACTION_VOLUME_UP,        /* volume_up [percent] */
+	REI_ACTION_VOLUME_DOWN,      /* volume_down [percent] */
+	REI_ACTION_VOLUME_MUTE,      /* volume_mute: toggles */
 };
 
 struct rei_action {
 	enum rei_action_type type;
 	char *arg;  /* Command line for exec; NULL otherwise. */
-	int value;  /* A rei_direction, a rei_layout, or a workspace number. */
+	int value;  /* A rei_direction, a rei_layout, a workspace number, or a volume step (0: the configured one). */
 };
 
 /* The modifier bit the config's composition key ("super", "alt", ...) stands for. */

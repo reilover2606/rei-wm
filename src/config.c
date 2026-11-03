@@ -248,8 +248,9 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_enabled = true;
 	cfg->toolbar_position = REI_BAR_TOP;
 	cfg->toolbar_thickness = 28;
+	cfg->toolbar_tray = REI_TRAY_ICONS_NAMES;
 	cfg->toolbar_font = rei_xstrdup("Sans 11");
-	cfg->toolbar_clock_format = rei_xstrdup("%H:%M");
+	cfg->toolbar_clock_format = rei_xstrdup("%H:%M:%S");
 	cfg->toolbar_background = 0x161c26;
 	cfg->toolbar_foreground = 0xd6dde8;
 	cfg->toolbar_highlight = 0x3c6ebe;
@@ -257,6 +258,10 @@ struct rei_config *rei_config_defaults(void)
 	cfg->repeat_rate = 25;
 	cfg->repeat_delay = 600;
 	cfg->tap_to_click = true;
+	cfg->xwayland = true;
+	cfg->audio_enabled = true;
+	cfg->volume_step = 5;
+	cfg->max_volume = 100;
 	cfg->wallpaper_mode = rei_xstrdup("fill");
 	cfg->background_rgb = 0x1b2733;
 	cfg->root = toml_parse("", NULL, 0);
@@ -285,6 +290,9 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		read_choice(&r, general, "general.", "backend", &cfg->backend, backends);
 		read_choice(&r, general, "general.", "composition_key",
 			    &cfg->composition_key, mod_keys);
+		const struct toml_value *xw = get(&r, general, "general.", "xwayland", TOML_BOOL);
+		if (xw)
+			cfg->xwayland = xw->u.b;
 		const struct toml_value *ffm = get(&r, general, "general.", "focus_follows_mouse", TOML_BOOL);
 		if (ffm)
 			cfg->focus_follows_mouse = ffm->u.b;
@@ -352,6 +360,15 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		}
 	}
 
+	const struct toml_table *audio = get_table(&r, root, "audio");
+	if (audio) {
+		const struct toml_value *en = get(&r, audio, "audio.", "enabled", TOML_BOOL);
+		if (en)
+			cfg->audio_enabled = en->u.b;
+		read_int(&r, audio, "audio.", "volume_step", &cfg->volume_step, 1, 100);
+		read_int(&r, audio, "audio.", "max_volume", &cfg->max_volume, 10, 150);
+	}
+
 	const struct toml_table *tb = get_table(&r, root, "toolbar");
 	if (tb) {
 		static const char *const positions[] = { "top", "bottom", "left", "right", NULL };
@@ -366,6 +383,14 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		}
 		free(pos);
 		read_int(&r, tb, "toolbar.", "thickness", &cfg->toolbar_thickness, 16, 96);
+		static const char *const trays[] = { "off", "icon", "icon_and_name", NULL };
+		char *tray = rei_xstrdup("icon_and_name");
+		read_choice(&r, tb, "toolbar.", "tray", &tray, trays);
+		for (int i = 0; trays[i]; i++) {
+			if (strcmp(tray, trays[i]) == 0)
+				cfg->toolbar_tray = (enum rei_tray_mode)i;
+		}
+		free(tray);
 		read_string(&r, tb, "toolbar.", "font", &cfg->toolbar_font);
 		read_string(&r, tb, "toolbar.", "clock_format", &cfg->toolbar_clock_format);
 		read_color(&r, tb, "toolbar.", "background", &cfg->toolbar_background);

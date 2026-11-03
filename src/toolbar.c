@@ -8,7 +8,10 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include "audio.h"
 #include "desktop.h"
+#include "icons.h"
+#include "tray.h"
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
@@ -84,6 +87,26 @@ static void build_state(struct rei_server *s, struct rei_output *o, struct rei_b
 	}
 	snprintf(st->clock, sizeof st->clock, "%s", s->clock_text);
 	snprintf(st->font, sizeof st->font, "%s", cfg->toolbar_font);
+	struct rei_audio_state audio = rei_audio_state(s);
+	rei_audio_label(&audio, st->volume, sizeof st->volume);
+	/* A narrow vertical bar has no room for the word. */
+	if (audio.muted && rei_bar_vertical(st->position))
+		snprintf(st->volume, sizeof st->volume, "mute");
+	st->volume_muted = audio.muted;
+	st->tray_mode = cfg->toolbar_tray;
+	if (st->tray_mode != REI_TRAY_OFF) {
+		struct rei_tray_group groups[REI_TRAY_MAX_GROUPS];
+		size_t n = rei_tray_collect(s, o, groups, REI_TRAY_MAX_GROUPS);
+		for (size_t i = 0; i < n && i < REI_BAR_MAX_TRAY; i++) {
+			struct rei_bar_tray_item *it = &st->tray[st->n_tray++];
+			snprintf(it->label, sizeof it->label, "%s", groups[i].label);
+			it->count = groups[i].count;
+			it->active = groups[i].active;
+			it->minimized = groups[i].minimized;
+			const char *title = groups[i].n_views ? rei_view_title(groups[i].views[0]) : "";
+			it->icon = rei_icon_for_app(groups[i].app_id, title);
+		}
+	}
 	st->background = cfg->toolbar_background;
 	st->foreground = cfg->toolbar_foreground;
 	st->highlight = cfg->toolbar_highlight;
@@ -106,6 +129,18 @@ void rei_toolbar_emit(struct rei_server *s, struct rei_output *o, struct rei_sce
 		rei_pixbuf_unref(o->bar->pixbuf);
 		o->bar->pixbuf = pb;
 		o->bar->state = st;
+		if (st.n_tray) {  /* Where the tiles are: read by the tests, handy when debugging. */
+			struct rei_rect rects[REI_BAR_MAX_TRAY];
+			size_t n = rei_bar_tray_layout(&st, rects);
+			char line[1024];
+			size_t used = (size_t)snprintf(line, sizeof line, "tray %s:", o->name);
+			for (size_t i = 0; i < n && used < sizeof line - 160; i++)
+				used += (size_t)snprintf(line + used, sizeof line - used, " [%d %d,%d %dx%d count=%d active=%d min=%d '%s']",
+							 (int)i, bar_rect(s, o).x + rects[i].x,
+							 bar_rect(s, o).y + rects[i].y, rects[i].w, rects[i].h,
+							 st.tray[i].count, st.tray[i].active, st.tray[i].minimized, st.tray[i].label);
+			rei_debug("%s", line);
+		}
 	}
 
 	struct rei_rect r = bar_rect(s, o);
@@ -150,6 +185,92 @@ bool rei_toolbar_hit(struct rei_server *s, double x, double y, struct rei_output
 		return true;
 	}
 	return false;
+}
+
+bool rei_toolbar_volume_at(struct rei_server *s, double x, double y)
+{
+	if (!bar_enabled(s))
+		return false;
+	struct rei_output *o;
+	wl_list_for_each(o, &s->outputs, link) {
+		if (o->workspace && o->workspace->fullscreen)
+			continue;
+		struct rei_rect r = bar_rect(s, o);
+		if (x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h)
+			continue;
+		struct rei_bar_state st;
+		build_state(s, o, &st);
+		struct rei_rect v;
+		if (!rei_bar_volume_rect(&st, &v))
+			return false;
+		double lx = x - r.x, ly = y - r.y;
+		return lx >= v.x && ly >= v.y && lx < v.x + v.w && ly < v.y + v.h;
+	}
+	return false;
+}
+
+bool rei_toolbar_tray_at(struct rei_server *s, double x, double y, struct rei_output **out, int *index)
+{
+	if (!bar_enabled(s) || s->config->toolbar_tray == REI_TRAY_OFF)
+		return false;
+	struct rei_output *o;
+	wl_list_for_each(o, &s->outputs, link) {
+		if (o->workspace && o->workspace->fullscreen)
+			continue;
+		struct rei_rect r = bar_rect(s, o);
+		if (x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h)
+			continue;
+		struct rei_bar_state st;
+		build_state(s, o, &st);
+		struct rei_rect rects[REI_BAR_MAX_TRAY];
+		size_t n = rei_bar_tray_layout(&st, rects);
+		double lx = x - r.x, ly = y - r.y;
+		for (size_t i = 0; i < n; i++) {
+			if (lx >= rects[i].x && ly >= rects[i].y && lx < rects[i].x + rects[i].w &&
+			    ly < rects[i].y + rects[i].h) {
+				*out = o;
+				*index = (int)i;
+				return true;
+			}
+		}
+		return false;
+	}
+	return false;
+}
+
+void rei_toolbar_tray_click(struct rei_server *s, struct rei_output *o, int index)
+{
+	struct rei_tray_group groups[REI_TRAY_MAX_GROUPS];
+	size_t n = rei_tray_collect(s, o, groups, REI_TRAY_MAX_GROUPS);
+	if (index < 0 || (size_t)index >= n)
+		return;
+	struct rei_tray_group *g = &groups[index];
+
+	if (g->count == 1 && g->n_views == 1) {
+		rei_tray_menu_close(s);
+		struct rei_view *v = g->views[0];
+		/* Like other desktops: the focused window's tile hides it; any other tile brings it. */
+		if (!v->minimized && g->active && rei_view_visible(v))
+			rei_wm_minimize_view(v);
+		else
+			rei_wm_activate_view(v);
+		return;
+	}
+
+	if (rei_tray_menu_is_for(s, g->app_id)) {
+		rei_tray_menu_close(s);
+		return;
+	}
+	/* The list opens beside this tile. */
+	struct rei_bar_state st;
+	build_state(s, o, &st);
+	struct rei_rect rects[REI_BAR_MAX_TRAY];
+	size_t nr = rei_bar_tray_layout(&st, rects);
+	if ((size_t)index >= nr)
+		return;
+	struct rei_rect bar = bar_rect(s, o);
+	struct rei_rect tile = { bar.x + rects[index].x, bar.y + rects[index].y, rects[index].w, rects[index].h };
+	rei_tray_menu_open(s, o, g, bar, s->config->toolbar_position, tile);
 }
 
 void rei_toolbar_set_hover(struct rei_server *s, struct rei_output *o, int workspace)
@@ -251,5 +372,6 @@ void rei_toolbar_finish(struct rei_server *s)
 		event_free(s->clock_event);
 		s->clock_event = NULL;
 	}
+	rei_tray_finish(s);
 	rei_bar_render_cleanup();
 }

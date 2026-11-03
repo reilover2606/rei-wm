@@ -1,4 +1,5 @@
 #include "desktop.h"
+#include "xwayland.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -6,6 +7,7 @@
 #include "input/input.h"
 #include "proto/xdg_shell.h"
 #include "toolbar.h"
+#include "tray.h"
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
@@ -42,14 +44,52 @@ static struct rei_rect inset(struct rei_rect r, int d)
 	return r;
 }
 
+/* ---- A window is either an xdg toplevel or an X11 window ---- */
+
+/* A window that is on screen if its workspace is: mapped and not minimized. */
+#define SHOWN(v) ((v)->mapped && !(v)->minimized)
+
+static struct rei_rect view_geometry(const struct rei_view *v)
+{
+	return v->xwin ? rei_xwindow_geometry(v->xwin) : rei_xdg_toplevel_geometry(v->toplevel);
+}
+
+static struct rei_surface *view_surface(const struct rei_view *v)
+{
+	return v->xwin ? rei_xwindow_surface(v->xwin) : rei_xdg_toplevel_surface(v->toplevel);
+}
+
+static bool view_wants_fullscreen(const struct rei_view *v)
+{
+	return v->xwin ? rei_xwindow_wants_fullscreen(v->xwin) : v->toplevel->want_fullscreen;
+}
+
+void rei_wm_close_view(struct rei_view *v)
+{
+	if (v->xwin)
+		rei_xwindow_close(v->xwin);
+	else
+		rei_xdg_toplevel_close(v->toplevel);
+}
+
+bool rei_wm_surface_rect(struct rei_surface *root, struct rei_rect *out)
+{
+	return rei_xdg_surface_rect(root, out) || rei_xwayland_surface_rect(root, out);
+}
+
+bool rei_wm_surface_hidden(struct rei_surface *root)
+{
+	return rei_xdg_surface_hidden(root) || rei_xwayland_surface_hidden(root);
+}
+
 bool rei_view_visible(const struct rei_view *v)
 {
-	return v->ws && v->ws->output && v->ws->output->workspace == v->ws;
+	return !v->minimized && v->ws && v->ws->output && v->ws->output->workspace == v->ws;
 }
 
 struct rei_rect rei_view_rect(const struct rei_view *v)
 {
-	struct rei_rect g = rei_xdg_toplevel_geometry(v->toplevel);
+	struct rei_rect g = view_geometry(v);
 	return (struct rei_rect){ v->x, v->y, v->w > 0 ? v->w : g.w, v->h > 0 ? v->h : g.h };
 }
 
@@ -86,7 +126,8 @@ static struct rei_workspace *ws_create(struct rei_server *s, int number, struct 
 
 static bool ws_empty(const struct rei_workspace *ws)
 {
-	return rei_tree_leaf_count(ws->tree) == 0 && wl_list_empty(&ws->floating);
+	/* Minimized windows are in `focus` but not in the tree. */
+	return rei_tree_leaf_count(ws->tree) == 0 && wl_list_empty(&ws->floating) && wl_list_empty(&ws->focus);
 }
 
 static void ws_destroy(struct rei_workspace *ws)
@@ -121,7 +162,10 @@ static void apply_to_view(struct rei_view *v, struct rei_rect r, bool tiled, boo
 	v->y = r.y;
 	v->w = r.w;
 	v->h = r.h;
-	rei_xdg_toplevel_set_state(v->toplevel, r.w, r.h, tiled, fullscreen);
+	if (v->xwin)
+		rei_xwindow_configure(v->xwin, r.x, r.y, r.w, r.h, fullscreen);
+	else
+		rei_xdg_toplevel_set_state(v->toplevel, r.w, r.h, tiled, fullscreen);
 }
 
 static void arrange(struct rei_output *o)
@@ -156,6 +200,8 @@ static void arrange(struct rei_output *o)
 
 	struct rei_view *v;
 	wl_list_for_each(v, &ws->floating, float_link) {
+		if (v->minimized)
+			continue;
 		/* A floating window keeps whatever size its client chose until the user
 		 * resizes it; then we dictate it. */
 		/* If the notches would stick out above the screen, pull the window back
@@ -198,7 +244,7 @@ struct rei_view *rei_wm_active_view(struct rei_server *s)
 		return NULL;
 	struct rei_view *v;
 	wl_list_for_each(v, &s->focused_output->workspace->focus, focus_link) {
-		if (v->mapped)
+		if (SHOWN(v))
 			return v;
 	}
 	return NULL;
@@ -210,7 +256,10 @@ static void update_activation(struct rei_server *s)
 	struct rei_view *active = rei_wm_active_view(s);
 	struct rei_view *v;
 	wl_list_for_each(v, &s->views, link)
-		rei_xdg_toplevel_set_activated(v->toplevel, v == active);
+		if (v->xwin)
+			rei_xwindow_set_activated(v->xwin, v == active);
+		else
+			rei_xdg_toplevel_set_activated(v->toplevel, v == active);
 	rei_input_refocus(s);
 	rei_server_schedule_damage(s);
 }
@@ -218,7 +267,7 @@ static void update_activation(struct rei_server *s)
 void rei_wm_focus_view(struct rei_view *v)
 {
 	struct rei_server *s = v->server;
-	if (!rei_view_visible(v) || !v->mapped)
+	if (!rei_view_visible(v) || !SHOWN(v))
 		return;
 
 	s->focused_output = v->ws->output;
@@ -255,7 +304,7 @@ static struct rei_node *insertion_point(struct rei_workspace *ws)
 {
 	struct rei_view *v;
 	wl_list_for_each(v, &ws->focus, focus_link) {
-		if (v->mapped && v->node)
+		if (SHOWN(v) && v->node)
 			return v->node;
 	}
 	return NULL;
@@ -296,10 +345,19 @@ static void detach(struct rei_view *v)
 /* Dialogs, and windows that can't be resized, are better off floating. */
 static bool wants_float(struct rei_server *s, const struct rei_view *v)
 {
+	if (v->xwin)
+		return s->config->float_new_windows || rei_xwindow_wants_float(v->xwin);
 	const struct rei_xdg_toplevel *tl = v->toplevel;
 	bool fixed_size = tl->min_w > 0 && tl->min_h > 0 &&
 			  tl->min_w == tl->max_w && tl->min_h == tl->max_h;
 	return s->config->float_new_windows || tl->has_parent || fixed_size;
+}
+
+struct rei_view *rei_view_create_x(struct rei_server *s, struct rei_xwindow *xwin)
+{
+	struct rei_view *v = rei_view_create(s, NULL);
+	v->xwin = xwin;
+	return v;
 }
 
 struct rei_view *rei_view_create(struct rei_server *s, struct rei_xdg_toplevel *toplevel)
@@ -320,7 +378,7 @@ void rei_wm_add_view(struct rei_view *v)
 		return;  /* No output: adopted when one appears. */
 
 	attach(v, s->focused_output->workspace, wants_float(s, v));
-	if (v->toplevel->want_fullscreen)
+	if (view_wants_fullscreen(v))
 		rei_wm_set_fullscreen(v, true);
 	else
 		arrange_ws(v->ws);
@@ -337,7 +395,7 @@ void rei_view_map(struct rei_view *v)
 		/* First appearance: centre it on its output, cascading a little so
 		 * several new windows don't land exactly on top of each other. */
 		struct rei_output *o = v->ws->output;
-		struct rei_rect g = rei_xdg_toplevel_geometry(v->toplevel);
+		struct rei_rect g = view_geometry(v);
 		struct rei_rect or = output_usable(o);
 		or.x -= o->x;  /* Floating positions are relative to the output. */
 		or.y -= o->y;
@@ -377,10 +435,15 @@ void rei_view_destroy(struct rei_view *v)
 		s->input->notch_press = REI_NOTCH_NONE;
 	}
 	s->drop_hint.active = false;
+	rei_tray_menu_view_gone(s, v);
 
 	struct rei_workspace *ws = v->ws;
 	detach(v);
 	wl_list_remove(&v->link);
+	struct rei_view *other;
+	wl_list_for_each(other, &s->views, link)
+		if (other->restore_anchor == v)
+			other->restore_anchor = NULL;
 	free(v);
 
 	if (s->shutting_down)
@@ -436,6 +499,7 @@ void rei_wm_output_added(struct rei_server *s, struct rei_output *o)
 
 void rei_wm_output_removed(struct rei_server *s, struct rei_output *o)
 {
+	rei_tray_menu_close(s);
 	struct rei_output *dest = NULL, *it;
 	wl_list_for_each(it, &s->outputs, link) {
 		if (it != o) {
@@ -479,13 +543,13 @@ static size_t collect_views(struct rei_workspace *ws, struct rei_view **out, siz
 	rei_tree_leaves(ws->tree, nodes, leaves);
 	for (size_t i = 0; i < leaves && n < cap; i++) {
 		struct rei_view *v = nodes[i]->data;
-		if (v->mapped)
+		if (SHOWN(v))
 			out[n++] = v;
 	}
 	free(nodes);
 	struct rei_view *v;
 	wl_list_for_each(v, &ws->floating, float_link) {
-		if (v->mapped && n < cap)
+		if (SHOWN(v) && n < cap)
 			out[n++] = v;
 	}
 	return n;
@@ -653,7 +717,10 @@ void rei_wm_toggle_floating(struct rei_server *s)
 
 void rei_wm_set_fullscreen(struct rei_view *v, bool on)
 {
-	v->toplevel->want_fullscreen = on;
+	if (v->xwin)
+		rei_xwindow_set_fullscreen(v->xwin, on);
+	else
+		v->toplevel->want_fullscreen = on;
 	if (!v->ws)
 		return;
 	struct rei_workspace *ws = v->ws;
@@ -717,6 +784,122 @@ void rei_wm_move_to_workspace(struct rei_server *s, int number)
 		return;
 	move_view_to_workspace(v, dest);
 	update_activation(s);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Minimize and restore                                                     */
+/* ------------------------------------------------------------------------ */
+
+static struct rei_node *edge_leaf(struct rei_node *n, bool last)
+{
+	while (n->is_split) {
+		struct wl_list *e = last ? n->children.prev : n->children.next;
+		if (e == &n->children)
+			return NULL;
+		n = wl_container_of(e, n, link);
+	}
+	return n;
+}
+
+/* Forgets everything that points at a window that is about to be hidden. */
+static void drop_interaction(struct rei_view *v)
+{
+	struct rei_server *s = v->server;
+	if (s->input) {
+		if (s->input->move_view == v)
+			s->input->move_view = NULL;
+		if (s->input->resize_view == v)
+			s->input->resize_view = NULL;
+		if (s->input->notch_view == v) {
+			s->input->notch_view = NULL;
+			s->input->notch_press = REI_NOTCH_NONE;
+		}
+	}
+	if (s->notch_hover_view == v) {
+		s->notch_hover_view = NULL;
+		s->notch_hover_part = REI_NOTCH_NONE;
+	}
+	s->drop_hint.active = false;
+}
+
+void rei_wm_minimize_view(struct rei_view *v)
+{
+	struct rei_server *s = v->server;
+	if (!v->ws || !v->mapped || v->minimized)
+		return;
+	struct rei_workspace *ws = v->ws;
+	drop_interaction(v);
+
+	v->restore_anchor = NULL;
+	v->restore_tiled = v->node != NULL;
+	if (v->node) {
+		/* Remember a neighbour and the side, so the window can go back to the same spot. */
+		struct rei_node *n = v->node, *p = n->parent, *sib = NULL;
+		bool before = false;
+		if (p && n->link.prev != &p->children) {
+			sib = wl_container_of(n->link.prev, sib, link);
+			before = true;
+		} else if (p && n->link.next != &p->children) {
+			sib = wl_container_of(n->link.next, sib, link);
+		}
+		struct rei_node *leaf = sib ? edge_leaf(sib, before) : NULL;
+		if (leaf && leaf->data) {
+			v->restore_anchor = leaf->data;
+			bool horizontal = p->layout == REI_LAYOUT_SPLIT_H;
+			v->restore_side = horizontal ? (before ? REI_DIR_RIGHT : REI_DIR_LEFT)
+						     : (before ? REI_DIR_DOWN : REI_DIR_UP);
+		}
+		rei_tree_remove_leaf(ws->tree, n);
+		v->node = NULL;
+	}
+	if (ws->fullscreen == v) {
+		ws->fullscreen = NULL;
+		v->fullscreen = false;
+	}
+	/* The least recently focused, so something else takes the focus. */
+	wl_list_remove(&v->focus_link);
+	wl_list_insert(ws->focus.prev, &v->focus_link);
+	v->minimized = true;
+
+	arrange_ws(ws);
+	update_activation(s);
+	rei_server_schedule_damage(s);
+}
+
+static void restore_view(struct rei_view *v)
+{
+	struct rei_workspace *ws = v->ws;
+	v->minimized = false;
+	if (!v->floating && v->restore_tiled) {
+		struct rei_view *a = v->restore_anchor;
+		if (a && a->ws == ws && a->node && !a->minimized)
+			v->node = rei_tree_insert_beside(ws->tree, a->node, v, v->restore_side);
+		else
+			v->node = rei_tree_add_leaf(ws->tree, insertion_point(ws), v);
+	}
+	v->restore_anchor = NULL;
+	arrange_ws(ws);
+}
+
+void rei_wm_activate_view(struct rei_view *v)
+{
+	struct rei_server *s = v->server;
+	if (!v->ws || !v->mapped)
+		return;
+	if (v->minimized)
+		restore_view(v);
+	struct rei_workspace *ws = v->ws;
+	if (!(ws->output && ws->output->workspace == ws))
+		rei_wm_goto_workspace(s, ws->number);
+	rei_wm_focus_view(v);
+	rei_server_schedule_damage(s);
+}
+
+void rei_wm_minimize_active(struct rei_server *s)
+{
+	struct rei_view *v = rei_wm_active_view(s);
+	if (v)
+		rei_wm_minimize_view(v);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -830,10 +1013,10 @@ void rei_wm_notch_activate(struct rei_server *s, struct rei_view *v, enum rei_no
 {
 	switch (part) {
 	case REI_NOTCH_CLOSE:
-		rei_xdg_toplevel_close(v->toplevel);
+		rei_wm_close_view(v);
 		break;
 	case REI_NOTCH_MINIMIZE:
-		rei_debug("notch: minimize is not implemented yet");
+		rei_wm_minimize_view(v);
 		break;
 	case REI_NOTCH_MAXIMIZE:
 		rei_debug("notch: maximize is not implemented yet");
@@ -912,7 +1095,7 @@ static struct rei_view *find_drop_target(struct rei_server *s, const struct rei_
 		for (size_t i = 0; i < n && !found; i++) {
 			struct rei_view *tv = leaves[i]->data;
 			struct rei_rect r = leaves[i]->rect;
-			if (tv == dragged || !tv->mapped)
+			if (tv == dragged || !SHOWN(tv))
 				continue;
 			if (x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h)
 				continue;
@@ -989,10 +1172,13 @@ void rei_wm_drag_finish(struct rei_view *v, double x, double y)
 
 static void emit_view(struct rei_view *v, struct rei_scene_snapshot *snap, bool clip)
 {
-	if (!v->mapped)
+	if (!SHOWN(v))
 		return;
 	size_t first = snap->n_items;
-	rei_xdg_emit_view(v, snap);
+	if (v->xwin)
+		rei_xwindow_emit(v, snap);
+	else
+		rei_xdg_emit_view(v, snap);
 	if (clip) {
 		/* A tiled window must stay inside its slot even while its client is
 		 * still redrawing at the old size. */
@@ -1027,10 +1213,17 @@ void rei_wm_emit_views(struct rei_server *s, struct rei_output *o, struct rei_sc
 		emit_view(ws->fullscreen, snap, true);
 }
 
+static bool view_pick(const struct rei_view *v, double x, double y, struct rei_surface **out,
+		      double *sx, double *sy)
+{
+	return v->xwin ? rei_xwindow_pick(v, x, y, out, sx, sy) : rei_xdg_pick_view(v, x, y, out, sx, sy);
+}
+
 bool rei_wm_pick(struct rei_server *s, double x, double y,
 		 struct rei_surface **surface, double *sx, double *sy)
 {
-	if (rei_xdg_pick_popups(s, x, y, surface, sx, sy))
+	if (rei_xdg_pick_popups(s, x, y, surface, sx, sy) ||
+	    rei_xwayland_pick_unmanaged(s, x, y, surface, sx, sy))
 		return true;
 
 	struct rei_output *o;
@@ -1039,13 +1232,13 @@ bool rei_wm_pick(struct rei_server *s, double x, double y,
 		if (!ws)
 			continue;
 		if (ws->fullscreen) {
-			if (rei_xdg_pick_view(ws->fullscreen, x, y, surface, sx, sy))
+			if (view_pick(ws->fullscreen, x, y, surface, sx, sy))
 				return true;
 			continue;
 		}
 		struct rei_view *v;
 		wl_list_for_each_reverse(v, &ws->floating, float_link) {
-			if (v->mapped && rei_xdg_pick_view(v, x, y, surface, sx, sy))
+			if (SHOWN(v) && view_pick(v, x, y, surface, sx, sy))
 				return true;
 		}
 		size_t n = rei_tree_leaf_count(ws->tree);
@@ -1056,8 +1249,8 @@ bool rei_wm_pick(struct rei_server *s, double x, double y,
 			struct rei_view *tv = leaves[i]->data;
 			/* Only the visible part: a tiled window is clipped to its slot. */
 			struct rei_rect r = rei_view_rect(tv);
-			if (tv->mapped && x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h)
-				hit = rei_xdg_pick_view(tv, x, y, surface, sx, sy);
+			if (SHOWN(tv) && x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h)
+				hit = view_pick(tv, x, y, surface, sx, sy);
 		}
 		free(leaves);
 		if (hit)
@@ -1070,11 +1263,12 @@ bool rei_wm_pick(struct rei_server *s, double x, double y,
 struct rei_surface *rei_wm_keyboard_surface(struct rei_server *s)
 {
 	struct rei_view *v = rei_wm_active_view(s);
-	return v ? rei_xdg_toplevel_surface(v->toplevel) : NULL;
+	return v ? view_surface(v) : NULL;
 }
 
 struct rei_view *rei_wm_view_for_surface(struct rei_server *s, struct rei_surface *surface)
 {
 	(void)s;
-	return rei_xdg_view_of(surface);
+	struct rei_view *v = rei_xdg_view_of(surface);
+	return v ? v : rei_xwayland_view_of(surface);
 }

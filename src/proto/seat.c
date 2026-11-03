@@ -173,6 +173,23 @@ static void seat_bind(struct wl_client *client, void *data, uint32_t version, ui
 		wl_seat_send_name(r, "seat0");
 }
 
+void rei_seat_keyboards_reconfigured(struct rei_seat *seat, bool keymap_changed)
+{
+	struct rei_server *server = seat->server;
+	struct rei_input *in = server->input;
+	struct wl_resource *r;
+	wl_resource_for_each(r, &seat->keyboards) {
+		if (keymap_changed)
+			wl_keyboard_send_keymap(r, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, in->xkb->keymap_fd,
+						in->xkb->keymap_size);
+		if (wl_resource_get_version(r) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)
+			wl_keyboard_send_repeat_info(r, server->config->repeat_rate,
+						     server->config->repeat_delay);
+	}
+	if (keymap_changed && in->keyboard_focus)
+		rei_seat_keyboard_modifiers(seat, in->keyboard_focus);
+}
+
 bool rei_seat_init(struct rei_server *server)
 {
 	struct rei_seat *seat = rei_xcalloc(1, sizeof *seat);

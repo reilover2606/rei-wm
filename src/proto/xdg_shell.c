@@ -456,7 +456,10 @@ static void toplevel_unset_fullscreen(struct wl_client *c, struct wl_resource *r
 
 static void toplevel_set_minimized(struct wl_client *c, struct wl_resource *r)
 {
-	(void)c; (void)r;
+	(void)c;
+	struct rei_xdg_toplevel *tl = wl_resource_get_user_data(r);
+	if (tl && tl->view)
+		rei_wm_minimize_view(tl->view);
 }
 
 static const struct xdg_toplevel_interface toplevel_impl = {

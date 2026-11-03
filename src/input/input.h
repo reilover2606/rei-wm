@@ -59,6 +59,8 @@ struct rei_input {
 	/* A toolbar button pressed and not yet released. */
 	bool bar_press;
 	int bar_press_ws;  /* The workspace button pressed (0: the bar itself). */
+	bool bar_press_volume;  /* The press was on the volume text. */
+	int bar_press_tray;     /* The tray tile pressed, or -1. */
 	struct rei_output *bar_press_output;
 
 	/* A notch button pressed and not yet released (the click is the release). */
@@ -74,6 +76,17 @@ struct rei_input {
 	uint32_t resize_edges;  /* xdg_toplevel resize edge bits */
 	struct rei_rect resize_start;
 };
+
+/* Config hot reload, in two steps so that a bad config changes nothing. */
+struct rei_input_reload {
+	struct rei_bindings *bindings;
+	struct rei_xkb *xkb;  /* NULL unless the keyboard layout changed. */
+	bool keymap_changed;
+};
+struct rei_config;
+bool rei_input_prepare_reload(struct rei_server *server, const struct rei_config *cfg,
+			      struct rei_input_reload *out, char *err, size_t errlen);
+void rei_input_commit_reload(struct rei_server *server, struct rei_input_reload *r);
 
 /* The server's [input]/[keybindings] config must be loaded. */
 bool rei_input_init(struct rei_server *server, char *err, size_t errlen);
