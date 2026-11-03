@@ -171,7 +171,7 @@ static void *render_main(void *arg)
 	struct rei_render *r = arg;
 	rei_log_set_thread_name(r->log_name);
 
-	r->gles = rei_gles_create();
+	r->gles = rei_gles_create(NULL);
 	if (r->gles) {
 		rei_info("output %s: rendering with %s", r->name, rei_gles_renderer_name(r->gles));
 	} else {
@@ -212,6 +212,7 @@ struct rei_render *rei_render_create(struct rei_server *server,
 		.width = params->width, .height = params->height,
 		.origin_x = params->x, .origin_y = params->y,
 		.scale = params->scale > 0 ? params->scale : 1.0,
+		.draw_cursor = true,
 	};
 	r->ops = params->ops;
 	r->ops_data = params->ops_data;

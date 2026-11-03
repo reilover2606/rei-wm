@@ -25,8 +25,11 @@ void rei_snapshot_unref(struct rei_scene_snapshot *s)
 		return;
 	if (atomic_fetch_sub_explicit(&s->refs, 1, memory_order_acq_rel) != 1)
 		return;
-	for (size_t i = 0; i < s->n_items; i++)
+	for (size_t i = 0; i < s->n_items; i++) {
 		rei_pixbuf_unref(s->items[i].pix);
+		rei_dmabuf_unref(s->items[i].dmabuf);
+	}
+	rei_pixbuf_unref(s->cursor.pix);
 	free(s->items);
 	free(s);
 }
@@ -55,4 +58,26 @@ void rei_snapshot_clip_from(struct rei_scene_snapshot *s, size_t first,
 		s->items[i].clip_w = w;
 		s->items[i].clip_h = h;
 	}
+}
+
+void rei_snapshot_add_dmabuf(struct rei_scene_snapshot *s, struct rei_dmabuf *buf,
+			     float x, float y, float w, float h, bool opaque)
+{
+	if (s->n_items == s->cap_items) {
+		s->cap_items = s->cap_items ? s->cap_items * 2 : 16;
+		s->items = rei_xrealloc(s->items, s->cap_items * sizeof *s->items);
+	}
+	s->items[s->n_items++] = (struct rei_drawable){
+		.dmabuf = rei_dmabuf_ref(buf),
+		.x = x, .y = y, .w = w, .h = h,
+		.opaque = opaque || buf->opaque,
+	};
+}
+
+void rei_snapshot_set_cursor(struct rei_scene_snapshot *s, struct rei_pixbuf *pix, float x, float y)
+{
+	rei_pixbuf_unref(s->cursor.pix);
+	s->cursor.pix = pix ? rei_pixbuf_ref(pix) : NULL;
+	s->cursor.x = x;
+	s->cursor.y = y;
 }

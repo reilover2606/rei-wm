@@ -6,11 +6,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "dmabuf.h"
 #include "pixbuf.h"
 
 /* One textured rectangle, in global (logical) layout coordinates. */
 struct rei_drawable {
-	struct rei_pixbuf *pix;  /* Holds a reference. */
+	struct rei_pixbuf *pix;      /* Exactly one of pix and dmabuf is set; holds a reference. */
+	struct rei_dmabuf *dmabuf;
 	float x, y, w, h;
 	bool opaque;             /* Safe to draw without blending. */
 	bool has_clip;           /* Drawn only inside `clip` (global coordinates). */
@@ -28,6 +30,15 @@ struct rei_scene_snapshot {
 	atomic_int refs;
 	uint64_t serial;
 	float clear_color[4];  /* RGBA, behind everything. */
+
+	/* The pointer image. Kept apart from the drawables so an output with a
+	 * hardware cursor can leave it out of the picture entirely. Drawn last, on
+	 * any output that has no hardware cursor of its own. */
+	struct {
+		struct rei_pixbuf *pix;  /* NULL: no cursor. Holds a reference. */
+		float x, y;              /* Top-left, global coordinates (hotspot applied). */
+	} cursor;
+
 	struct rei_drawable *items;
 	size_t n_items, cap_items;
 };
@@ -40,6 +51,12 @@ void rei_snapshot_unref(struct rei_scene_snapshot *s);
  * a tiled window inside its slot while its client catches up with a resize. */
 void rei_snapshot_clip_from(struct rei_scene_snapshot *s, size_t first,
 			    float x, float y, float w, float h);
+
+/* A client dma-buf instead of CPU pixels. `flip` is the buffer's own y_invert. */
+void rei_snapshot_add_dmabuf(struct rei_scene_snapshot *s, struct rei_dmabuf *buf,
+			     float x, float y, float w, float h, bool opaque);
+
+void rei_snapshot_set_cursor(struct rei_scene_snapshot *s, struct rei_pixbuf *pix, float x, float y);
 
 /* Only valid while the snapshot is still being built (before it is shared). */
 void rei_snapshot_add(struct rei_scene_snapshot *s, struct rei_pixbuf *pix,

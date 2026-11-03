@@ -33,11 +33,8 @@ struct rei_scene_snapshot *rei_scene_build(struct rei_server *s, uint64_t serial
 	rei_xdg_emit_popups(s, snap);
 
 	const struct rei_cursor_image *cur = rei_cursor_default();
-	if (cur) {
-		rei_snapshot_add(snap, cur->pixbuf,
-				 (float)(s->cursor_x - cur->hotspot_x),
-				 (float)(s->cursor_y - cur->hotspot_y),
-				 (float)cur->pixbuf->width, (float)cur->pixbuf->height, false);
-	}
+	if (cur)
+		rei_snapshot_set_cursor(snap, cur->pixbuf, (float)(s->cursor_x - cur->hotspot_x),
+					(float)(s->cursor_y - cur->hotspot_y));
 	return snap;
 }
