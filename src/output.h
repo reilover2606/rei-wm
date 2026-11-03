@@ -8,6 +8,8 @@
 #include "render_thread.h"
 
 struct rei_render;
+struct rei_wl_output;
+struct rei_pixbuf;
 
 /* What a backend supplies when it adds a monitor. */
 struct rei_output_params {
@@ -41,6 +43,13 @@ struct rei_output {
 
 	struct rei_render *render;
 	void *backend_data;
+
+	struct rei_pixbuf *wallpaper;     /* Rendered for this output's size. */
+	struct rei_wl_output *wl_output;  /* The protocol-visible twin. */
+
+	/* What the render thread and clients were last told, to send only changes. */
+	int32_t sent_x, sent_y, sent_width, sent_height;
+	double sent_scale;
 
 	uint64_t frames_presented;
 	uint64_t last_presented_serial;

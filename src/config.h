@@ -27,6 +27,11 @@ struct rei_config {
 	int32_t gap_outer;  /* Between windows and the edge of the desktop. */
 	int32_t gap_inner;  /* Between adjacent windows. */
 
+	/* [wallpaper] */
+	char *wallpaper_path;     /* NULL: no image, just the background colour. */
+	char *wallpaper_mode;     /* "fill", "fit", "stretch", "center" or "tile". */
+	uint32_t background_rgb;  /* 0xRRGGBB; behind the wallpaper and windows. */
+
 	/* [[output]] */
 	struct rei_output_config *outputs;
 	size_t n_outputs;

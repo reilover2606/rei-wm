@@ -9,6 +9,7 @@
  */
 #include <errno.h>
 #include <fcntl.h>
+#include <stdbool.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -65,6 +66,21 @@ static void roundtrip(struct wl_display *d)
 	wl_registry_add_listener(reg, &reg_listener, NULL);
 	CHECK(wl_display_roundtrip(d) >= 0);
 	wl_registry_destroy(reg);
+}
+
+/* Polls the compositor's log until `needle` shows up. */
+static void wait_for_log(const char *logpath, const char *needle, int timeout_ms)
+{
+	for (int waited = 0; waited < timeout_ms; waited += 20) {
+		char *log = slurp(logpath);
+		bool found = strstr(log, needle) != NULL;
+		free(log);
+		if (found)
+			return;
+		sleep_ms(20);
+	}
+	fprintf(stderr, "timed out waiting for log line: %s\n", needle);
+	exit(1);
 }
 
 static unsigned long long summary_field(const char *log, const char *output, const char *field)
@@ -125,6 +141,12 @@ int main(int argc, char **argv)
 	roundtrip(c1);
 	roundtrip(c2);
 
+	/* Each render thread takes a moment to bring up its GL context. Redraws
+	 * requested before the first frame legitimately merge into it, so wait
+	 * for both outputs to have shown something before counting frames. */
+	wait_for_log(logpath, "frame output=A seq=1", 5000);
+	wait_for_log(logpath, "frame output=B seq=1", 5000);
+
 	const int redraws = 5;
 	for (int i = 0; i < redraws; i++) {
 		CHECK(kill(pid, SIGUSR1) == 0);
@@ -156,9 +178,10 @@ int main(int argc, char **argv)
 	CHECK(strstr(log, "output added: name=B id=2 mode=1024x768@75.000 pos=800,0"));
 	CHECK(strstr(log, "listening on WAYLAND_DISPLAY=" SOCKET " (backend: headless)"));
 
-	/* Scene serial: one per output added (2) plus one per SIGUSR1. Both render
+	/* Scene serial: one for the outputs added at startup (changes made in the same
+	 * pass share a snapshot) plus one per SIGUSR1. Both render
 	 * threads must have presented the final snapshot. */
-	unsigned long long final_serial = 2 + redraws;
+	unsigned long long final_serial = 1 + redraws;
 	CHECK(summary_field(log, "A", "last_serial") == final_serial);
 	CHECK(summary_field(log, "B", "last_serial") == final_serial);
 	CHECK(summary_field(log, "A", "frames") >= (unsigned long long)redraws);

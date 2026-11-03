@@ -4,13 +4,21 @@
 #include <event2/thread.h>
 #include <signal.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <wayland-server-core.h>
 
 #include "backend/backend.h"
+#include "desktop.h"
 #include "messages.h"
+#include "proto/seat.h"
+#include "proto/surface.h"
+#include "proto/wl_output.h"
+#include "proto/xdg_shell.h"
 #include "render_thread.h"
+#include "scene.h"
 #include "snapshot.h"
+#include "wallpaper.h"
 #include "util/log.h"
 #include "util/util.h"
 
@@ -42,6 +50,8 @@ static void on_flush(evutil_socket_t fd, short what, void *arg)
 
 void rei_server_schedule_flush(struct rei_server *s)
 {
+	if (s->shutting_down)
+		return;
 	/* event_active on an already-active event is a no-op: free coalescing. */
 	event_active(s->flush_event, 0, 0);
 }
@@ -64,12 +74,59 @@ static void on_usr1(evutil_socket_t sig, short what, void *arg)
 	(void)sig;
 	(void)what;
 	rei_debug("SIGUSR1: damaging scene");
-	rei_server_damage(arg);
+	rei_server_schedule_damage(arg);
+}
+
+static void on_usr2(evutil_socket_t sig, short what, void *arg)
+{
+	(void)sig;
+	(void)what;
+	rei_server_screenshot(arg);
 }
 
 /* ------------------------------------------------------------------------ */
 /* Messages from render threads                                             */
 /* ------------------------------------------------------------------------ */
+
+static bool rects_intersect(const struct rei_rect *a, int32_t bx, int32_t by, int32_t bw, int32_t bh)
+{
+	return a->x < bx + bw && a->x + a->w > bx && a->y < by + bh && a->y + a->h > by;
+}
+
+/*
+ * A frame containing snapshot `f->scene_serial` reached `out`. Tell every client
+ * whose window is (partly) on that output, or that isn't on any output, that
+ * it may draw its next frame.
+ */
+static void fire_frame_callbacks(struct rei_server *s, const struct rei_output *out,
+				 const struct rei_frame_event *f)
+{
+	uint32_t ms = (uint32_t)(f->present_ns / 1000000ull);
+	int32_t ow, oh;
+	rei_output_logical_size(out, &ow, &oh);
+
+	struct rei_surface *surf;
+	wl_list_for_each(surf, &s->surfaces, link) {
+		if (wl_list_empty(&surf->frames))
+			continue;
+
+		struct rei_rect r;
+		bool fire = true;
+		if (rei_xdg_surface_rect(rei_surface_root(surf), &r)) {
+			bool here = rects_intersect(&r, out->x, out->y, ow, oh);
+			bool anywhere = here;
+			const struct rei_output *o;
+			wl_list_for_each(o, &s->outputs, link) {
+				int32_t w, h;
+				rei_output_logical_size(o, &w, &h);
+				anywhere = anywhere || rects_intersect(&r, o->x, o->y, w, h);
+			}
+			fire = here || !anywhere;
+		}
+		if (fire)
+			rei_surface_fire_frames(surf, f->scene_serial, ms);
+	}
+}
 
 static void on_inbox(struct rei_msg *m, void *userdata)
 {
@@ -85,8 +142,7 @@ static void on_inbox(struct rei_msg *m, void *userdata)
 		o->last_presented_serial = f->scene_serial;
 		rei_debug("frame output=%s seq=%llu serial=%llu", o->name,
 			  (unsigned long long)f->seq, (unsigned long long)f->scene_serial);
-		/* Later: send wl_surface frame callbacks and presentation
-		 * feedback, and release buffers the frame no longer needs. */
+		fire_frame_callbacks(s, o, f);
 		rei_server_schedule_flush(s);
 		break;
 	}
@@ -96,12 +152,77 @@ static void on_inbox(struct rei_msg *m, void *userdata)
 		rei_error("renderer failed on output %s", o ? o->name : "(removed)");
 		break;
 	}
+	case REI_EMSG_SCREENSHOT: {
+		const struct rei_screenshot_event *e = m->data;
+		if (e->ok)
+			rei_info("screenshot written: %s", e->path);
+		else
+			rei_error("screenshot failed: %s", e->path);
+		break;
+	}
 	}
 }
 
 /* ------------------------------------------------------------------------ */
 /* Outputs and scene                                                        */
 /* ------------------------------------------------------------------------ */
+
+void rei_server_schedule_damage(struct rei_server *s)
+{
+	if (!s || s->shutting_down)
+		return;
+	s->damage_pending = true;
+	event_active(s->damage_event, 0, 0);
+}
+
+void rei_server_flush_damage(struct rei_server *s)
+{
+	if (!s->damage_pending)
+		return;
+	s->damage_pending = false;
+
+	uint64_t serial = ++s->scene_serial;
+	struct rei_scene_snapshot *snap = rei_scene_build(s, serial);
+
+	if (wl_list_empty(&s->outputs)) {
+		/* Nothing will ever present this; don't leave clients waiting. */
+		struct rei_surface *surf;
+		uint32_t ms = (uint32_t)(rei_now_ns() / 1000000ull);
+		wl_list_for_each(surf, &s->surfaces, link)
+			rei_surface_fire_frames(surf, serial, ms);
+		rei_server_schedule_flush(s);
+	}
+
+	struct rei_output *o;
+	wl_list_for_each(o, &s->outputs, link)
+		rei_render_submit(o->render, snap);
+	rei_snapshot_unref(snap);
+}
+
+static void on_damage(evutil_socket_t fd, short what, void *arg)
+{
+	(void)fd;
+	(void)what;
+	rei_server_flush_damage(arg);
+}
+
+void rei_server_screenshot(struct rei_server *s)
+{
+	/* Make sure the render threads have seen the latest state first; their
+	 * queues are ordered, so the screenshot request lands after it. */
+	rei_server_flush_damage(s);
+
+	const char *dir = getenv("REI_SCREENSHOT_DIR");
+	if (!dir || !dir[0])
+		dir = getenv("XDG_RUNTIME_DIR");
+
+	struct rei_output *o;
+	wl_list_for_each(o, &s->outputs, link) {
+		char path[256];
+		snprintf(path, sizeof path, "%s/rei-wm-%s.ppm", dir ? dir : ".", o->name);
+		rei_render_screenshot(o->render, path);
+	}
+}
 
 struct rei_output *rei_server_output_by_id(struct rei_server *s, uint32_t id)
 {
@@ -113,13 +234,38 @@ struct rei_output *rei_server_output_by_id(struct rei_server *s, uint32_t id)
 	return NULL;
 }
 
-void rei_server_damage(struct rei_server *s)
+static void refresh_wallpaper(struct rei_server *s, struct rei_output *o)
 {
-	struct rei_scene_snapshot *snap = rei_snapshot_create(++s->scene_serial);
+	rei_pixbuf_unref(o->wallpaper);
+	o->wallpaper = NULL;
+	if (!s->wallpaper_image)
+		return;
+	o->wallpaper = rei_wallpaper_render(s->wallpaper_image,
+					    (enum rei_wallpaper_mode)s->wallpaper_mode,
+					    s->config->background_rgb, o->width, o->height);
+}
+
+/*
+ * Pushes position/size/scale to anything that cares, but only where it changed.
+ * Called after every layout change, since adding or removing one output can
+ * move the others.
+ */
+static void sync_output_geometry(struct rei_server *s)
+{
 	struct rei_output *o;
-	wl_list_for_each(o, &s->outputs, link)
-		rei_render_submit(o->render, snap);
-	rei_snapshot_unref(snap);
+	wl_list_for_each(o, &s->outputs, link) {
+		if (o->sent_x == o->x && o->sent_y == o->y && o->sent_width == o->width &&
+		    o->sent_height == o->height && o->sent_scale == o->scale)
+			continue;
+		o->sent_x = o->x;
+		o->sent_y = o->y;
+		o->sent_width = o->width;
+		o->sent_height = o->height;
+		o->sent_scale = o->scale;
+		rei_render_set_geometry(o->render, o->width, o->height, o->x, o->y, o->scale);
+		rei_wl_output_update(o);
+	}
+	rei_server_schedule_flush(s);
 }
 
 struct rei_output *rei_server_add_output(struct rei_server *s,
@@ -137,32 +283,53 @@ struct rei_output *rei_server_add_output(struct rei_server *s,
 	o->y = p->y;
 	o->backend_data = p->backend_data;
 
+	wl_list_insert(s->outputs.prev, &o->link);
+	rei_outputs_layout(&s->outputs);
+
 	struct rei_render_params rp = {
 		.output_id = o->id,
 		.name = o->name,
 		.width = o->width,
 		.height = o->height,
+		.x = o->x,
+		.y = o->y,
+		.scale = o->scale,
 		.refresh_mhz = o->refresh_mhz,
 		.ops = p->render_ops,
 		.ops_data = p->render_ops_data,
 	};
 	o->render = rei_render_create(s, &rp);
 	if (!o->render) {
+		wl_list_remove(&o->link);
+		rei_outputs_layout(&s->outputs);
 		free(o->name);
 		free(o);
 		return NULL;
 	}
+	o->sent_x = o->x;
+	o->sent_y = o->y;
+	o->sent_width = o->width;
+	o->sent_height = o->height;
+	o->sent_scale = o->scale;
 
-	wl_list_insert(s->outputs.prev, &o->link);
-	rei_outputs_layout(&s->outputs);
+	refresh_wallpaper(s, o);
+	rei_wl_output_add(s, o);
 
 	rei_info("output added: name=%s id=%u mode=%dx%d@%.3f pos=%d,%d scale=%g",
 		 o->name, o->id, o->width, o->height, o->refresh_mhz / 1000.0,
 		 o->x, o->y, o->scale);
 
-	/* Placement of other outputs may have shifted; a fresh snapshot gives
-	 * every render thread (including the new one) something to draw. */
-	rei_server_damage(s);
+	if (!s->cursor_placed) {
+		int32_t w, h;
+		rei_output_logical_size(o, &w, &h);
+		s->cursor_x = o->x + w / 2;
+		s->cursor_y = o->y + h / 2;
+		s->cursor_placed = true;
+	}
+
+	/* Other outputs may have shifted; every render thread needs a fresh scene. */
+	sync_output_geometry(s);
+	rei_server_schedule_damage(s);
 	return o;
 }
 
@@ -170,12 +337,17 @@ void rei_server_remove_output(struct rei_server *s, struct rei_output *o)
 {
 	rei_info("output removed: name=%s id=%u", o->name, o->id);
 
+	rei_wl_output_remove(o);
 	/* Join the render thread first so nothing is in flight referencing it. */
 	rei_render_destroy(o->render);
 	wl_list_remove(&o->link);
 	rei_outputs_layout(&s->outputs);
+	rei_pixbuf_unref(o->wallpaper);
 	free(o->name);
 	free(o);
+
+	sync_output_geometry(s);
+	rei_server_schedule_damage(s);
 }
 
 void rei_server_set_output_mode(struct rei_server *s, struct rei_output *o,
@@ -185,10 +357,11 @@ void rei_server_set_output_mode(struct rei_server *s, struct rei_output *o,
 		return;
 	o->width = width;
 	o->height = height;
-	rei_render_resize(o->render, width, height);
 	rei_outputs_layout(&s->outputs);
+	refresh_wallpaper(s, o);
 	rei_info("output resized: name=%s mode=%dx%d", o->name, width, height);
-	rei_server_damage(s);
+	sync_output_geometry(s);
+	rei_server_schedule_damage(s);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -223,6 +396,10 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	struct rei_server *s = rei_xcalloc(1, sizeof *s);
 	s->config = config;
 	wl_list_init(&s->outputs);
+	wl_list_init(&s->surfaces);
+	wl_list_init(&s->views);
+	wl_list_init(&s->popups);
+	wl_list_init(&s->wl_outputs);
 
 	/* Must precede the creation of any event base that other threads wake. */
 	if (evthread_use_pthreads() != 0) {
@@ -258,13 +435,21 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 		s->socket_name = rei_xstrdup(name);
 	}
 
+	if (wl_display_init_shm(s->display) != 0 || !rei_surface_init(s) ||
+	    !rei_xdg_shell_init(s) || !rei_seat_init(s)) {
+		rei_error("cannot register Wayland globals");
+		goto fail;
+	}
+
 	s->wl_event = event_new(s->base, wl_event_loop_get_fd(s->wl_loop),
 				EV_READ | EV_PERSIST, on_wayland_readable, s);
 	s->flush_event = event_new(s->base, -1, 0, on_flush, s);
 	s->sigint_event = evsignal_new(s->base, SIGINT, on_terminate, s);
 	s->sigterm_event = evsignal_new(s->base, SIGTERM, on_terminate, s);
 	s->sigusr1_event = evsignal_new(s->base, SIGUSR1, on_usr1, s);
-	if (!s->wl_event || !s->flush_event || !s->sigint_event ||
+	s->sigusr2_event = evsignal_new(s->base, SIGUSR2, on_usr2, s);
+	s->damage_event = event_new(s->base, -1, 0, on_damage, s);
+	if (!s->damage_event || !s->sigusr2_event || !s->wl_event || !s->flush_event || !s->sigint_event ||
 	    !s->sigterm_event || !s->sigusr1_event) {
 		rei_error("cannot create event sources");
 		goto fail;
@@ -273,6 +458,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	event_add(s->sigint_event, NULL);
 	event_add(s->sigterm_event, NULL);
 	event_add(s->sigusr1_event, NULL);
+	event_add(s->sigusr2_event, NULL);
 
 	if (!rei_msgq_init(&s->inbox, s->base, on_inbox, s)) {
 		rei_error("cannot create message queue");
@@ -280,6 +466,18 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	}
 
 	signal(SIGPIPE, SIG_IGN);
+
+	s->wallpaper_mode = rei_wallpaper_parse_mode(config->wallpaper_mode);
+	if (config->wallpaper_path) {
+		char err[256];
+		s->wallpaper_image = rei_image_load(config->wallpaper_path, err, sizeof err);
+		if (s->wallpaper_image)
+			rei_info("wallpaper: %s (%dx%d, %s)", config->wallpaper_path,
+				 s->wallpaper_image->width, s->wallpaper_image->height,
+				 config->wallpaper_mode);
+		else
+			rei_warn("wallpaper not loaded: %s", err);
+	}
 
 	const char *backend_name = resolve_backend(s, opts);
 	s->backend = rei_backend_create(backend_name, s);
@@ -320,6 +518,7 @@ void rei_server_destroy(struct rei_server *s)
 {
 	if (!s)
 		return;
+	s->shutting_down = true;
 
 	struct rei_output *o;
 	wl_list_for_each(o, &s->outputs, link) {
@@ -337,14 +536,19 @@ void rei_server_destroy(struct rei_server *s)
 		rei_server_remove_output(s, o);
 	}
 
+	/* Destroying clients tears down every surface and window; do it while the
+	 * event sources they poke at still exist. */
 	if (s->display)
 		wl_display_destroy_clients(s->display);
+	if (s->display)
+		rei_wl_output_finish(s);
 
 	if (s->inbox.wake)
 		rei_msgq_finish(&s->inbox);
 
 	struct event **events[] = { &s->wl_event, &s->flush_event, &s->sigint_event,
-				    &s->sigterm_event, &s->sigusr1_event };
+				    &s->sigterm_event, &s->sigusr1_event, &s->sigusr2_event,
+				    &s->damage_event };
 	for (size_t i = 0; i < REI_ARRAY_LEN(events); i++) {
 		if (*events[i]) {
 			event_free(*events[i]);
@@ -354,6 +558,8 @@ void rei_server_destroy(struct rei_server *s)
 
 	if (s->display)
 		wl_display_destroy(s->display);
+	rei_seat_finish(s);
+	rei_image_free(s->wallpaper_image);
 	if (s->base)
 		event_base_free(s->base);
 	free(s->socket_name);
