@@ -6,6 +6,8 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include <string.h>
 #include <wayland-server-core.h>
 
@@ -408,6 +410,48 @@ static const char *resolve_backend(const struct rei_server *s,
 #endif
 }
 
+/* ---- Client diagnostics: who connected, and what we told them went wrong ---- */
+
+static void on_client_created(struct wl_listener *l, void *data)
+{
+	(void)l;
+	struct wl_client *client = data;
+	pid_t pid = 0;
+	uid_t uid = 0;
+	gid_t gid = 0;
+	wl_client_get_credentials(client, &pid, &uid, &gid);
+
+	char path[64], exe[256] = "?";
+	snprintf(path, sizeof path, "/proc/%d/comm", (int)pid);
+	FILE *f = fopen(path, "r");
+	if (f) {
+		if (fgets(exe, sizeof exe, f))
+			exe[strcspn(exe, "\n")] = '\0';
+		fclose(f);
+	}
+	rei_info("client connected: pid=%d (%s)", (int)pid, exe);
+}
+
+static void protocol_logger(void *user_data, enum wl_protocol_logger_type type,
+			    const struct wl_protocol_logger_message *m)
+{
+	(void)user_data;
+	if (type != WL_PROTOCOL_LOGGER_EVENT || m->resource == NULL)
+		return;
+	if (strcmp(wl_resource_get_class(m->resource), "wl_display") != 0 ||
+	    strcmp(m->message->name, "error") != 0 || m->arguments_count < 3)
+		return;
+	struct wl_client *client = wl_resource_get_client(m->resource);
+	pid_t pid = 0;
+	uid_t uid;
+	gid_t gid;
+	wl_client_get_credentials(client, &pid, &uid, &gid);
+	rei_warn("protocol error sent to client pid=%d: code %u: %s", (int)pid,
+		  m->arguments[1].u, m->arguments[2].s ? m->arguments[2].s : "");
+}
+
+static struct wl_listener client_created_listener = { .notify = on_client_created };
+
 struct rei_server *rei_server_create(const struct rei_config *config,
 				     const struct rei_server_options *opts)
 {
@@ -440,6 +484,10 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	}
 
 	s->display = wl_display_create();
+	if (s->display) {
+		wl_display_add_client_created_listener(s->display, &client_created_listener);
+		wl_display_add_protocol_logger(s->display, protocol_logger, s);
+	}
 	if (!s->display) {
 		rei_error("cannot create wl_display");
 		goto fail;
