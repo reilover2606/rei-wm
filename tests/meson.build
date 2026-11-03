@@ -14,6 +14,14 @@ foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'k
   test(t, exe, env: test_env)
 endforeach
 
+if have_drm
+  exe = executable('test_drm_logic', 'test_drm_logic.c',
+    include_directories: inc,
+    dependencies: test_deps,
+  )
+  test('drm_logic', exe, env: test_env)
+endif
+
 integration = executable('test_integration', 'test_integration.c',
   include_directories: inc,
   dependencies: [wayland_client],
@@ -80,4 +88,23 @@ foreach mode : ['top', 'bottom', 'left', 'right', 'multi']
     env: test_env,
     timeout: 120,
   )
+endforeach
+
+# The same end-to-end tests again, with the outputs driven through the vsync
+# path that real displays use (draw, queue a flip, wait for it, then report).
+vsync_env = environment()
+vsync_env.set('TSAN_OPTIONS', 'suppressions=' + meson.current_source_dir() / 'tsan.supp')
+vsync_env.set('LSAN_OPTIONS', 'suppressions=' + meson.current_source_dir() / 'lsan.supp')
+vsync_env.set('REI_HEADLESS_VSYNC', '1')
+test('render-vsync', render_test, args: [rei_wm.full_path()], depends: rei_wm,
+  env: vsync_env, timeout: 90)
+test('input-vsync', input_test, args: [rei_wm.full_path()], depends: rei_wm,
+  env: vsync_env, timeout: 90)
+test('wm-vsync', wm_test, args: [rei_wm.full_path()], depends: rei_wm,
+  env: vsync_env, timeout: 120)
+test('notch-vsync', notch_test, args: [rei_wm.full_path()], depends: rei_wm,
+  env: vsync_env, timeout: 120)
+foreach mode : ['top', 'multi']
+  test('bar-vsync-' + mode, bar_test, args: [rei_wm.full_path(), mode], depends: rei_wm,
+    env: vsync_env, timeout: 120)
 endforeach

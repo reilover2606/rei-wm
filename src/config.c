@@ -183,6 +183,7 @@ static void read_output(struct reader *r, const struct toml_table *t, size_t ind
 	out->height = 1080;
 	out->refresh_mhz = 60000;
 	out->scale = 1.0;
+	out->enabled = true;
 
 	const struct toml_value *name = get(r, t, prefix, "name", TOML_STRING);
 	if (name) {
@@ -197,6 +198,27 @@ static void read_output(struct reader *r, const struct toml_table *t, size_t ind
 	double hz;
 	if (read_double(r, t, prefix, "refresh", &hz, 1.0, 1000.0))
 		out->refresh_mhz = (int32_t)lround(hz * 1000.0);
+
+	out->has_mode = toml_table_get(t, "width") || toml_table_get(t, "height") ||
+			toml_table_get(t, "refresh");
+	/* mode = "2560x1440@144" is the same thing in one string. */
+	const struct toml_value *mode = get(r, t, prefix, "mode", TOML_STRING);
+	if (mode) {
+		int32_t w, h, mhz;
+		if (!rei_parse_mode(mode->u.s, &w, &h, &mhz)) {
+			fail(r, "%smode: '%s' is not a mode like \"1920x1080\" or \"2560x1440@144\"",
+			     prefix, mode->u.s);
+		} else {
+			out->width = w;
+			out->height = h;
+			if (mhz)
+				out->refresh_mhz = mhz;
+			out->has_mode = true;
+		}
+	}
+	const struct toml_value *enabled = get(r, t, prefix, "enabled", TOML_BOOL);
+	if (enabled)
+		out->enabled = enabled->u.b;
 
 	read_double(r, t, prefix, "scale", &out->scale, 0.25, 8.0);
 
@@ -234,6 +256,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->notch_height = 22;
 	cfg->repeat_rate = 25;
 	cfg->repeat_delay = 600;
+	cfg->tap_to_click = true;
 	cfg->wallpaper_mode = rei_xstrdup("fill");
 	cfg->background_rgb = 0x1b2733;
 	cfg->root = toml_parse("", NULL, 0);
@@ -254,7 +277,7 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 	if (errlen)
 		err[0] = '\0';
 
-	static const char *const backends[] = { "auto", "headless", "nested", NULL };
+	static const char *const backends[] = { "auto", "headless", "nested", "drm", NULL };
 	static const char *const mod_keys[] = { "super", "alt", "ctrl", "shift", NULL };
 
 	const struct toml_table *general = get_table(&r, root, "general");
@@ -287,6 +310,16 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		read_string(&r, input, "input.", "keyboard_options", &cfg->kb_options);
 		read_int(&r, input, "input.", "repeat_rate", &cfg->repeat_rate, 0, 1000);
 		read_int(&r, input, "input.", "repeat_delay", &cfg->repeat_delay, 0, 10000);
+		const struct toml_value *tap = get(&r, input, "input.", "tap_to_click", TOML_BOOL);
+		if (tap)
+			cfg->tap_to_click = tap->u.b;
+		const struct toml_value *nat = get(&r, input, "input.", "natural_scroll", TOML_BOOL);
+		if (nat)
+			cfg->natural_scroll = nat->u.b;
+		const struct toml_value *lh = get(&r, input, "input.", "left_handed", TOML_BOOL);
+		if (lh)
+			cfg->left_handed = lh->u.b;
+		read_double(&r, input, "input.", "pointer_accel", &cfg->pointer_accel, -1.0, 1.0);
 	}
 
 	const struct toml_table *kb = get_table(&r, root, "keybindings");

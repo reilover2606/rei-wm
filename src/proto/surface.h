@@ -6,12 +6,14 @@
 #include <wayland-server-core.h>
 
 #include "geom.h"
+#include "dmabuf.h"
 #include "pixbuf.h"
 #include "snapshot.h"
 
 struct rei_server;
 struct rei_surface;
 struct rei_subsurface;
+struct rei_buffer_lease;
 
 /* A set of rectangles (not normalised: overlaps are allowed). */
 struct rei_rects {
@@ -49,6 +51,8 @@ struct rei_surface_state {
 
 	bool content_set;
 	struct rei_pixbuf *content;  /* NULL with content_set means "no buffer". */
+	struct rei_dmabuf *dmabuf;   /* Instead of `content`, for a GPU buffer. */
+	struct rei_buffer_lease *lease;  /* Holds that buffer until it may be released. */
 	bool scale_set;
 	int32_t scale;
 	bool transform_set;
@@ -67,8 +71,10 @@ struct rei_surface {
 	struct rei_surface_state cached;  /* Held back by a synchronized subsurface. */
 	bool has_cached;
 
-	/* Current (committed) state. */
+	/* Current (committed) state. At most one of content and dmabuf is set. */
 	struct rei_pixbuf *content;
+	struct rei_dmabuf *dmabuf;
+	struct rei_buffer_lease *lease;
 	int32_t scale, transform;
 	int32_t width, height;  /* Surface-local size = buffer size / scale. */
 	struct rei_rects opaque, input;

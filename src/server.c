@@ -1,4 +1,5 @@
 #include "server.h"
+#include "proto/linux_dmabuf.h"
 
 #include <event2/event.h>
 #include <event2/thread.h>
@@ -144,6 +145,7 @@ static void on_inbox(struct rei_msg *m, void *userdata)
 			break;  /* Output went away while the frame was in flight. */
 		o->frames_presented = f->seq;
 		o->last_presented_serial = f->scene_serial;
+		rei_buffer_leases_check(s);
 		rei_debug("frame output=%s seq=%llu serial=%llu", o->name,
 			  (unsigned long long)f->seq, (unsigned long long)f->scene_serial);
 		fire_frame_callbacks(s, o, f);
@@ -177,6 +179,13 @@ void rei_server_schedule_damage(struct rei_server *s)
 		return;
 	s->damage_pending = true;
 	event_active(s->damage_event, 0, 0);
+}
+
+void rei_server_cursor_moved(struct rei_server *s)
+{
+	if (s->backend && s->backend->impl->cursor_moved && s->backend->impl->cursor_moved(s->backend))
+		return;
+	rei_server_schedule_damage(s);
 }
 
 void rei_server_flush_damage(struct rei_server *s)
@@ -391,8 +400,12 @@ static const char *resolve_backend(const struct rei_server *s,
 	if (parent && parent[0])
 		return "nested";
 
-	rei_warn("no parent Wayland session and no DRM backend yet: running headless");
+#ifdef REI_HAVE_DRM
+	return "drm";
+#else
+	rei_warn("no parent Wayland session and this build has no DRM backend: running headless");
 	return "headless";
+#endif
 }
 
 struct rei_server *rei_server_create(const struct rei_config *config,
@@ -412,6 +425,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	rei_wm_init(s);
 	wl_list_init(&s->popups);
 	wl_list_init(&s->wl_outputs);
+	wl_list_init(&s->buffer_leases);
 
 	/* Must precede the creation of any event base that other threads wake. */
 	if (evthread_use_pthreads() != 0) {
@@ -560,6 +574,7 @@ void rei_server_destroy(struct rei_server *s)
 		wl_display_destroy_clients(s->display);
 	if (s->display)
 		rei_wl_output_finish(s);
+	rei_linux_dmabuf_finish(s);
 
 	if (s->inbox.wake)
 		rei_msgq_finish(&s->inbox);

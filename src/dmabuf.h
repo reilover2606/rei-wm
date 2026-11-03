@@ -3,6 +3,7 @@
 
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /*
@@ -60,5 +61,13 @@ bool rei_format_is_opaque(uint32_t format);
 
 /* Bytes per pixel for the formats this compositor handles (0 if unknown). */
 int rei_format_bpp(uint32_t format);
+
+bool rei_format_mod_supported(const struct rei_format_mod *list, size_t n,
+			      uint32_t format, uint64_t modifier);
+
+/* Pairs present in both lists. Returns the count; *out is caller-freed. */
+size_t rei_format_mod_intersect(const struct rei_format_mod *a, size_t na,
+				const struct rei_format_mod *b, size_t nb,
+				struct rei_format_mod **out);
 
 #endif

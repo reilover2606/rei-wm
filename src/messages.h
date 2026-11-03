@@ -14,6 +14,8 @@ enum rei_render_msg {
 	REI_RMSG_SNAPSHOT = 1,  /* data: struct rei_scene_snapshot * (one ref) */
 	REI_RMSG_GEOMETRY,      /* data: struct rei_geometry_msg * */
 	REI_RMSG_SCREENSHOT,    /* data: char * path (PPM), malloc'd */
+	REI_RMSG_VBLANK,        /* data: struct rei_vblank_msg *; a queued page flip completed */
+	REI_RMSG_PAUSE,         /* data: struct rei_pause_msg *; the display is lost or regained */
 	REI_RMSG_STOP,          /* no data */
 };
 
@@ -29,6 +31,15 @@ struct rei_geometry_msg {
 	int32_t width, height;  /* Physical pixels. */
 	int32_t x, y;           /* Position in the global logical layout. */
 	double scale;
+};
+
+/* The display hardware finished a flip we queued. */
+struct rei_vblank_msg {
+	uint64_t present_ns;  /* CLOCK_MONOTONIC, as the kernel stamped it (0: unknown). */
+};
+
+struct rei_pause_msg {
+	int paused;  /* 1: stop drawing (e.g. VT switched away); 0: resume. */
 };
 
 /* A frame reached the screen. This is what drives wl_surface frame callbacks

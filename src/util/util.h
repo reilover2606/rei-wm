@@ -17,4 +17,8 @@ void *rei_xcalloc(size_t n, size_t size);
 void *rei_xrealloc(void *ptr, size_t size);
 char *rei_xstrdup(const char *s);
 
+/* Parses "1920x1080", "1920x1080@60" or "2560x1440@143.912". Returns false
+ * on anything else. `refresh_mhz` is 0 when no rate was given. */
+bool rei_parse_mode(const char *text, int32_t *width, int32_t *height, int32_t *refresh_mhz);
+
 #endif

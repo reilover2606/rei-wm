@@ -36,6 +36,14 @@ struct rei_render {
 
 	struct rei_scene_snapshot *pending;
 	bool dirty;
+
+	/* Vsync-driven pacing (ops.render set). */
+	bool vsync;
+	bool flip_pending;
+	bool timed_flip;       /* The pending flip completes on the timer, not a hardware event. */
+	bool paused;
+	struct rei_scene_snapshot *inflight;   /* Queued, not yet on screen. */
+	struct rei_scene_snapshot *displayed;  /* On screen now; kept so its buffers stay valid. */
 	uint64_t clock_origin_ns;
 	uint64_t interval_ns;
 	uint64_t seq;
@@ -63,6 +71,66 @@ static void arm_timer(struct rei_render *r)
 	r->timer_armed = true;
 }
 
+static void post_frame(struct rei_render *r, uint64_t serial, uint64_t present_ns)
+{
+	struct rei_frame_event *ev = rei_xcalloc(1, sizeof *ev);
+	ev->output_id = r->output_id;
+	ev->seq = ++r->seq;
+	ev->present_ns = present_ns ? present_ns : rei_now_ns();
+	ev->scene_serial = serial;
+	rei_msgq_post(&r->server->inbox, REI_EMSG_FRAME, ev, free);
+}
+
+static void arm_timer_after(struct rei_render *r, uint64_t wait_ns)
+{
+	if (r->timer_armed)
+		return;
+	struct timeval tv = {
+		.tv_sec = (time_t)(wait_ns / 1000000000ull),
+		.tv_usec = (suseconds_t)((wait_ns % 1000000000ull) / 1000ull),
+	};
+	evtimer_add(r->timer, &tv);
+	r->timer_armed = true;
+}
+
+static void vsync_try_render(struct rei_render *r);
+
+/* The queued flip reached the screen: report it and draw the next frame. */
+static void complete_flip(struct rei_render *r, uint64_t present_ns)
+{
+	if (!r->flip_pending)
+		return;
+	r->flip_pending = false;
+	r->timed_flip = false;
+	rei_snapshot_unref(r->displayed);
+	r->displayed = r->inflight;
+	r->inflight = NULL;
+	post_frame(r, r->displayed->serial, present_ns);
+	vsync_try_render(r);
+}
+
+static void vsync_try_render(struct rei_render *r)
+{
+	if (!r->vsync || r->flip_pending || r->paused || !r->dirty || !r->pending)
+		return;
+
+	enum rei_render_result res = REI_RENDER_TIMED;
+	if (r->gles && r->ops_ready)
+		res = r->ops.render(r->ops_data, r->gles, r->pending, &r->target);
+
+	if (res == REI_RENDER_FAILED) {
+		/* Keep the scene dirty and look again in a moment, rather than spin. */
+		arm_timer_after(r, r->interval_ns);
+		return;
+	}
+	r->flip_pending = true;
+	r->timed_flip = res == REI_RENDER_TIMED;
+	r->inflight = rei_snapshot_ref(r->pending);
+	r->dirty = false;
+	if (r->timed_flip)
+		arm_timer_after(r, r->interval_ns);
+}
+
 static bool draw_pending(struct rei_render *r)
 {
 	if (!r->gles || !r->pending)
@@ -77,6 +145,14 @@ static void on_vblank(evutil_socket_t fd, short what, void *arg)
 	struct rei_render *r = arg;
 	r->timer_armed = false;
 
+	if (r->vsync) {
+		if (r->flip_pending && r->timed_flip)
+			complete_flip(r, 0);
+		else
+			vsync_try_render(r);
+		return;
+	}
+
 	if (!r->dirty || !r->pending)
 		return;
 
@@ -87,12 +163,7 @@ static void on_vblank(evutil_socket_t fd, short what, void *arg)
 			       r->target.width, r->target.height);
 	r->dirty = false;
 
-	struct rei_frame_event *ev = rei_xcalloc(1, sizeof *ev);
-	ev->output_id = r->output_id;
-	ev->seq = ++r->seq;
-	ev->present_ns = rei_now_ns();
-	ev->scene_serial = snap->serial;
-	rei_msgq_post(&r->server->inbox, REI_EMSG_FRAME, ev, free);
+	post_frame(r, snap->serial, 0);
 }
 
 static bool write_ppm(const char *path, const uint8_t *rgba, int32_t w, int32_t h)
@@ -144,7 +215,10 @@ static void on_message(struct rei_msg *m, void *userdata)
 		r->pending = m->data;
 		m->data = NULL;
 		r->dirty = true;
-		arm_timer(r);
+		if (r->vsync)
+			vsync_try_render(r);
+		else
+			arm_timer(r);
 		break;
 	case REI_RMSG_GEOMETRY: {
 		const struct rei_geometry_msg *g = m->data;
@@ -154,7 +228,33 @@ static void on_message(struct rei_msg *m, void *userdata)
 		r->target.origin_y = g->y;
 		r->target.scale = g->scale;
 		r->dirty = r->pending != NULL;
-		arm_timer(r);
+		if (r->vsync)
+			vsync_try_render(r);
+		else
+			arm_timer(r);
+		break;
+	}
+	case REI_RMSG_VBLANK: {
+		const struct rei_vblank_msg *v = m->data;
+		complete_flip(r, v->present_ns);
+		break;
+	}
+	case REI_RMSG_PAUSE: {
+		const struct rei_pause_msg *pm = m->data;
+		r->paused = pm->paused != 0;
+		if (r->paused) {
+			/* The display went away: a flip in flight will never complete. */
+			r->flip_pending = false;
+			r->timed_flip = false;
+			rei_snapshot_unref(r->inflight);
+			r->inflight = NULL;
+		}
+		if (r->ops.set_paused && r->ops_ready)
+			r->ops.set_paused(r->ops_data, r->paused);
+		if (!r->paused) {
+			r->dirty = r->pending != NULL;
+			vsync_try_render(r);
+		}
 		break;
 	}
 	case REI_RMSG_SCREENSHOT:
@@ -171,7 +271,7 @@ static void *render_main(void *arg)
 	struct rei_render *r = arg;
 	rei_log_set_thread_name(r->log_name);
 
-	r->gles = rei_gles_create(NULL);
+	r->gles = rei_gles_create(&r->ops.gles);
 	if (r->gles) {
 		rei_info("output %s: rendering with %s", r->name, rei_gles_renderer_name(r->gles));
 	} else {
@@ -183,7 +283,7 @@ static void *render_main(void *arg)
 	}
 
 	r->ops_ready = true;
-	if (r->ops.init && !r->ops.init(r->ops_data)) {
+	if (r->ops.init && !r->ops.init(r->ops_data, r->gles)) {
 		rei_error("output %s: backend render init failed", r->name);
 		r->ops_ready = false;
 	}
@@ -216,6 +316,7 @@ struct rei_render *rei_render_create(struct rei_server *server,
 	};
 	r->ops = params->ops;
 	r->ops_data = params->ops_data;
+	r->vsync = params->ops.render != NULL;
 
 	int32_t mhz = params->refresh_mhz > 0 ? params->refresh_mhz : 60000;
 	r->interval_ns = 1000000000000ull / (uint64_t)mhz;
@@ -251,6 +352,20 @@ void rei_render_submit(struct rei_render *r, struct rei_scene_snapshot *snap)
 	rei_msgq_post(&r->inbox, REI_RMSG_SNAPSHOT, rei_snapshot_ref(snap), free_snapshot);
 }
 
+void rei_render_notify_vblank(struct rei_render *r, uint64_t present_ns)
+{
+	struct rei_vblank_msg *m = rei_xcalloc(1, sizeof *m);
+	m->present_ns = present_ns;
+	rei_msgq_post(&r->inbox, REI_RMSG_VBLANK, m, free);
+}
+
+void rei_render_set_paused(struct rei_render *r, bool paused)
+{
+	struct rei_pause_msg *m = rei_xcalloc(1, sizeof *m);
+	m->paused = paused;
+	rei_msgq_post(&r->inbox, REI_RMSG_PAUSE, m, free);
+}
+
 void rei_render_set_geometry(struct rei_render *r, int32_t width, int32_t height,
 			     int32_t x, int32_t y, double scale)
 {
@@ -275,5 +390,7 @@ void rei_render_destroy(struct rei_render *r)
 	event_free(r->timer);
 	event_base_free(r->base);
 	rei_snapshot_unref(r->pending);
+	rei_snapshot_unref(r->inflight);
+	rei_snapshot_unref(r->displayed);
 	free(r);
 }

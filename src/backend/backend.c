@@ -13,6 +13,14 @@ struct rei_backend *rei_backend_create(const char *name, struct rei_server *serv
 		return rei_headless_backend_create(server);
 	if (strcmp(name, "nested") == 0)
 		return rei_nested_backend_create(server);
+	if (strcmp(name, "drm") == 0) {
+#ifdef REI_HAVE_DRM
+		return rei_drm_backend_create(server);
+#else
+		rei_error("this build has no DRM backend (libdrm, gbm, libseat, libinput or libudev missing)");
+		return NULL;
+#endif
+	}
 	rei_error("unknown backend '%s'", name);
 	return NULL;
 }
