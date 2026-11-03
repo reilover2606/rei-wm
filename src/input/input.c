@@ -14,6 +14,7 @@
 #include "proto/surface.h"
 #include "proto/xdg_shell.h"
 #include "server.h"
+#include "toolbar.h"
 #include "util/log.h"
 #include "util/util.h"
 
@@ -323,6 +324,17 @@ static void update_pointer(struct rei_input *in, uint32_t time_ms, bool send_mot
 	struct rei_surface *hit = NULL;
 	double sx = 0, sy = 0;
 	rei_wm_pick(s, s->cursor_x, s->cursor_y, &hit, &sx, &sy);
+
+	/* The toolbar is the compositor's. A window over it (a floating one) wins,
+	 * since it is drawn above. */
+	struct rei_output *bar_output = NULL;
+	int bar_ws = 0;
+	if (!hit && rei_toolbar_hit(s, s->cursor_x, s->cursor_y, &bar_output, &bar_ws)) {
+		rei_toolbar_set_hover(s, bar_output, bar_ws);
+		set_pointer_focus(in, NULL, 0, 0);
+		return;
+	}
+	rei_toolbar_set_hover(s, NULL, 0);
 	if (hit != in->pointer_focus)
 		set_pointer_focus(in, hit, sx, sy);
 	else if (hit && send_motion)
@@ -396,6 +408,19 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 		}
 	}
 
+	if (pressed && in->n_buttons == 1 && !in->move_view && !in->resize_view && !in->pointer_focus) {
+		/* A press on the toolbar is the compositor's, not a client's. */
+		struct rei_output *bo;
+		int ws;
+		if (rei_toolbar_hit(s, s->cursor_x, s->cursor_y, &bo, &ws)) {
+			in->bar_press = true;
+			in->bar_press_ws = ws;
+			in->bar_press_output = bo;
+			rei_server_schedule_flush(s);
+			return;
+		}
+	}
+
 	if (pressed && in->n_buttons == 1 && !in->move_view && !in->resize_view) {
 		/* First button down: this click decides focus. */
 		struct rei_surface *target = in->pointer_focus;
@@ -450,8 +475,8 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 		}
 	}
 
-	if (in->move_view || in->resize_view || in->notch_press != REI_NOTCH_NONE) {
-		/* A move, resize or notch click owns the pointer; the client sees no buttons. */
+	if (in->move_view || in->resize_view || in->notch_press != REI_NOTCH_NONE || in->bar_press) {
+		/* A move, resize, notch or toolbar click owns the pointer; the client sees no buttons. */
 		if (in->n_buttons == 0) {
 			/* End the grab FIRST. What follows (dropping a window, closing one)
 			 * changes focus, which re-evaluates the pointer and would otherwise
@@ -463,6 +488,20 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 			in->resize_view = NULL;
 			in->notch_press = REI_NOTCH_NONE;
 			in->notch_view = NULL;
+			bool bar_clicked = in->bar_press;
+			int bar_ws = in->bar_press_ws;
+			struct rei_output *bar_output = in->bar_press_output;
+			in->bar_press = false;
+			in->bar_press_ws = 0;
+			in->bar_press_output = NULL;
+
+			/* A workspace button is clicked if the press and release are on it. */
+			if (bar_clicked && bar_ws > 0) {
+				struct rei_output *o;
+				int ws;
+				if (rei_toolbar_hit(s, s->cursor_x, s->cursor_y, &o, &ws) && o == bar_output && ws == bar_ws)
+					rei_wm_goto_workspace(s, bar_ws);
+			}
 
 			if (moved)  /* Drops a lifted window into place, or settles a floating one. */
 				rei_wm_drag_finish(moved, s->cursor_x, s->cursor_y);
@@ -497,8 +536,17 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 void rei_input_pointer_axis(struct rei_server *s, uint32_t time_ms, bool horizontal, double value)
 {
 	struct rei_input *in = s->input;
-	if (!in || in->move_view || in->resize_view || in->notch_press != REI_NOTCH_NONE)
+	if (!in || in->move_view || in->resize_view || in->notch_press != REI_NOTCH_NONE || in->bar_press)
 		return;
+
+	/* The wheel over a toolbar steps through that output's workspaces. */
+	struct rei_output *bar_output;
+	int bar_ws;
+	if (!in->pointer_focus && !in->grab_surface && !horizontal && value != 0 &&
+	    rei_toolbar_hit(s, s->cursor_x, s->cursor_y, &bar_output, &bar_ws)) {
+		rei_toolbar_scroll(s, bar_output, value > 0 ? 1 : -1);
+		return;
+	}
 	struct rei_surface *to = in->grab_surface ? in->grab_surface : in->pointer_focus;
 	if (!to)
 		return;

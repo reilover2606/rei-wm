@@ -9,6 +9,8 @@ core_sources = files(
   'pixbuf.c',
   'render_thread.c',
   'scene.c',
+  'toolbar.c',
+  'toolbar_render.c',
   'server.c',
   'snapshot.c',
   'wallpaper.c',
@@ -39,7 +41,7 @@ stb = static_library('stb',
 
 generated = [xdg_shell_client_h, xdg_shell_server_h, xdg_shell_code]
 
-core_deps = [wayland_server, wayland_client, egl, glesv2, xkbcommon, libevent, libevent_pthreads, threads, m_dep]
+core_deps = [wayland_server, wayland_client, egl, glesv2, xkbcommon, cairo, pangocairo, fontconfig, libevent, libevent_pthreads, threads, m_dep]
 
 rei_core = static_library('rei-core',
   core_sources, generated,

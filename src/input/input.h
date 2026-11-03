@@ -12,6 +12,7 @@
 struct rei_server;
 struct rei_surface;
 struct rei_view;
+struct rei_output;
 struct rei_xkb;
 struct rei_bindings;
 
@@ -54,6 +55,11 @@ struct rei_input {
 	double grab_origin_x, grab_origin_y;  /* Global position of that surface's top-left. */
 
 	uint32_t last_button_serial;
+
+	/* A toolbar button pressed and not yet released. */
+	bool bar_press;
+	int bar_press_ws;  /* The workspace button pressed (0: the bar itself). */
+	struct rei_output *bar_press_output;
 
 	/* A notch button pressed and not yet released (the click is the release). */
 	enum rei_notch_part notch_press;

@@ -617,6 +617,7 @@ int main(int argc, char **argv)
 	char marker[200], config[900];
 	snprintf(marker, sizeof marker, "%s/exec-ran", g_dir);
 	snprintf(config, sizeof config,
+		 "[toolbar]\nenabled = false\n"
 		 "[layout]\nnew_windows = \"float\"\n"
 		 "[keybindings]\n\"Mod+t\" = \"exec echo $WAYLAND_DISPLAY > %s\"\n"
 		 "[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n", marker, OUT_W, OUT_H);

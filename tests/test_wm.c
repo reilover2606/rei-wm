@@ -348,8 +348,9 @@ int main(int argc, char **argv)
 	CHECK(mkdtemp(g_dir));
 	chmod(g_dir, 0700);
 
-	char config[600];
+	char config[700];
 	snprintf(config, sizeof config,
+		 "[toolbar]\nenabled = false\n"
 		 "[general]\nfocus_follows_mouse = true\n"
 		 "[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n"
 		 "[[output]]\nname = \"OUT2\"\nwidth = %d\nheight = %d\n",

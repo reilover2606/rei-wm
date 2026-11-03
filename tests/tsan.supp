@@ -6,3 +6,15 @@
 # it. No rei-wm memory is involved. Races whose stacks are in that library are
 # ignored; races in rei-wm's own code are still reported.
 race:libgallium
+
+# Pango loads fonts on its own background thread ("[pango] fontconfig") and hands
+# work to the calling thread through glib queues and fontconfig structures. glib's
+# mutexes are futex based and invisible to ThreadSanitizer, so a correctly
+# synchronised hand-off is reported as a race, with every frame inside these
+# libraries. rei-wm only calls Pango from the event thread and shares none of its
+# own data with that thread.
+race:libglib
+race:libfontconfig
+race:libpango
+race:libpangocairo
+race:libcairo

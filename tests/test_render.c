@@ -26,6 +26,7 @@ static void render_config(char *text, size_t len)
 	fclose(f);
 
 	snprintf(text, len,
+		 "[toolbar]\nenabled = false\n"
 		 "[layout]\nnew_windows = \"float\"\n"
 		 "[wallpaper]\npath = \"%s\"\nmode = \"stretch\"\n"
 		 "[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n", wall, OUT_W, OUT_H);

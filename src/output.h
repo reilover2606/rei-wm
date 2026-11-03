@@ -10,6 +10,7 @@
 struct rei_render;
 struct rei_server;
 struct rei_workspace;
+struct rei_bar_cache;
 struct rei_wl_output;
 struct rei_pixbuf;
 
@@ -48,6 +49,7 @@ struct rei_output {
 	void *backend_data;
 
 	struct rei_workspace *workspace;  /* What this output is showing. */
+	struct rei_bar_cache *bar;        /* Its toolbar, redrawn only when it changes. */
 
 	struct rei_pixbuf *wallpaper;     /* Rendered for this output's size. */
 	struct rei_wl_output *wl_output;  /* The protocol-visible twin. */

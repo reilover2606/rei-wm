@@ -19,6 +19,7 @@
 #include "render_thread.h"
 #include "scene.h"
 #include "snapshot.h"
+#include "toolbar.h"
 #include "wallpaper.h"
 #include "util/log.h"
 #include "util/util.h"
@@ -346,6 +347,7 @@ void rei_server_remove_output(struct rei_server *s, struct rei_output *o)
 	rei_info("output removed: name=%s id=%u", o->name, o->id);
 
 	rei_wm_output_removed(s, o);
+	rei_toolbar_output_removed(o);
 	rei_wl_output_remove(o);
 	/* Join the render thread first so nothing is in flight referencing it. */
 	rei_render_destroy(o->render);
@@ -481,6 +483,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	}
 
 	signal(SIGPIPE, SIG_IGN);
+	rei_toolbar_init(s);
 
 	s->wallpaper_mode = rei_wallpaper_parse_mode(config->wallpaper_mode);
 	if (config->wallpaper_path) {
@@ -574,6 +577,7 @@ void rei_server_destroy(struct rei_server *s)
 	if (s->display)
 		wl_display_destroy(s->display);
 	rei_input_finish(s);
+	rei_toolbar_finish(s);
 	rei_wm_finish(s);
 	rei_seat_finish(s);
 	rei_image_free(s->wallpaper_image);

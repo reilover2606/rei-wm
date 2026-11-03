@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "toolbar.h"
 #include "util/toml.h"
 
 struct rei_output_config {
@@ -43,6 +44,14 @@ struct rei_config {
 	/* [keybindings]: overrides on top of the built-in defaults. */
 	struct rei_binding_config *bindings;
 	size_t n_bindings;
+
+	/* [toolbar] */
+	bool toolbar_enabled;
+	enum rei_bar_position toolbar_position;
+	int32_t toolbar_thickness;   /* Pixels. */
+	char *toolbar_font;          /* Pango font description. */
+	char *toolbar_clock_format;  /* strftime; empty means no clock. */
+	uint32_t toolbar_background, toolbar_foreground, toolbar_highlight;  /* 0xRRGGBB */
 
 	/* [decoration] */
 	int32_t notch_height;  /* Pixels; 0 turns the window notches off. */
