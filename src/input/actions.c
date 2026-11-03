@@ -25,19 +25,29 @@ static char **build_environment(const char *socket_name)
 	while (environ[n])
 		n++;
 
-	char **env = rei_xcalloc(n + 2, sizeof *env);
+	char **env = rei_xcalloc(n + 3, sizeof *env);
 	size_t out = 0;
 	for (size_t i = 0; i < n; i++) {
 		/* DISPLAY would point X11 programs at some other X server (e.g. your
 		 * desktop's) until rei-wm runs its own Xwayland. */
 		if (strncmp(environ[i], "WAYLAND_DISPLAY=", 16) != 0 &&
-		    strncmp(environ[i], "DISPLAY=", 8) != 0)
+		    strncmp(environ[i], "DISPLAY=", 8) != 0 &&
+		    strncmp(environ[i], "XDG_RUNTIME_DIR=", 16) != 0)
 			env[out++] = rei_xstrdup(environ[i]);
 	}
 	char *wd = NULL;
 	if (asprintf(&wd, "WAYLAND_DISPLAY=%s", socket_name) < 0)
 		abort();
 	env[out++] = wd;
+	/* WAYLAND_DISPLAY is relative to this directory; a program that lacks it
+	 * cannot find our socket and would fall back to some other display. */
+	const char *rt = getenv("XDG_RUNTIME_DIR");
+	if (rt && rt[0]) {
+		char *xr = NULL;
+		if (asprintf(&xr, "XDG_RUNTIME_DIR=%s", rt) < 0)
+			abort();
+		env[out++] = xr;
+	}
 	return env;
 }
 
