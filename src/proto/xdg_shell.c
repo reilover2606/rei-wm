@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "desktop.h"
+#include "input/input.h"
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
@@ -46,6 +47,7 @@ struct rei_xdg_popup {
 	struct rei_xdg_surface *parent;  /* NULL once the parent is gone. */
 	struct wl_listener parent_destroy;
 	struct rei_positioner pos;
+	bool grab;     /* The client asked for a grab (a menu): focus follows it. */
 	int32_t x, y;  /* Popup geometry origin relative to parent's geometry origin. */
 };
 
@@ -336,9 +338,10 @@ static void toplevel_show_window_menu(struct wl_client *c, struct wl_resource *r
 static void toplevel_move(struct wl_client *c, struct wl_resource *r,
 			  struct wl_resource *seat, uint32_t serial)
 {
-	/* Interactive move needs pointer input (milestone 4) and the window
-	 * manager (milestone 5). */
-	(void)c; (void)r; (void)seat; (void)serial;
+	(void)c; (void)seat;
+	struct rei_xdg_toplevel *tl = wl_resource_get_user_data(r);
+	if (tl->xs && tl->view)
+		rei_input_begin_move(tl->xs->server, tl->view, serial);
 }
 
 static void toplevel_resize(struct wl_client *c, struct wl_resource *r,
@@ -417,6 +420,7 @@ static void unmap_xdg_surface(struct rei_xdg_surface *xs)
 		xs->toplevel->view = NULL;
 	}
 	xs->mapped = false;
+	rei_input_refocus(xs->server);
 	rei_server_schedule_damage(xs->server);
 }
 
@@ -448,8 +452,11 @@ static void popup_destroy_request(struct wl_client *c, struct wl_resource *r)
 
 static void popup_grab(struct wl_client *c, struct wl_resource *r, struct wl_resource *seat, uint32_t serial)
 {
-	/* Dismissing popups on outside clicks needs pointer input (milestone 4). */
-	(void)c; (void)r; (void)seat; (void)serial;
+	(void)c; (void)seat; (void)serial;
+	/* The popup takes keyboard focus once mapped, and is dismissed by a click
+	 * outside it (see rei_xdg_dismiss_popups). */
+	struct rei_xdg_popup *p = wl_resource_get_user_data(r);
+	p->grab = true;
 }
 
 static void popup_reposition(struct wl_client *c, struct wl_resource *r,
@@ -490,6 +497,7 @@ static void popup_resource_destroy(struct wl_resource *r)
 		p->xs->popup = NULL;
 		p->xs->initial_sent = p->xs->configured = false;
 		p->xs->n_sent = 0;
+		rei_input_refocus(p->xs->server);
 		rei_server_schedule_damage(p->xs->server);
 	}
 	free(p);
@@ -535,6 +543,8 @@ static void xdg_surface_commit(struct rei_surface *surface, void *data)
 
 	if (has_buffer && !xs->mapped) {
 		xs->mapped = true;
+		if (xs->popup)
+			rei_input_refocus(xs->server);  /* A grabbing popup takes the keyboard. */
 		if (xs->toplevel) {
 			xs->toplevel->view = rei_view_create(xs->server, xs->toplevel);
 			rei_view_map(xs->toplevel->view);
@@ -835,4 +845,75 @@ bool rei_xdg_surface_rect(struct rei_surface *root, struct rei_rect *out)
 	struct rei_rect g = xs_geometry(xs);
 	*out = (struct rei_rect){ gx - g.x, gy - g.y, root->width, root->height };
 	return true;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Input support                                                            */
+/* ------------------------------------------------------------------------ */
+
+struct rei_surface *rei_xdg_toplevel_surface(const struct rei_xdg_toplevel *tl)
+{
+	return tl->xs ? tl->xs->surface : NULL;
+}
+
+struct rei_view *rei_xdg_view_of(struct rei_surface *surface)
+{
+	struct rei_surface *root = rei_surface_root(surface);
+	if (!root->role_data)
+		return NULL;
+	const struct rei_xdg_surface *xs = root->role_data;
+	if (root->role == REI_ROLE_XDG_POPUP)
+		xs = popup_root(xs);
+	if (!xs || !xs->toplevel)
+		return NULL;
+	return xs->toplevel->view;
+}
+
+static bool pick_xs(const struct rei_xdg_surface *xs, double x, double y,
+		    struct rei_surface **out, double *sx, double *sy)
+{
+	int32_t gx, gy;
+	if (!xs->surface || !xs->mapped || !xs_geometry_origin(xs, &gx, &gy))
+		return false;
+	struct rei_rect g = xs_geometry(xs);
+	return rei_surface_pick(xs->surface, (double)(gx - g.x), (double)(gy - g.y), x, y, out, sx, sy);
+}
+
+bool rei_xdg_pick_view(const struct rei_view *view, double x, double y,
+		       struct rei_surface **out, double *sx, double *sy)
+{
+	/* Popups are above their window, newest on top. */
+	const struct rei_xdg_popup *p;
+	wl_list_for_each_reverse(p, &view->server->popups, link) {
+		if (p->xs && popup_root(p->xs) == view->toplevel->xs &&
+		    pick_xs(p->xs, x, y, out, sx, sy))
+			return true;
+	}
+	return view->toplevel->xs && pick_xs(view->toplevel->xs, x, y, out, sx, sy);
+}
+
+struct rei_surface *rei_xdg_topmost_grab_surface(struct rei_server *server)
+{
+	const struct rei_xdg_popup *p;
+	wl_list_for_each_reverse(p, &server->popups, link) {
+		if (p->grab && p->xs && p->xs->mapped && p->xs->surface)
+			return p->xs->surface;
+	}
+	return NULL;
+}
+
+void rei_xdg_dismiss_popups(struct rei_server *server, struct rei_surface *clicked)
+{
+	struct rei_surface *clicked_root = clicked ? rei_surface_root(clicked) : NULL;
+
+	/* Newest first. Stop at the popup that was clicked: it and everything it
+	 * was opened from stay open. */
+	struct rei_xdg_popup *p, *tmp;
+	wl_list_for_each_reverse_safe(p, tmp, &server->popups, link) {
+		if (!p->grab || !p->xs || !p->xs->mapped)
+			continue;
+		if (clicked_root && p->xs->surface == clicked_root)
+			break;
+		xdg_popup_send_popup_done(p->resource);
+	}
 }

@@ -96,6 +96,62 @@ with the server's event loop. Interface: `src/backend/backend.h`.
 `render_ops` on an output are the seam where a backend gives its render thread
 somewhere to draw: `init`, `present` and `fini` all run on the render thread.
 
+## Input (`src/input/`)
+
+Backends feed raw events (evdev key and button codes, absolute or relative
+motion, scroll) into `rei_input_*`; `input.c` decides what they mean.
+
+```
+backend ─ key ──► xkb state ─► keybinding match ─► action (exec/close/quit/focus)
+                                    │ no match
+                                    └──────────────► keyboard-focused client
+backend ─ motion ─► cursor (clamped to outputs) ─► hit-test ─► pointer focus
+backend ─ button ─► popup dismissal ─► click-to-focus/raise ─► client (with grab)
+```
+
+- **Keymap** comes from libxkbcommon using the `[input]` config (layout, variant,
+  options). Clients get it as a memfd on `wl_keyboard`; the compositor tracks
+  modifiers itself and sends them after the key that changed them.
+- **Keybindings** (`keybindings.c`) are `"Mod+Shift+q" = "close"`-style strings.
+  The built-in defaults are merged with the config's `[keybindings]`; `"none"`
+  removes one. Matching needs the *exact* modifier set (Caps/Num Lock are
+  ignored) and uses the key's unshifted symbol, so `Mod+Shift+1` is the 1 key.
+  A matched press is swallowed and so is its release; modifier keys themselves
+  are still forwarded. `exec` runs `/bin/sh -c` detached (double fork, so there
+  are no zombies) with `WAYLAND_DISPLAY` set; the environment is built before
+  forking because a forked child of a multithreaded process may only call
+  async-signal-safe functions.
+- **Focus.** Keyboard focus is the topmost popup holding a grab (a menu), else
+  the active window. Pointer focus is whatever surface is topmost under the
+  cursor, honouring input regions and subsurface stacking, and is recomputed on
+  every scene change so a window appearing under a stationary pointer gets its
+  `enter`. While a button is held the pointer stays with the surface it was
+  pressed on (implicit grab). Clicking a window raises and activates it.
+- **Popups** that asked for a grab take the keyboard and are told to close
+  (`popup_done`) by a click outside them; clicking inside one closes only the
+  popups opened after it.
+- **Clipboard.** `set_selection` is honoured only from the client holding
+  keyboard focus (a background program can't silently replace what you copied),
+  and the selection is announced to a client whenever focus moves to it.
+- **Move.** `xdg_toplevel.move` with the serial of the latest button press starts
+  an interactive drag; the client sees no pointer events until release.
+
+Input backends: **headless** reads a FIFO (`REI_HEADLESS_INPUT`, for tests and
+scripting); **nested** forwards the parent's seat, hiding the parent's cursor
+and releasing held keys when it loses focus. **libinput** is not here yet: it
+needs libseat to open devices without root, so it arrives with the DRM backend
+(milestone 8).
+
+### A listener-list pitfall
+
+`wl_signal_emit()` is only safe if a listener removes *itself*. When a client
+dies, its `wl_surface` is destroyed before its xdg objects, and the surface's
+destroy listeners run while the window is still mapped: unmapping changes
+keyboard focus, which unlinks the focus listeners from the very list being
+walked, and `wl_signal_emit` then spins forever on a self-linked node. Surface
+and data-source destruction therefore use `rei_signal_emit()`
+(`util/wlsignal.h`), which detaches each listener before calling it.
+
 ## Protocol objects (`src/proto/`)
 
 | global | version | notes |
@@ -105,8 +161,65 @@ somewhere to draw: `init`, `present` and `fini` all run on the render thread.
 | `wl_shm` | 1 | ARGB8888, XRGB8888 |
 | `xdg_wm_base` | 5 | toplevels, popups, positioners, window geometry |
 | `wl_output` | 4 | one per output; removal has a 5 s grace period |
-| `wl_seat` | 7 | **no capabilities yet**: plumbing only, until milestone 4 |
-| `wl_data_device_manager` | 3 | sources/offers/devices; clipboard delivery waits for keyboard focus |
+| `wl_seat` | 7 | keyboard and pointer, offered by the backend |
+| `wl_data_device_manager` | 3 | clipboard; drag-and-drop is refused (cancelled) for now |
+
+Object lifetimes follow one rule: when a client disconnects, libwayland destroys
+its objects in id order, so a parent object can die before the role object that
+refers to it. Every cross-object pointer is therefore either guarded by a
+destroy listener or cleared by the object that dies first.
+
+## Known gaps and placeholders
+
+These are deliberate and tracked by later milestones:
+
+- **Window management is a placeholder** (`src/desktop.c`): windows are centred
+  on the first output, cascaded 30px, newest on top and activated. No tiling,
+  workspaces, focus handling or interactive move/resize (milestones 4–5).
+- **No real hardware input**: libinput arrives with the DRM backend (milestone 8).
+  Until then input comes from the nested parent or the headless FIFO.
+- **Only `xdg_toplevel.move` is interactive**; `resize` and the window menu are
+  ignored until the window manager exists. Key repeat is done by clients from
+  the `repeat_info` we send (as the protocol intends), not by the compositor.
+- **Drag and drop** is refused (the source is cancelled); there is no touch,
+  tablet or gesture support, and no pointer constraints or relative-pointer
+  protocol (games).
+- **Popups** that asked for a grab take the keyboard and are told to close
+  (`popup_done`) by a click outside them; clicking inside one closes only the
+  popups opened after it.
+- **Clipboard.** `set_selection` is honoured only from the client holding
+  keyboard focus (a background program can't silently replace what you copied),
+  and the selection is announced to a client whenever focus moves to it.
+- **Move.** `xdg_toplevel.move` with the serial of the latest button press starts
+  an interactive drag; the client sees no pointer events until release.
+
+Input backends: **headless** reads a FIFO (`REI_HEADLESS_INPUT`, for tests and
+scripting); **nested** forwards the parent's seat, hiding the parent's cursor
+and releasing held keys when it loses focus. **libinput** is not here yet: it
+needs libseat to open devices without root, so it arrives with the DRM backend
+(milestone 8).
+
+### A listener-list pitfall
+
+`wl_signal_emit()` is only safe if a listener removes *itself*. When a client
+dies, its `wl_surface` is destroyed before its xdg objects, and the surface's
+destroy listeners run while the window is still mapped: unmapping changes
+keyboard focus, which unlinks the focus listeners from the very list being
+walked, and `wl_signal_emit` then spins forever on a self-linked node. Surface
+and data-source destruction therefore use `rei_signal_emit()`
+(`util/wlsignal.h`), which detaches each listener before calling it.
+
+## Protocol objects (`src/proto/`)
+
+| global | version | notes |
+|---|---|---|
+| `wl_compositor` | 6 | surfaces, regions, frame callbacks, buffer scale |
+| `wl_subcompositor` | 1 | sync/desync, positioning, z-order |
+| `wl_shm` | 1 | ARGB8888, XRGB8888 |
+| `xdg_wm_base` | 5 | toplevels, popups, positioners, window geometry |
+| `wl_output` | 4 | one per output; removal has a 5 s grace period |
+| `wl_seat` | 7 | keyboard and pointer, offered by the backend |
+| `wl_data_device_manager` | 3 | clipboard; drag-and-drop is refused (cancelled) for now |
 
 Object lifetimes follow one rule: when a client disconnects, libwayland destroys
 its objects in id order, so a parent object can die before the role object that
@@ -127,7 +240,7 @@ These are deliberate and tracked by later milestones:
   clipboard objects exist, but `rei_data_device_send_selection()` has no caller
   until keyboard focus does.
 - **Popups** are positioned from anchor/gravity/offset only: constraint
-  adjustment (keeping them on screen) and `popup.grab` dismissal are not done.
+  adjustment (keeping them on screen) is not done.
 - **`wl_surface.damage` is ignored** and `set_buffer_transform` is stored but not
   applied: the whole buffer is re-uploaded and drawn untransformed.
 - **No server-side decorations** (`xdg-decoration`), `linux-dmabuf`,
@@ -156,11 +269,11 @@ changing the core loader. All keybindings will be configurable there.
 | 1 | event loop, thread boundary, outputs, headless + nested backends | done |
 | 2 | protocol baseline (compositor, shm, xdg-shell, seat, output, data-device) | done |
 | 3 | EGL/GLES renderer: shm upload, alpha blending, wallpaper, software cursor | done |
-| 4 | libinput + libxkbcommon, keybinding engine | |
+| 4 | libxkbcommon, keybinding engine, focus, clipboard, move (libinput moved to 8) | done |
 | 5 | tiling tree (H/V splits), floating, gaps, workspaces | |
 | 6 | window notches: close/min/max (right), drag handle (left) | |
 | 7 | toolbar (any edge): workspaces left, clock right | |
-| 8 | DRM/KMS backend, dmabuf, direct scanout, hardware cursor | |
+| 8 | DRM/KMS backend, libseat + libinput, dmabuf, direct scanout, hardware cursor | |
 | 9 | Xwayland window manager, cursor override | |
 | 10 | Qt settings application, config hot reload | |
 | 11 | PipeWire volume widget and media keys | |
@@ -173,6 +286,12 @@ changing the core loader. All keybindings will be configurable there.
   producers, rectangle sets, wallpaper fit modes;
 - `integration`: launches the real binary, connects as a Wayland client, checks
   redraws across two outputs and clean shutdown;
+- `keybindings`: combo/action parsing, config merge and validation, exact-modifier
+  matching, real xkb layouts, and a guard that the shipped default config and the
+  built-in defaults can't drift apart;
+- `input`: keyboard, pointer, focus, bindings, popup grabs, move, clipboard between
+  two clients and an abrupt client disconnect, all through the headless FIFO and
+  observed from real Wayland clients;
 - `render`: a Wayland client against the real binary on a software GL context.
   It checks the advertised globals and `wl_output` state, maps windows, a
   subsurface and a popup, checks frame callbacks and activation, provokes a
@@ -183,7 +302,11 @@ changing the core loader. All keybindings will be configurable there.
 
 The nested backend is not covered by the automated tests; it was verified by
 hand against a headless Weston parent, capturing the parent's screen with
-`weston-screenshooter`. CI-style sanitizer builds:
+`weston-screenshooter`. The suite also runs clean under sanitizers (`tests/tsan.supp` suppresses one
+shutdown race inside Mesa's llvmpipe driver; races in rei-wm itself are still
+reported). The nested backend's *input forwarding* is not covered by automated
+tests (Weston's headless mode has no input to forward); it is written and
+compiles but has only been exercised for presentation. CI-style sanitizer builds:
 
 ```bash
 meson setup build-asan -Db_sanitize=address,undefined -Db_lundef=false

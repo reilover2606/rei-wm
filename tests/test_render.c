@@ -9,78 +9,15 @@
  *
  * Exits 77 (meson's "skipped") if the machine has no usable OpenGL ES.
  */
-#include <errno.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <signal.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <time.h>
-#include <unistd.h>
-#include <wayland-client.h>
-
-#include "check.h"
-#include "xdg-shell-client-protocol.h"
-
 #define SOCKET "rei-render-test"
-#define OUT_W 800
-#define OUT_H 600
+#include "testlib.h"
 
-/* ------------------------------------------------------------------------ */
-/* Harness                                                                  */
-/* ------------------------------------------------------------------------ */
-
-static char g_dir[128], g_log[192], g_shot[192];
-static pid_t g_pid;
-
-static void sleep_ms(long ms)
+/* Writes the config for this test: a 2x2 PNM wallpaper (red, green / blue,
+ * white; stretched, the corners keep their exact colour) and one 800x600 output. */
+static void render_config(char *text, size_t len)
 {
-	struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
-	nanosleep(&ts, NULL);
-}
-
-static char *slurp(const char *path)
-{
-	FILE *f = fopen(path, "rb");
-	if (!f)
-		return NULL;
-	char *buf = calloc(1, 1 << 20);
-	size_t n = fread(buf, 1, (1 << 20) - 1, f);
-	buf[n] = '\0';
-	fclose(f);
-	return buf;
-}
-
-static bool log_has(const char *needle)
-{
-	char *log = slurp(g_log);
-	bool found = log && strstr(log, needle);
-	free(log);
-	return found;
-}
-
-static void write_text(const char *path, const char *text)
-{
-	FILE *f = fopen(path, "w");
-	CHECK(f);
-	fputs(text, f);
-	fclose(f);
-}
-
-static void start_compositor(const char *binary)
-{
-	char cfg[192], wall[192], text[1024];
-	snprintf(cfg, sizeof cfg, "%s/config.toml", g_dir);
+	char wall[192];
 	snprintf(wall, sizeof wall, "%s/wall.ppm", g_dir);
-	snprintf(g_log, sizeof g_log, "%s/log.txt", g_dir);
-	snprintf(g_shot, sizeof g_shot, "%s/rei-wm-OUT.ppm", g_dir);
-
-	/* 2x2 wallpaper: red, green / blue, white. Stretched, the corners keep
-	 * their exact colour. */
 	FILE *f = fopen(wall, "wb");
 	CHECK(f);
 	fputs("P6\n2 2\n255\n", f);
@@ -88,354 +25,10 @@ static void start_compositor(const char *binary)
 	fwrite(px, 1, sizeof px, f);
 	fclose(f);
 
-	snprintf(text, sizeof text,
+	snprintf(text, len,
 		 "[wallpaper]\npath = \"%s\"\nmode = \"stretch\"\n"
 		 "[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n", wall, OUT_W, OUT_H);
-	write_text(cfg, text);
-
-	g_pid = fork();
-	CHECK(g_pid >= 0);
-	if (g_pid == 0) {
-		setenv("XDG_RUNTIME_DIR", g_dir, 1);
-		unsetenv("WAYLAND_DISPLAY");
-		int fd = open(g_log, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-		dup2(fd, STDERR_FILENO);
-		execl(binary, binary, "-c", cfg, "-b", "headless", "-s", SOCKET, "-v", (char *)NULL);
-		_exit(127);
-	}
-
-	char sock[192];
-	snprintf(sock, sizeof sock, "%s/%s", g_dir, SOCKET);
-	struct stat st;
-	for (int t = 0; stat(sock, &st) != 0; t += 20) {
-		int status;
-		CHECK(waitpid(g_pid, &status, WNOHANG) == 0);
-		CHECK(t < 5000);
-		sleep_ms(20);
-	}
-
-	/* Rendering needs OpenGL ES; without it there is nothing to verify. */
-	for (int t = 0;; t += 20) {
-		if (log_has("rendering with"))
-			break;
-		if (log_has("OpenGL ES unavailable")) {
-			fprintf(stderr, "test_render: no OpenGL ES here, skipping\n");
-			kill(g_pid, SIGTERM);
-			waitpid(g_pid, NULL, 0);
-			exit(77);
-		}
-		CHECK(t < 8000);
-		sleep_ms(20);
-	}
 }
-
-static int stop_compositor(void)
-{
-	CHECK(kill(g_pid, SIGTERM) == 0);
-	int status = 0;
-	for (int t = 0;; t += 10) {
-		pid_t r = waitpid(g_pid, &status, WNOHANG);
-		if (r == g_pid)
-			break;
-		CHECK(r == 0);
-		CHECK(t < 5000);
-		sleep_ms(10);
-	}
-	return WIFEXITED(status) ? WEXITSTATUS(status) : 128;
-}
-
-/* ------------------------------------------------------------------------ */
-/* Screenshots                                                              */
-/* ------------------------------------------------------------------------ */
-
-struct ppm {
-	int w, h;
-	uint8_t *rgb;
-};
-
-static struct ppm screenshot(void)
-{
-	unlink(g_shot);
-	CHECK(kill(g_pid, SIGUSR2) == 0);
-	struct stat st;
-	for (int t = 0; stat(g_shot, &st) != 0; t += 20) {
-		CHECK(t < 5000);
-		sleep_ms(20);
-	}
-	FILE *f = fopen(g_shot, "rb");
-	CHECK(f);
-	struct ppm img;
-	int maxv;
-	CHECK(fscanf(f, "P6 %d %d %d", &img.w, &img.h, &maxv) == 3 && maxv == 255);
-	CHECK(fgetc(f) == '\n');
-	img.rgb = malloc((size_t)img.w * (size_t)img.h * 3);
-	CHECK(fread(img.rgb, 1, (size_t)img.w * (size_t)img.h * 3, f) == (size_t)img.w * (size_t)img.h * 3);
-	fclose(f);
-	return img;
-}
-
-static void expect_px(const struct ppm *img, int x, int y, int r, int g, int b, int tol,
-		      const char *what)
-{
-	const uint8_t *p = img->rgb + ((size_t)y * (size_t)img->w + (size_t)x) * 3;
-	if (abs(p[0] - r) > tol || abs(p[1] - g) > tol || abs(p[2] - b) > tol) {
-		fprintf(stderr, "pixel (%d,%d) [%s]: got (%d,%d,%d), expected (%d,%d,%d) +-%d\n",
-			x, y, what, p[0], p[1], p[2], r, g, b, tol);
-		exit(1);
-	}
-}
-
-static bool near_px(const struct ppm *img, int x, int y, int r, int g, int b, int tol)
-{
-	const uint8_t *p = img->rgb + ((size_t)y * (size_t)img->w + (size_t)x) * 3;
-	return abs(p[0] - r) <= tol && abs(p[1] - g) <= tol && abs(p[2] - b) <= tol;
-}
-
-/* ------------------------------------------------------------------------ */
-/* Client                                                                   */
-/* ------------------------------------------------------------------------ */
-
-struct global_info {
-	char name[48];
-	uint32_t version;
-};
-
-struct client {
-	struct wl_display *d;
-	struct wl_registry *registry;
-	struct wl_compositor *compositor;
-	struct wl_subcompositor *subcompositor;
-	struct wl_shm *shm;
-	struct xdg_wm_base *wm;
-	struct wl_seat *seat;
-	struct wl_data_device_manager *ddm;
-	struct wl_output *output;
-	struct global_info globals[32];
-	int n_globals;
-
-	/* wl_output events */
-	int out_x, out_y, out_w, out_h, out_refresh, out_scale, out_mode_flags;
-	char out_name[32];
-	bool out_done;
-	char seat_name[32];
-	uint32_t seat_caps;
-};
-
-static void out_geometry(void *d, struct wl_output *o, int32_t x, int32_t y, int32_t pw, int32_t ph,
-			 int32_t sub, const char *make, const char *model, int32_t tr)
-{
-	(void)o; (void)pw; (void)ph; (void)sub; (void)make; (void)model; (void)tr;
-	struct client *c = d;
-	c->out_x = x;
-	c->out_y = y;
-}
-static void out_mode(void *d, struct wl_output *o, uint32_t flags, int32_t w, int32_t h, int32_t r)
-{
-	(void)o;
-	struct client *c = d;
-	c->out_mode_flags = (int)flags;
-	c->out_w = w;
-	c->out_h = h;
-	c->out_refresh = r;
-}
-static void out_done(void *d, struct wl_output *o) { (void)o; ((struct client *)d)->out_done = true; }
-static void out_scale(void *d, struct wl_output *o, int32_t s) { (void)o; ((struct client *)d)->out_scale = s; }
-static void out_name(void *d, struct wl_output *o, const char *n)
-{
-	(void)o;
-	snprintf(((struct client *)d)->out_name, 32, "%s", n);
-}
-static void out_desc(void *d, struct wl_output *o, const char *n) { (void)d; (void)o; (void)n; }
-static const struct wl_output_listener out_listener = {
-	out_geometry, out_mode, out_done, out_scale, out_name, out_desc,
-};
-
-static void seat_caps(void *d, struct wl_seat *s, uint32_t caps) { (void)s; ((struct client *)d)->seat_caps = caps; }
-static void seat_name(void *d, struct wl_seat *s, const char *n)
-{
-	(void)s;
-	snprintf(((struct client *)d)->seat_name, 32, "%s", n);
-}
-static const struct wl_seat_listener seat_listener = { seat_caps, seat_name };
-
-static void wm_ping(void *d, struct xdg_wm_base *wm, uint32_t serial) { (void)d; xdg_wm_base_pong(wm, serial); }
-static const struct xdg_wm_base_listener wm_listener = { wm_ping };
-
-static void reg_global(void *data, struct wl_registry *reg, uint32_t name, const char *iface, uint32_t version)
-{
-	struct client *c = data;
-	CHECK(c->n_globals < 32);
-	snprintf(c->globals[c->n_globals].name, sizeof c->globals[0].name, "%s", iface);
-	c->globals[c->n_globals++].version = version;
-
-	if (!strcmp(iface, "wl_compositor"))
-		c->compositor = wl_registry_bind(reg, name, &wl_compositor_interface, version);
-	else if (!strcmp(iface, "wl_subcompositor"))
-		c->subcompositor = wl_registry_bind(reg, name, &wl_subcompositor_interface, version);
-	else if (!strcmp(iface, "wl_shm"))
-		c->shm = wl_registry_bind(reg, name, &wl_shm_interface, version);
-	else if (!strcmp(iface, "xdg_wm_base")) {
-		c->wm = wl_registry_bind(reg, name, &xdg_wm_base_interface, version);
-		xdg_wm_base_add_listener(c->wm, &wm_listener, c);
-	} else if (!strcmp(iface, "wl_seat")) {
-		c->seat = wl_registry_bind(reg, name, &wl_seat_interface, version);
-		wl_seat_add_listener(c->seat, &seat_listener, c);
-	} else if (!strcmp(iface, "wl_data_device_manager"))
-		c->ddm = wl_registry_bind(reg, name, &wl_data_device_manager_interface, version);
-	else if (!strcmp(iface, "wl_output") && !c->output) {
-		c->output = wl_registry_bind(reg, name, &wl_output_interface, version);
-		wl_output_add_listener(c->output, &out_listener, c);
-	}
-}
-static void reg_remove(void *d, struct wl_registry *r, uint32_t n) { (void)d; (void)r; (void)n; }
-static const struct wl_registry_listener reg_listener = { reg_global, reg_remove };
-
-static void client_connect(struct client *c)
-{
-	memset(c, 0, sizeof *c);
-	setenv("XDG_RUNTIME_DIR", g_dir, 1);
-	c->d = wl_display_connect(SOCKET);
-	CHECK(c->d);
-	c->registry = wl_display_get_registry(c->d);
-	wl_registry_add_listener(c->registry, &reg_listener, c);
-	CHECK(wl_display_roundtrip(c->d) >= 0);
-	CHECK(wl_display_roundtrip(c->d) >= 0);  /* second trip: events of the bound objects */
-}
-
-static uint32_t global_version(const struct client *c, const char *name)
-{
-	for (int i = 0; i < c->n_globals; i++) {
-		if (!strcmp(c->globals[i].name, name))
-			return c->globals[i].version;
-	}
-	return 0;
-}
-
-/* Pumps events for up to timeout_ms; returns once `*flag` is set. */
-static bool wait_for(struct client *c, const bool *flag, int timeout_ms)
-{
-	for (int t = 0; t < timeout_ms && !*flag; t += 10) {
-		while (wl_display_prepare_read(c->d) != 0)
-			wl_display_dispatch_pending(c->d);
-		wl_display_flush(c->d);
-		struct pollfd pfd = { wl_display_get_fd(c->d), POLLIN, 0 };
-		if (poll(&pfd, 1, 10) > 0)
-			wl_display_read_events(c->d);
-		else
-			wl_display_cancel_read(c->d);
-		wl_display_dispatch_pending(c->d);
-	}
-	return *flag;
-}
-
-/* ---- buffers --------------------------------------------------------- */
-
-static struct wl_buffer *make_buffer(struct client *c, int w, int h, uint32_t format, uint32_t pixel)
-{
-	size_t size = (size_t)w * (size_t)h * 4;
-	int fd = memfd_create("test-buf", MFD_CLOEXEC);
-	CHECK(fd >= 0 && ftruncate(fd, (off_t)size) == 0);
-	uint32_t *px = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	CHECK(px != MAP_FAILED);
-	for (size_t i = 0; i < size / 4; i++)
-		px[i] = pixel;
-	munmap(px, size);
-	struct wl_shm_pool *pool = wl_shm_create_pool(c->shm, fd, (int32_t)size);
-	struct wl_buffer *buf = wl_shm_pool_create_buffer(pool, 0, w, h, w * 4, format);
-	wl_shm_pool_destroy(pool);
-	close(fd);
-	return buf;
-}
-
-/* ---- windows --------------------------------------------------------- */
-
-struct window {
-	struct client *c;
-	struct wl_surface *surface;
-	struct xdg_surface *xs;
-	struct xdg_toplevel *tl;
-	struct xdg_popup *popup;
-	bool configured, activated, frame_done, popup_configured;
-	uint32_t serial;
-	int n_configures;
-	int popup_x, popup_y, popup_w, popup_h;
-};
-
-static void xs_configure(void *d, struct xdg_surface *xs, uint32_t serial)
-{
-	struct window *w = d;
-	w->serial = serial;
-	w->configured = true;
-	w->n_configures++;
-	xdg_surface_ack_configure(xs, serial);
-}
-static const struct xdg_surface_listener xs_listener = { xs_configure };
-
-static void tl_configure(void *d, struct xdg_toplevel *t, int32_t wd, int32_t h, struct wl_array *states)
-{
-	(void)t; (void)wd; (void)h;
-	struct window *w = d;
-	w->activated = false;
-	uint32_t *s;
-	wl_array_for_each(s, states) {
-		if (*s == XDG_TOPLEVEL_STATE_ACTIVATED)
-			w->activated = true;
-	}
-}
-static void tl_close(void *d, struct xdg_toplevel *t) { (void)d; (void)t; }
-static void tl_bounds(void *d, struct xdg_toplevel *t, int32_t a, int32_t b) { (void)d; (void)t; (void)a; (void)b; }
-static void tl_caps(void *d, struct xdg_toplevel *t, struct wl_array *a) { (void)d; (void)t; (void)a; }
-static const struct xdg_toplevel_listener tl_listener = { tl_configure, tl_close, tl_bounds, tl_caps };
-
-static void popup_configure(void *d, struct xdg_popup *p, int32_t x, int32_t y, int32_t wd, int32_t h)
-{
-	(void)p;
-	struct window *w = d;
-	w->popup_x = x; w->popup_y = y; w->popup_w = wd; w->popup_h = h;
-	w->popup_configured = true;
-}
-static void popup_done(void *d, struct xdg_popup *p) { (void)d; (void)p; }
-static void popup_repositioned(void *d, struct xdg_popup *p, uint32_t t) { (void)d; (void)p; (void)t; }
-static const struct xdg_popup_listener popup_listener = { popup_configure, popup_done, popup_repositioned };
-
-static void frame_done_cb(void *d, struct wl_callback *cb, uint32_t time)
-{
-	(void)time;
-	((struct window *)d)->frame_done = true;
-	wl_callback_destroy(cb);
-}
-static const struct wl_callback_listener frame_listener = { frame_done_cb };
-
-/* Creates a toplevel and performs the initial commit/configure handshake, but
- * does not attach a buffer yet. */
-static void toplevel_create(struct client *c, struct window *w, const char *title)
-{
-	memset(w, 0, sizeof *w);
-	w->c = c;
-	w->surface = wl_compositor_create_surface(c->compositor);
-	w->xs = xdg_wm_base_get_xdg_surface(c->wm, w->surface);
-	xdg_surface_add_listener(w->xs, &xs_listener, w);
-	w->tl = xdg_surface_get_toplevel(w->xs);
-	xdg_toplevel_add_listener(w->tl, &tl_listener, w);
-	xdg_toplevel_set_title(w->tl, title);
-	xdg_toplevel_set_app_id(w->tl, "rei-test");
-	wl_surface_commit(w->surface);
-	CHECK(wait_for(c, &w->configured, 3000));
-}
-
-static void window_show(struct window *w, struct wl_buffer *buf, bool want_frame)
-{
-	wl_surface_attach(w->surface, buf, 0, 0);
-	wl_surface_damage(w->surface, 0, 0, 1 << 20, 1 << 20);
-	if (want_frame) {
-		w->frame_done = false;
-		struct wl_callback *cb = wl_surface_frame(w->surface);
-		wl_callback_add_listener(cb, &frame_listener, w);
-	}
-	wl_surface_commit(w->surface);
-}
-
-/* ------------------------------------------------------------------------ */
 
 static void test_globals_and_output(struct client *c)
 {
@@ -457,7 +50,7 @@ static void test_globals_and_output(struct client *c)
 	CHECK_STR(c->out_name, "OUT");
 
 	CHECK_STR(c->seat_name, "seat0");
-	CHECK(c->seat_caps == 0);  /* No input devices until milestone 4. */
+	CHECK(c->seat_caps == (WL_SEAT_CAPABILITY_POINTER | WL_SEAT_CAPABILITY_KEYBOARD));
 }
 
 /* A second client misbehaves; it is disconnected and nobody else notices. */
@@ -493,21 +86,17 @@ static void test_protocol_error_is_contained(struct client *good)
 	CHECK(rt >= 0);  /* the good client is unaffected */
 }
 
-/* Under LeakSanitizer, don't report this test client's own undestroyed proxies
- * and buffers: it exits right after, and they're not what is being tested. The
- * compositor runs as a separate process and is still fully leak-checked. */
-extern void __lsan_disable(void) __attribute__((weak));
-
 int main(int argc, char **argv)
 {
 	CHECK(argc == 2);
-	if (__lsan_disable)
-		__lsan_disable();
+	quiet_client_leaks();
 	snprintf(g_dir, sizeof g_dir, "/tmp/rei-render-test-XXXXXX");
 	CHECK(mkdtemp(g_dir));
 	chmod(g_dir, 0700);
 
-	start_compositor(argv[1]);
+	char config[1024];
+	render_config(config, sizeof config);
+	start_compositor(argv[1], config, false);
 
 	struct client c;
 	client_connect(&c);

@@ -95,6 +95,14 @@ static unsigned long long summary_field(const char *log, const char *output, con
 	return strtoull(f + strlen(needle), NULL, 10);
 }
 
+static pid_t g_child;
+
+static void kill_child_at_exit(void)
+{
+	if (g_child > 0)
+		kill(g_child, SIGKILL);
+}
+
 int main(int argc, char **argv)
 {
 	CHECK(argc == 2);
@@ -114,6 +122,10 @@ int main(int argc, char **argv)
 
 	pid_t pid = fork();
 	CHECK(pid >= 0);
+	if (pid > 0) {
+		g_child = pid;
+		atexit(kill_child_at_exit);
+	}
 	if (pid == 0) {
 		setenv("XDG_RUNTIME_DIR", dir, 1);
 		unsetenv("WAYLAND_DISPLAY");
@@ -170,6 +182,7 @@ int main(int argc, char **argv)
 		CHECK(polls++ < 500);  /* 5 s: shutdown must not hang */
 		sleep_ms(10);
 	}
+	g_child = 0;  /* Reaped. */
 	CHECK(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 
 	char *log = slurp(logpath);

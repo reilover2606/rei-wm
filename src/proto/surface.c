@@ -7,6 +7,7 @@
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
+#include "util/wlsignal.h"
 
 /* ------------------------------------------------------------------------ */
 /* Rectangle sets                                                           */
@@ -227,6 +228,7 @@ static void apply_state(struct rei_surface *s, struct rei_surface_state *st)
 		st->opaque_set = false;
 	}
 	if (st->input_set) {
+		s->input_default = false;
 		rei_rects_clear(&s->input);
 		s->input = st->input;
 		st->input = (struct rei_rects){ 0 };
@@ -491,7 +493,9 @@ static void surface_resource_destroy(struct wl_resource *resource)
 {
 	struct rei_surface *s = wl_resource_get_user_data(resource);
 
-	wl_signal_emit(&s->destroy_signal, s);
+	/* Listeners (xdg_surface, subsurface, input focus) may unlink each other as
+	 * they react, so this must not be a plain wl_signal_emit(). */
+	rei_signal_emit(&s->destroy_signal, s);
 
 	/* Subsurfaces (as parent or child) detach themselves via destroy_signal. */
 
@@ -527,6 +531,7 @@ static void compositor_create_surface(struct wl_client *client,
 	s->server = server;
 	s->resource = res;
 	s->scale = 1;
+	s->input_default = true;
 	state_init(&s->pending);
 	state_init(&s->cached);
 	wl_list_init(&s->frames);
@@ -823,6 +828,42 @@ void rei_surface_emit(const struct rei_surface *s, float ox, float oy,
 					 oy + (float)entry->y, snap);
 		}
 	}
+}
+
+static bool input_accepts(const struct rei_surface *s, double lx, double ly)
+{
+	if (s->input_default)
+		return true;
+	for (size_t i = 0; i < s->input.n; i++) {
+		const struct rei_rect *r = &s->input.items[i];
+		if (lx >= r->x && lx < (double)r->x + r->w && ly >= r->y && ly < (double)r->y + r->h)
+			return true;
+	}
+	return false;
+}
+
+bool rei_surface_pick(const struct rei_surface *s, double ox, double oy,
+		      double x, double y, struct rei_surface **out, double *sx, double *sy)
+{
+	/* Back to front is the drawing order, so walk it in reverse. */
+	const struct rei_subsurface *entry;
+	wl_list_for_each_reverse(entry, &s->subs, link) {
+		if (entry == s->self_marker) {
+			double lx = x - ox, ly = y - oy;
+			if (s->content && lx >= 0 && ly >= 0 && lx < s->width && ly < s->height &&
+			    input_accepts(s, lx, ly)) {
+				*out = (struct rei_surface *)s;
+				*sx = lx;
+				*sy = ly;
+				return true;
+			}
+		} else if (entry->surface &&
+			   rei_surface_pick(entry->surface, ox + entry->x, oy + entry->y,
+					    x, y, out, sx, sy)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 void rei_surface_fire_frames(struct rei_surface *s, uint64_t serial, uint32_t time_ms)

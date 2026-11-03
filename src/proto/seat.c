@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <wayland-server-protocol.h>
 
+#include "input/input.h"
+#include "input/xkb.h"
 #include "proto/data_device.h"
 #include "proto/surface.h"
 #include "server.h"
@@ -36,6 +38,11 @@ static const struct wl_pointer_interface pointer_impl = {
 	.release = release_request,
 };
 
+static void device_resource_destroy(struct wl_resource *r)
+{
+	wl_list_remove(wl_resource_get_link(r));
+}
+
 static const struct wl_keyboard_interface keyboard_impl = {
 	.release = release_request,
 };
@@ -66,7 +73,9 @@ static void seat_get_pointer(struct wl_client *client, struct wl_resource *seat_
 		wl_client_post_no_memory(client);
 		return;
 	}
-	wl_resource_set_implementation(r, &pointer_impl, wl_resource_get_user_data(seat_res), NULL);
+	struct rei_seat *seat = wl_resource_get_user_data(seat_res);
+	wl_resource_set_implementation(r, &pointer_impl, seat, device_resource_destroy);
+	wl_list_insert(&seat->pointers, wl_resource_get_link(r));
 }
 
 static void seat_get_keyboard(struct wl_client *client, struct wl_resource *seat_res, uint32_t id)
@@ -79,7 +88,30 @@ static void seat_get_keyboard(struct wl_client *client, struct wl_resource *seat
 		wl_client_post_no_memory(client);
 		return;
 	}
-	wl_resource_set_implementation(r, &keyboard_impl, wl_resource_get_user_data(seat_res), NULL);
+	struct rei_seat *seat = wl_resource_get_user_data(seat_res);
+	wl_resource_set_implementation(r, &keyboard_impl, seat, device_resource_destroy);
+	wl_list_insert(&seat->keyboards, wl_resource_get_link(r));
+
+	struct rei_input *in = seat->server->input;
+	wl_keyboard_send_keymap(r, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, in->xkb->keymap_fd,
+				in->xkb->keymap_size);
+	if (wl_resource_get_version(r) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)
+		wl_keyboard_send_repeat_info(r, seat->server->config->repeat_rate,
+					     seat->server->config->repeat_delay);
+
+	/* A client that binds its keyboard while it already has focus still needs
+	 * the enter event, or it would never see keys. */
+	if (in->keyboard_focus && wl_resource_get_client(in->keyboard_focus->resource) == client) {
+		struct wl_array keys;
+		wl_array_init(&keys);
+		for (size_t i = 0; i < in->n_pressed; i++)
+			*(uint32_t *)wl_array_add(&keys, sizeof(uint32_t)) = in->pressed[i];
+		uint32_t serial = wl_display_next_serial(seat->server->display);
+		wl_keyboard_send_enter(r, serial, in->keyboard_focus->resource, &keys);
+		wl_array_release(&keys);
+		struct rei_xkb_mods m = rei_xkb_serialize(in->xkb);
+		wl_keyboard_send_modifiers(r, serial, m.depressed, m.latched, m.locked, m.group);
+	}
 }
 
 static void seat_get_touch(struct wl_client *client, struct wl_resource *seat_res, uint32_t id)
@@ -129,6 +161,8 @@ bool rei_seat_init(struct rei_server *server)
 	seat->server = server;
 	wl_list_init(&seat->resources);
 	wl_list_init(&seat->data_devices);
+	wl_list_init(&seat->pointers);
+	wl_list_init(&seat->keyboards);
 	seat->global = wl_global_create(server->display, &wl_seat_interface, 7, seat, seat_bind);
 	if (!seat->global) {
 		free(seat);
@@ -153,4 +187,132 @@ void rei_seat_set_capabilities(struct rei_seat *seat, uint32_t capabilities)
 	struct wl_resource *r;
 	wl_resource_for_each(r, &seat->resources)
 		wl_seat_send_capabilities(r, capabilities);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Event delivery                                                           */
+/* ------------------------------------------------------------------------ */
+
+static struct wl_client *client_of(const struct rei_surface *surface)
+{
+	return wl_resource_get_client(surface->resource);
+}
+
+/* Runs `fn` for every pointer object belonging to the surface's client. */
+#define FOR_CLIENT_POINTERS(seat, surface, res)                                \
+	struct wl_resource *res;                                               \
+	wl_resource_for_each(res, &(seat)->pointers)                           \
+		if (wl_resource_get_client(res) == client_of(surface))
+
+#define FOR_CLIENT_KEYBOARDS(seat, surface, res)                               \
+	struct wl_resource *res;                                               \
+	wl_resource_for_each(res, &(seat)->keyboards)                          \
+		if (wl_resource_get_client(res) == client_of(surface))
+
+static void pointer_frame(struct wl_resource *r)
+{
+	if (wl_resource_get_version(r) >= WL_POINTER_FRAME_SINCE_VERSION)
+		wl_pointer_send_frame(r);
+}
+
+uint32_t rei_seat_pointer_enter(struct rei_seat *seat, struct rei_surface *surface, double sx, double sy)
+{
+	uint32_t serial = wl_display_next_serial(seat->server->display);
+	FOR_CLIENT_POINTERS(seat, surface, r) {
+		wl_pointer_send_enter(r, serial, surface->resource,
+				      wl_fixed_from_double(sx), wl_fixed_from_double(sy));
+		pointer_frame(r);
+	}
+	return serial;
+}
+
+void rei_seat_pointer_leave(struct rei_seat *seat, struct rei_surface *surface)
+{
+	uint32_t serial = wl_display_next_serial(seat->server->display);
+	FOR_CLIENT_POINTERS(seat, surface, r) {
+		wl_pointer_send_leave(r, serial, surface->resource);
+		pointer_frame(r);
+	}
+}
+
+void rei_seat_pointer_motion(struct rei_seat *seat, struct rei_surface *surface,
+			     uint32_t time_ms, double sx, double sy)
+{
+	FOR_CLIENT_POINTERS(seat, surface, r) {
+		wl_pointer_send_motion(r, time_ms, wl_fixed_from_double(sx), wl_fixed_from_double(sy));
+		pointer_frame(r);
+	}
+}
+
+uint32_t rei_seat_pointer_button(struct rei_seat *seat, struct rei_surface *surface,
+				 uint32_t time_ms, uint32_t button, bool pressed)
+{
+	uint32_t serial = wl_display_next_serial(seat->server->display);
+	FOR_CLIENT_POINTERS(seat, surface, r) {
+		wl_pointer_send_button(r, serial, time_ms, button,
+				       pressed ? WL_POINTER_BUTTON_STATE_PRESSED
+					       : WL_POINTER_BUTTON_STATE_RELEASED);
+		pointer_frame(r);
+	}
+	return serial;
+}
+
+void rei_seat_pointer_axis(struct rei_seat *seat, struct rei_surface *surface,
+			   uint32_t time_ms, bool horizontal, double value)
+{
+	FOR_CLIENT_POINTERS(seat, surface, r) {
+		if (wl_resource_get_version(r) >= WL_POINTER_AXIS_SOURCE_SINCE_VERSION)
+			wl_pointer_send_axis_source(r, WL_POINTER_AXIS_SOURCE_WHEEL);
+		uint32_t axis = horizontal ? WL_POINTER_AXIS_HORIZONTAL_SCROLL
+					   : WL_POINTER_AXIS_VERTICAL_SCROLL;
+		if (value == 0.0) {
+			if (wl_resource_get_version(r) >= WL_POINTER_AXIS_STOP_SINCE_VERSION)
+				wl_pointer_send_axis_stop(r, time_ms, axis);
+		} else {
+			wl_pointer_send_axis(r, time_ms, axis, wl_fixed_from_double(value));
+		}
+		pointer_frame(r);
+	}
+}
+
+void rei_seat_keyboard_enter(struct rei_seat *seat, struct rei_surface *surface,
+			     const uint32_t *keys, size_t n_keys)
+{
+	struct wl_array arr;
+	wl_array_init(&arr);
+	for (size_t i = 0; i < n_keys; i++)
+		*(uint32_t *)wl_array_add(&arr, sizeof(uint32_t)) = keys[i];
+
+	uint32_t serial = wl_display_next_serial(seat->server->display);
+	struct rei_xkb_mods m = rei_xkb_serialize(seat->server->input->xkb);
+	FOR_CLIENT_KEYBOARDS(seat, surface, r) {
+		wl_keyboard_send_enter(r, serial, surface->resource, &arr);
+		wl_keyboard_send_modifiers(r, serial, m.depressed, m.latched, m.locked, m.group);
+	}
+	wl_array_release(&arr);
+}
+
+void rei_seat_keyboard_leave(struct rei_seat *seat, struct rei_surface *surface)
+{
+	uint32_t serial = wl_display_next_serial(seat->server->display);
+	FOR_CLIENT_KEYBOARDS(seat, surface, r)
+		wl_keyboard_send_leave(r, serial, surface->resource);
+}
+
+void rei_seat_keyboard_key(struct rei_seat *seat, struct rei_surface *surface,
+			   uint32_t time_ms, uint32_t key, bool pressed)
+{
+	uint32_t serial = wl_display_next_serial(seat->server->display);
+	FOR_CLIENT_KEYBOARDS(seat, surface, r)
+		wl_keyboard_send_key(r, serial, time_ms, key,
+				     pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
+					     : WL_KEYBOARD_KEY_STATE_RELEASED);
+}
+
+void rei_seat_keyboard_modifiers(struct rei_seat *seat, struct rei_surface *surface)
+{
+	uint32_t serial = wl_display_next_serial(seat->server->display);
+	struct rei_xkb_mods m = rei_xkb_serialize(seat->server->input->xkb);
+	FOR_CLIENT_KEYBOARDS(seat, surface, r)
+		wl_keyboard_send_modifiers(r, serial, m.depressed, m.latched, m.locked, m.group);
 }

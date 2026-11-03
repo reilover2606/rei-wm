@@ -6,8 +6,11 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client.h>
+#include <wayland-server-protocol.h>
 
 #include "backend/backend.h"
+#include "input/input.h"
+#include "proto/seat.h"
 #include "messages.h"
 #include "render/gles.h"
 #include "render_thread.h"
@@ -21,6 +24,11 @@
  * Runs rei-wm as a client of another Wayland compositor: each output is a
  * toplevel window in the parent. This is how the compositor is developed on a
  * machine that is already running a desktop.
+ *
+ * Input: the parent's keyboard and pointer, as delivered to our windows, are
+ * forwarded as rei-wm's own input. Beware that the parent compositor sees key
+ * combinations first, so a composition key of "super" is usually swallowed by
+ * it; set composition_key = "alt" when developing nested.
  *
  * Presentation: each output's render thread draws with the OpenGL renderer,
  * reads the frame back into a shared-memory file and hands it to the event
@@ -89,6 +97,10 @@ struct nested_backend {
 	struct wl_shm *shm;
 	struct xdg_wm_base *wm_base;
 	struct event *fd_event;
+	struct wl_seat *parent_seat;
+	struct wl_pointer *parent_pointer;
+	struct wl_keyboard *parent_keyboard;
+	struct nested_window *pointer_window;  /* The window the pointer is over. */
 	struct wl_list windows;
 	struct rei_msgq inbox;  /* frames from render threads */
 	bool inbox_ready;
@@ -304,6 +316,8 @@ static const struct xdg_surface_listener xdg_surface_listener = {
 
 static void window_destroy(struct nested_window *w)
 {
+	if (w->nb->pointer_window == w)
+		w->nb->pointer_window = NULL;
 	if (w->output)
 		rei_server_remove_output(w->nb->base.server, w->output);
 	struct nested_buffer *nbuf, *ntmp;
@@ -378,6 +392,173 @@ static struct nested_window *window_create(struct nested_backend *nb, size_t ind
 	return w;
 }
 
+/* ---- input forwarding ---------------------------------------------------- */
+
+static uint32_t now_ms(void)
+{
+	return (uint32_t)(rei_now_ns() / 1000000ull);
+}
+
+static void pointer_enter(void *data, struct wl_pointer *p, uint32_t serial,
+			  struct wl_surface *surface, wl_fixed_t sx, wl_fixed_t sy)
+{
+	struct nested_backend *nb = data;
+	struct nested_window *w;
+	nb->pointer_window = NULL;
+	wl_list_for_each(w, &nb->windows, link) {
+		if (w->surface == surface)
+			nb->pointer_window = w;
+	}
+	/* rei-wm draws its own cursor; hide the parent's so there aren't two. */
+	wl_pointer_set_cursor(p, serial, NULL, 0, 0);
+
+	if (nb->pointer_window && nb->pointer_window->output) {
+		const struct rei_output *o = nb->pointer_window->output;
+		rei_input_pointer_motion_abs(nb->base.server, now_ms(),
+					     o->x + wl_fixed_to_double(sx) / o->scale,
+					     o->y + wl_fixed_to_double(sy) / o->scale);
+	}
+}
+
+static void pointer_leave(void *data, struct wl_pointer *p, uint32_t serial, struct wl_surface *s)
+{
+	(void)p; (void)serial; (void)s;
+	((struct nested_backend *)data)->pointer_window = NULL;
+}
+
+static void pointer_motion(void *data, struct wl_pointer *p, uint32_t time,
+			   wl_fixed_t sx, wl_fixed_t sy)
+{
+	(void)p;
+	struct nested_backend *nb = data;
+	if (!nb->pointer_window || !nb->pointer_window->output)
+		return;
+	const struct rei_output *o = nb->pointer_window->output;
+	rei_input_pointer_motion_abs(nb->base.server, time,
+				     o->x + wl_fixed_to_double(sx) / o->scale,
+				     o->y + wl_fixed_to_double(sy) / o->scale);
+}
+
+static void pointer_button(void *data, struct wl_pointer *p, uint32_t serial, uint32_t time,
+			   uint32_t button, uint32_t state)
+{
+	(void)p; (void)serial;
+	rei_input_pointer_button(((struct nested_backend *)data)->base.server, time, button,
+				 state == WL_POINTER_BUTTON_STATE_PRESSED);
+}
+
+static void pointer_axis(void *data, struct wl_pointer *p, uint32_t time, uint32_t axis,
+			 wl_fixed_t value)
+{
+	(void)p;
+	rei_input_pointer_axis(((struct nested_backend *)data)->base.server, time,
+			       axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL, wl_fixed_to_double(value));
+}
+
+static void pointer_axis_stop(void *data, struct wl_pointer *p, uint32_t time, uint32_t axis)
+{
+	(void)p;
+	rei_input_pointer_axis(((struct nested_backend *)data)->base.server, time,
+			       axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL, 0.0);
+}
+
+static void pointer_frame(void *d, struct wl_pointer *p) { (void)d; (void)p; }
+static void pointer_axis_source(void *d, struct wl_pointer *p, uint32_t s) { (void)d; (void)p; (void)s; }
+static void pointer_axis_discrete(void *d, struct wl_pointer *p, uint32_t a, int32_t v)
+{
+	(void)d; (void)p; (void)a; (void)v;
+}
+
+static const struct wl_pointer_listener pointer_listener = {
+	.enter = pointer_enter,
+	.leave = pointer_leave,
+	.motion = pointer_motion,
+	.button = pointer_button,
+	.axis = pointer_axis,
+	.frame = pointer_frame,
+	.axis_source = pointer_axis_source,
+	.axis_stop = pointer_axis_stop,
+	.axis_discrete = pointer_axis_discrete,
+};
+
+static void keyboard_keymap(void *data, struct wl_keyboard *k, uint32_t format, int32_t fd, uint32_t size)
+{
+	(void)data; (void)k; (void)format; (void)size;
+	close(fd);  /* We have our own keymap; only raw key codes are forwarded. */
+}
+
+static void keyboard_enter(void *d, struct wl_keyboard *k, uint32_t serial, struct wl_surface *s,
+			   struct wl_array *keys)
+{
+	(void)d; (void)k; (void)serial; (void)s; (void)keys;
+}
+
+static void keyboard_leave(void *data, struct wl_keyboard *k, uint32_t serial, struct wl_surface *s)
+{
+	(void)k; (void)serial; (void)s;
+	/* No more events will come for held keys, so release them ourselves. */
+	rei_input_release_all(((struct nested_backend *)data)->base.server, now_ms());
+}
+
+static void keyboard_key(void *data, struct wl_keyboard *k, uint32_t serial, uint32_t time,
+			 uint32_t key, uint32_t state)
+{
+	(void)k; (void)serial;
+	rei_input_key(((struct nested_backend *)data)->base.server, time, key,
+		      state == WL_KEYBOARD_KEY_STATE_PRESSED);
+}
+
+static void keyboard_modifiers(void *d, struct wl_keyboard *k, uint32_t serial, uint32_t a,
+			       uint32_t b, uint32_t c, uint32_t g)
+{
+	(void)d; (void)k; (void)serial; (void)a; (void)b; (void)c; (void)g;
+}
+
+static void keyboard_repeat_info(void *d, struct wl_keyboard *k, int32_t rate, int32_t delay)
+{
+	(void)d; (void)k; (void)rate; (void)delay;
+}
+
+static const struct wl_keyboard_listener keyboard_listener = {
+	.keymap = keyboard_keymap,
+	.enter = keyboard_enter,
+	.leave = keyboard_leave,
+	.key = keyboard_key,
+	.modifiers = keyboard_modifiers,
+	.repeat_info = keyboard_repeat_info,
+};
+
+static void seat_capabilities(void *data, struct wl_seat *seat, uint32_t caps)
+{
+	struct nested_backend *nb = data;
+
+	if ((caps & WL_SEAT_CAPABILITY_POINTER) && !nb->parent_pointer) {
+		nb->parent_pointer = wl_seat_get_pointer(seat);
+		wl_pointer_add_listener(nb->parent_pointer, &pointer_listener, nb);
+	} else if (!(caps & WL_SEAT_CAPABILITY_POINTER) && nb->parent_pointer) {
+		wl_pointer_release(nb->parent_pointer);
+		nb->parent_pointer = NULL;
+	}
+	if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !nb->parent_keyboard) {
+		nb->parent_keyboard = wl_seat_get_keyboard(seat);
+		wl_keyboard_add_listener(nb->parent_keyboard, &keyboard_listener, nb);
+	} else if (!(caps & WL_SEAT_CAPABILITY_KEYBOARD) && nb->parent_keyboard) {
+		wl_keyboard_release(nb->parent_keyboard);
+		nb->parent_keyboard = NULL;
+	}
+
+	/* Offer our clients exactly what the parent gives us. */
+	rei_seat_set_capabilities(nb->base.server->seat,
+				  caps & (WL_SEAT_CAPABILITY_POINTER | WL_SEAT_CAPABILITY_KEYBOARD));
+}
+
+static void seat_name(void *d, struct wl_seat *s, const char *n) { (void)d; (void)s; (void)n; }
+
+static const struct wl_seat_listener seat_listener = {
+	.capabilities = seat_capabilities,
+	.name = seat_name,
+};
+
 /* ---- registry ---------------------------------------------------------- */
 
 static void registry_global(void *data, struct wl_registry *reg, uint32_t name,
@@ -389,6 +570,10 @@ static void registry_global(void *data, struct wl_registry *reg, uint32_t name,
 						  version < 4 ? version : 4);
 	} else if (strcmp(iface, wl_shm_interface.name) == 0) {
 		nb->shm = wl_registry_bind(reg, name, &wl_shm_interface, 1);
+	} else if (strcmp(iface, wl_seat_interface.name) == 0 && !nb->parent_seat) {
+		nb->parent_seat = wl_registry_bind(reg, name, &wl_seat_interface,
+						   version < 5 ? version : 5);
+		wl_seat_add_listener(nb->parent_seat, &seat_listener, nb);
 	} else if (strcmp(iface, xdg_wm_base_interface.name) == 0) {
 		nb->wm_base = wl_registry_bind(reg, name, &xdg_wm_base_interface,
 					       version < 2 ? version : 2);
@@ -464,6 +649,7 @@ static bool nested_start(struct rei_backend *b)
 	nb->registry = wl_display_get_registry(nb->parent);
 	wl_registry_add_listener(nb->registry, &registry_listener, nb);
 	wl_display_roundtrip(nb->parent);
+	wl_display_roundtrip(nb->parent);  /* Second trip: the seat's capabilities. */
 
 	if (!nb->compositor || !nb->shm || !nb->wm_base) {
 		rei_error("nested: parent compositor lacks wl_compositor, wl_shm or xdg_wm_base");
@@ -507,6 +693,12 @@ static void nested_destroy(struct rei_backend *b)
 		rei_msgq_finish(&nb->inbox);
 	}
 
+	if (nb->parent_pointer)
+		wl_pointer_release(nb->parent_pointer);
+	if (nb->parent_keyboard)
+		wl_keyboard_release(nb->parent_keyboard);
+	if (nb->parent_seat)
+		wl_seat_release(nb->parent_seat);
 	if (nb->wm_base)
 		xdg_wm_base_destroy(nb->wm_base);
 	if (nb->shm)
