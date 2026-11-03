@@ -361,7 +361,9 @@ static uint32_t add_fb(struct drm_backend *be, int32_t w, int32_t h, uint32_t fo
 		       const uint32_t offsets[4], uint64_t modifier)
 {
 	uint32_t fb = 0;
-	uint64_t mods[4] = { modifier, modifier, modifier, modifier };
+	uint64_t mods[4] = { 0 };
+	for (int i = 0; i < 4; i++)
+		mods[i] = handles[i] ? modifier : 0;  /* Planes that are not used carry no modifier. */
 	int ret;
 	if (be->addfb_modifiers && modifier != REI_MOD_INVALID)
 		ret = drmModeAddFB2WithModifiers(be->fd, (uint32_t)w, (uint32_t)h, format, handles,
@@ -370,28 +372,28 @@ static uint32_t add_fb(struct drm_backend *be, int32_t w, int32_t h, uint32_t fo
 		ret = drmModeAddFB2(be->fd, (uint32_t)w, (uint32_t)h, format, handles, strides,
 				    offsets, &fb, 0);
 	if (ret != 0) {
-		rei_debug("drm: AddFB2 failed for %dx%d %.4s mod 0x%llx: %s", w, h,
-			  (const char *)&format, (unsigned long long)modifier, strerror(errno));
+		rei_warn("drm: AddFB2 failed for %dx%d %.4s modifier 0x%llx (%s): %s", w, h,
+			 (const char *)&format, (unsigned long long)modifier,
+			 be->addfb_modifiers && modifier != REI_MOD_INVALID ? "with modifiers" : "implicit",
+			 strerror(errno));
 		return 0;
 	}
 	return fb;
 }
 
-static struct gbm_bo *alloc_bo(struct drm_output *o, const uint64_t *mods, unsigned n_mods)
+/* Attempt 0: layouts both the plane and the renderer share. 1: let the driver
+ * choose. 2: plain linear memory, which everything can scan out. */
+static struct gbm_bo *alloc_bo(struct drm_output *o, int attempt, const uint64_t *mods, unsigned n_mods)
 {
 	struct drm_backend *be = o->be;
-	int32_t w = o->mode.hdisplay, h = o->mode.vdisplay;
-	struct gbm_bo *bo = NULL;
-	if (n_mods > 0)
-		bo = gbm_bo_create_with_modifiers2(be->gbm, (uint32_t)w, (uint32_t)h, GBM_FORMAT_XRGB8888,
-						   mods, n_mods, GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
-	if (!bo)
-		bo = gbm_bo_create(be->gbm, (uint32_t)w, (uint32_t)h, GBM_FORMAT_XRGB8888,
-				   GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING);
-	if (!bo)
-		bo = gbm_bo_create(be->gbm, (uint32_t)w, (uint32_t)h, GBM_FORMAT_XRGB8888,
-				   GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
-	return bo;
+	uint32_t w = (uint32_t)o->mode.hdisplay, h = (uint32_t)o->mode.vdisplay;
+	uint32_t use = GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING;
+	if (attempt == 0)
+		return n_mods ? gbm_bo_create_with_modifiers2(be->gbm, w, h, GBM_FORMAT_XRGB8888, mods,
+							      n_mods, use) : NULL;
+	if (attempt == 1)
+		return gbm_bo_create(be->gbm, w, h, GBM_FORMAT_XRGB8888, use);
+	return gbm_bo_create(be->gbm, w, h, GBM_FORMAT_XRGB8888, use | GBM_BO_USE_LINEAR);
 }
 
 static void swap_buf_destroy(struct drm_output *o, struct rei_gles *gles, struct swap_buf *b)
@@ -405,16 +407,13 @@ static void swap_buf_destroy(struct drm_output *o, struct rei_gles *gles, struct
 	*b = (struct swap_buf){ 0 };
 }
 
-static bool swap_buf_create(struct drm_output *o, struct rei_gles *gles, struct swap_buf *b,
-			    const uint64_t *mods, unsigned n_mods)
+static bool swap_buf_try(struct drm_output *o, struct rei_gles *gles, struct swap_buf *b, int attempt,
+			 const uint64_t *mods, unsigned n_mods)
 {
 	struct drm_backend *be = o->be;
-	b->bo = alloc_bo(o, mods, n_mods);
-	if (!b->bo) {
-		rei_error("drm: %s: cannot allocate a %dx%d scanout buffer", o->name,
-			  o->mode.hdisplay, o->mode.vdisplay);
+	b->bo = alloc_bo(o, attempt, mods, n_mods);
+	if (!b->bo)
 		return false;
-	}
 
 	int n_planes = gbm_bo_get_plane_count(b->bo);
 	uint32_t handles[4] = { 0 }, strides[4] = { 0 }, offsets[4] = { 0 };
@@ -432,18 +431,21 @@ static bool swap_buf_create(struct drm_output *o, struct rei_gles *gles, struct 
 		proto.stride[i] = strides[i];
 		proto.offset[i] = offsets[i];
 	}
+	rei_info("drm: %s: trying %s buffers: %d plane(s), modifier 0x%llx, stride %u", o->name,
+		 attempt == 0 ? "shared-layout" : attempt == 1 ? "driver-chosen" : "linear", n_planes,
+		 (unsigned long long)proto.modifier, strides[0]);
 
 	b->fb_id = add_fb(be, o->mode.hdisplay, o->mode.vdisplay, DRM_FORMAT_XRGB8888, handles, strides,
 			  offsets, proto.modifier);
-
 	struct rei_dmabuf *d = rei_dmabuf_create(&proto);  /* Takes the fds. */
 	if (d) {
 		b->glbuf = rei_gles_buffer_import(gles, d);
 		rei_dmabuf_unref(d);
 	}
 	if (!b->fb_id || !b->glbuf) {
-		rei_error("drm: %s: cannot use the scanout buffer (%s)", o->name,
-			  !b->fb_id ? "framebuffer creation failed" : "EGL import failed");
+		rei_warn("drm: %s: that layout does not work (%s)", o->name,
+			 !b->fb_id ? "framebuffer creation failed" : "EGL import failed");
+		swap_buf_destroy(o, gles, b);
 		return false;
 	}
 	return true;
@@ -466,13 +468,22 @@ static bool swapchain_create(struct drm_output *o, struct rei_gles *gles)
 	}
 	free(both);
 
-	bool ok = true;
-	for (int i = 0; i < N_SWAP && ok; i++)
-		ok = swap_buf_create(o, gles, &o->buf[i], mods, n_mods);
+	/* Try the best layout first and settle for the first that fully works. */
+	bool ok = false;
+	for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+		if (attempt == 0 && n_mods == 0)
+			continue;
+		ok = true;
+		for (int i = 0; i < N_SWAP && ok; i++)
+			ok = swap_buf_try(o, gles, &o->buf[i], attempt, mods, n_mods);
+		if (!ok) {
+			for (int i = 0; i < N_SWAP; i++)
+				swap_buf_destroy(o, gles, &o->buf[i]);
+		}
+	}
 	free(mods);
 	if (!ok) {
-		for (int i = 0; i < N_SWAP; i++)
-			swap_buf_destroy(o, gles, &o->buf[i]);
+		rei_error("drm: %s: cannot create scanout buffers in any layout", o->name);
 		return false;
 	}
 	rei_info("drm: %s: %dx%d scanout buffers ready (modifier 0x%llx)", o->name,
