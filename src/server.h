@@ -7,6 +7,7 @@
 
 #include "config.h"
 #include "decoration.h"
+#include "dmabuf.h"
 #include "output.h"
 #include "util/msgq.h"
 
@@ -65,6 +66,12 @@ struct rei_server {
 	struct { bool active; struct rei_rect rect; } drop_hint;  /* Where a dragged window would land. */
 	struct wl_list popups;      /* xdg popups, creation order */
 	struct wl_list wl_outputs;  /* rei_wl_output, including ones being retired */
+
+	/* linux-dmabuf: what clients may send, and buffers waiting for their release. */
+	struct wl_global *dmabuf_global;
+	struct rei_format_mod *dmabuf_formats;
+	size_t n_dmabuf_formats;
+	struct wl_list buffer_leases;
 	struct rei_seat *seat;
 	struct rei_input *input;
 

@@ -14,6 +14,14 @@ foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'k
   test(t, exe, env: test_env)
 endforeach
 
+if have_drm
+  exe = executable('test_drm_logic', 'test_drm_logic.c',
+    include_directories: inc,
+    dependencies: test_deps,
+  )
+  test('drm_logic', exe, env: test_env)
+endif
+
 integration = executable('test_integration', 'test_integration.c',
   include_directories: inc,
   dependencies: [wayland_client],

@@ -27,6 +27,15 @@ libevent_pthreads = dependency('libevent_pthreads')
 threads = dependency('threads')
 m_dep = cc.find_library('m', required: false)
 
+# The DRM/KMS backend, for running on real hardware from a TTY. Optional so the
+# compositor still builds (headless and nested) on machines without the libraries.
+libdrm = dependency('libdrm', version: '>=2.4.109', required: get_option('drm'))
+gbm = dependency('gbm', required: get_option('drm'))
+libseat = dependency('libseat', required: get_option('drm'))
+libinput = dependency('libinput', required: get_option('drm'))
+libudev = dependency('libudev', required: get_option('drm'))
+have_drm = libdrm.found() and gbm.found() and libseat.found() and libinput.found() and libudev.found()
+
 wayland_scanner_dep = dependency('wayland-scanner', native: true)
 wayland_scanner = find_program(wayland_scanner_dep.get_variable(pkgconfig: 'wayland_scanner'))
 protocols_dir = wayland_protocols.get_variable(pkgconfig: 'pkgdatadir')
@@ -48,6 +57,10 @@ xdg_shell_xml = files(protocols_dir / 'stable' / 'xdg-shell' / 'xdg-shell.xml')
 xdg_shell_client_h = scan_client_header.process(xdg_shell_xml)
 xdg_shell_server_h = scan_server_header.process(xdg_shell_xml)
 xdg_shell_code = scan_code.process(xdg_shell_xml)
+
+linux_dmabuf_xml = files(protocols_dir / 'unstable' / 'linux-dmabuf' / 'linux-dmabuf-unstable-v1.xml')
+linux_dmabuf_server_h = scan_server_header.process(linux_dmabuf_xml)
+linux_dmabuf_code = scan_code.process(linux_dmabuf_xml)
 
 inc = include_directories('src')
 

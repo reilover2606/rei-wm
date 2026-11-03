@@ -5,6 +5,7 @@
 #include <wayland-server-protocol.h>
 
 #include "server.h"
+#include "proto/linux_dmabuf.h"
 #include "util/log.h"
 #include "util/util.h"
 #include "util/wlsignal.h"
@@ -125,11 +126,40 @@ static void frames_destroy_all(struct wl_list *frames)
 	}
 }
 
-static void state_clear(struct rei_surface_state *st)
+/* Content is either CPU pixels or a GPU buffer; these keep the pair (and the
+ * lease that holds the wl_buffer) together. */
+static void content_release(struct rei_server *server, struct rei_pixbuf **pix,
+			    struct rei_dmabuf **dmabuf, struct rei_buffer_lease **lease)
+{
+	rei_pixbuf_unref(*pix);
+	rei_dmabuf_unref(*dmabuf);
+	rei_buffer_lease_retire(server, *lease);
+	*pix = NULL;
+	*dmabuf = NULL;
+	*lease = NULL;
+}
+
+static bool content_size(const struct rei_pixbuf *pix, const struct rei_dmabuf *dmabuf,
+			 int32_t *w, int32_t *h)
+{
+	if (pix) {
+		*w = pix->width;
+		*h = pix->height;
+		return true;
+	}
+	if (dmabuf) {
+		*w = dmabuf->width;
+		*h = dmabuf->height;
+		return true;
+	}
+	return false;
+}
+
+static void state_clear(struct rei_server *server, struct rei_surface_state *st)
 {
 	if (st->buffer_set && st->buffer)
 		wl_list_remove(&st->buffer_destroy.link);
-	rei_pixbuf_unref(st->content);
+	content_release(server, &st->content, &st->dmabuf, &st->lease);
 	rei_rects_clear(&st->opaque);
 	rei_rects_clear(&st->input);
 	frames_destroy_all(&st->frames);
@@ -137,13 +167,18 @@ static void state_clear(struct rei_surface_state *st)
 }
 
 /* Moves everything `src` has set into `dst`, leaving `src` empty. */
-static void state_merge(struct rei_surface_state *dst, struct rei_surface_state *src)
+static void state_merge(struct rei_server *server, struct rei_surface_state *dst,
+			struct rei_surface_state *src)
 {
 	if (src->content_set) {
-		rei_pixbuf_unref(dst->content);
+		content_release(server, &dst->content, &dst->dmabuf, &dst->lease);
 		dst->content = src->content;
+		dst->dmabuf = src->dmabuf;
+		dst->lease = src->lease;
 		dst->content_set = true;
 		src->content = NULL;
+		src->dmabuf = NULL;
+		src->lease = NULL;
 	}
 	if (src->scale_set) {
 		dst->scale = src->scale;
@@ -202,9 +237,13 @@ struct rei_surface *rei_surface_root(struct rei_surface *s)
 static void apply_state(struct rei_surface *s, struct rei_surface_state *st)
 {
 	if (st->content_set) {
-		rei_pixbuf_unref(s->content);
+		content_release(s->server, &s->content, &s->dmabuf, &s->lease);
 		s->content = st->content;
+		s->dmabuf = st->dmabuf;
+		s->lease = st->lease;
 		st->content = NULL;
+		st->dmabuf = NULL;
+		st->lease = NULL;
 		st->content_set = false;
 	}
 	if (st->scale_set) {
@@ -215,9 +254,10 @@ static void apply_state(struct rei_surface *s, struct rei_surface_state *st)
 		s->transform = st->transform;
 		st->transform_set = false;
 	}
-	if (s->content) {
-		s->width = s->content->width / s->scale;
-		s->height = s->content->height / s->scale;
+	int32_t cw, ch;
+	if (content_size(s->content, s->dmabuf, &cw, &ch)) {
+		s->width = cw / s->scale;
+		s->height = ch / s->scale;
 	} else {
 		s->width = s->height = 0;
 	}
@@ -273,19 +313,42 @@ static bool latch_buffer(struct rei_surface *s)
 
 	if (!p->buffer) {
 		p->content = NULL;
+		p->dmabuf = NULL;
+		p->lease = NULL;
 		p->content_set = true;
 		p->buffer_set = false;
+		return true;
+	}
+
+	int32_t scale = p->scale_set ? p->scale : s->scale;
+
+	struct rei_dmabuf *gpu = rei_dmabuf_from_buffer(p->buffer);
+	if (gpu) {
+		if (gpu->width % scale != 0 || gpu->height % scale != 0) {
+			wl_resource_post_error(s->resource, WL_SURFACE_ERROR_INVALID_SIZE,
+					       "buffer size %dx%d is not a multiple of scale %d",
+					       gpu->width, gpu->height, scale);
+			return false;
+		}
+		/* The client keeps the buffer until we release it, which waits for
+		 * the frame that stops showing it. */
+		p->dmabuf = rei_dmabuf_ref(gpu);
+		p->lease = rei_buffer_lease_new(p->buffer);
+		p->content = NULL;
+		wl_list_remove(&p->buffer_destroy.link);
+		p->buffer = NULL;
+		p->buffer_set = false;
+		p->content_set = true;
 		return true;
 	}
 
 	struct wl_shm_buffer *shm = wl_shm_buffer_get(p->buffer);
 	if (!shm) {
 		wl_resource_post_error(s->resource, WL_DISPLAY_ERROR_INVALID_OBJECT,
-				       "only wl_shm buffers are supported");
+				       "unsupported buffer type (wl_shm and linux-dmabuf only)");
 		return false;
 	}
 
-	int32_t scale = p->scale_set ? p->scale : s->scale;
 	int32_t w = wl_shm_buffer_get_width(shm);
 	int32_t h = wl_shm_buffer_get_height(shm);
 	int32_t stride = wl_shm_buffer_get_stride(shm);
@@ -332,7 +395,7 @@ static void surface_commit(struct wl_client *client, struct wl_resource *resourc
 		return;
 
 	if (s->sub && effectively_sync(s)) {
-		state_merge(&s->cached, &s->pending);
+		state_merge(s->server, &s->cached, &s->pending);
 		s->has_cached = true;
 	} else {
 		apply_state(s, &s->pending);
@@ -500,9 +563,9 @@ static void surface_resource_destroy(struct wl_resource *resource)
 	/* Subsurfaces (as parent or child) detach themselves via destroy_signal. */
 
 	wl_list_remove(&s->link);
-	state_clear(&s->pending);
-	state_clear(&s->cached);
-	rei_pixbuf_unref(s->content);
+	state_clear(s->server, &s->pending);
+	state_clear(s->server, &s->cached);
+	content_release(s->server, &s->content, &s->dmabuf, &s->lease);
 	rei_rects_clear(&s->opaque);
 	rei_rects_clear(&s->input);
 	frames_destroy_all(&s->frames);
@@ -706,7 +769,7 @@ static void subsurface_resource_destroy(struct wl_resource *r)
 		sub->surface->sub = NULL;
 		if (sub->surface->has_cached) {
 			sub->surface->has_cached = false;
-			state_clear(&sub->surface->cached);
+			state_clear(sub->surface->server, &sub->surface->cached);
 		}
 	}
 	struct rei_server *server = sub->surface ? sub->surface->server : NULL;
@@ -822,6 +885,11 @@ void rei_surface_emit(const struct rei_surface *s, float ox, float oy,
 					      rei_rects_cover(&s->opaque, s->width, s->height);
 				rei_snapshot_add(snap, s->content, ox, oy,
 						 (float)s->width, (float)s->height, opaque);
+			} else if (s->dmabuf) {
+				bool opaque = s->dmabuf->opaque ||
+					      rei_rects_cover(&s->opaque, s->width, s->height);
+				rei_snapshot_add_dmabuf(snap, s->dmabuf, ox, oy,
+							(float)s->width, (float)s->height, opaque);
 			}
 		} else if (entry->surface) {
 			rei_surface_emit(entry->surface, ox + (float)entry->x,
@@ -850,7 +918,7 @@ bool rei_surface_pick(const struct rei_surface *s, double ox, double oy,
 	wl_list_for_each_reverse(entry, &s->subs, link) {
 		if (entry == s->self_marker) {
 			double lx = x - ox, ly = y - oy;
-			if (s->content && lx >= 0 && ly >= 0 && lx < s->width && ly < s->height &&
+			if ((s->content || s->dmabuf) && lx >= 0 && ly >= 0 && lx < s->width && ly < s->height &&
 			    input_accepts(s, lx, ly)) {
 				*out = (struct rei_surface *)s;
 				*sx = lx;

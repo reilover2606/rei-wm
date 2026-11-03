@@ -1,4 +1,5 @@
 #include "server.h"
+#include "proto/linux_dmabuf.h"
 
 #include <event2/event.h>
 #include <event2/thread.h>
@@ -144,6 +145,7 @@ static void on_inbox(struct rei_msg *m, void *userdata)
 			break;  /* Output went away while the frame was in flight. */
 		o->frames_presented = f->seq;
 		o->last_presented_serial = f->scene_serial;
+		rei_buffer_leases_check(s);
 		rei_debug("frame output=%s seq=%llu serial=%llu", o->name,
 			  (unsigned long long)f->seq, (unsigned long long)f->scene_serial);
 		fire_frame_callbacks(s, o, f);
@@ -412,6 +414,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	rei_wm_init(s);
 	wl_list_init(&s->popups);
 	wl_list_init(&s->wl_outputs);
+	wl_list_init(&s->buffer_leases);
 
 	/* Must precede the creation of any event base that other threads wake. */
 	if (evthread_use_pthreads() != 0) {
@@ -560,6 +563,7 @@ void rei_server_destroy(struct rei_server *s)
 		wl_display_destroy_clients(s->display);
 	if (s->display)
 		rei_wl_output_finish(s);
+	rei_linux_dmabuf_finish(s);
 
 	if (s->inbox.wake)
 		rei_msgq_finish(&s->inbox);

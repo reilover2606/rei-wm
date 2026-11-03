@@ -1,6 +1,7 @@
 #include "dmabuf.h"
 
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "util/util.h"
@@ -70,4 +71,33 @@ void rei_dmabuf_unref(struct rei_dmabuf *d)
 			close(d->fd[i]);
 	}
 	free(d);
+}
+
+bool rei_format_mod_supported(const struct rei_format_mod *list, size_t n,
+			      uint32_t format, uint64_t modifier)
+{
+	for (size_t i = 0; i < n; i++)
+		if (list[i].format == format && list[i].modifier == modifier)
+			return true;
+	return false;
+}
+
+size_t rei_format_mod_intersect(const struct rei_format_mod *a, size_t na,
+				const struct rei_format_mod *b, size_t nb,
+				struct rei_format_mod **out)
+{
+	*out = NULL;
+	if (na == 0 || nb == 0)
+		return 0;
+	struct rei_format_mod *list = rei_xcalloc(na, sizeof *list);
+	size_t count = 0;
+	for (size_t i = 0; i < na; i++)
+		if (rei_format_mod_supported(b, nb, a[i].format, a[i].modifier))
+			list[count++] = a[i];
+	if (count == 0) {
+		free(list);
+		return 0;
+	}
+	*out = list;
+	return count;
 }

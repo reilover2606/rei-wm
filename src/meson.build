@@ -23,6 +23,7 @@ core_sources = files(
   'input/keybindings.c',
   'input/xkb.c',
   'proto/data_device.c',
+  'proto/linux_dmabuf.c',
   'proto/seat.c',
   'proto/surface.c',
   'proto/wl_output.c',
@@ -34,15 +35,23 @@ core_sources = files(
   'util/util.c',
 )
 
+if have_drm
+  core_sources += files(
+    'backend/drm/drm_logic.c',
+  )
+endif
+
 # Third-party single-header code, compiled without our warning flags.
 stb = static_library('stb',
   '../third_party/stb_impl.c',
   c_args: ['-w'],
 )
 
-generated = [xdg_shell_client_h, xdg_shell_server_h, xdg_shell_code]
+generated = [xdg_shell_client_h, xdg_shell_server_h, xdg_shell_code,
+  linux_dmabuf_server_h, linux_dmabuf_code]
 
-core_deps = [wayland_server, wayland_client, egl, glesv2, xkbcommon, cairo, pangocairo, fontconfig, libevent, libevent_pthreads, threads, m_dep]
+drm_deps = have_drm ? [libdrm, gbm, libseat, libinput, libudev] : []
+core_deps = drm_deps + [wayland_server, wayland_client, egl, glesv2, xkbcommon, cairo, pangocairo, fontconfig, libevent, libevent_pthreads, threads, m_dep]
 
 rei_core = static_library('rei-core',
   core_sources, generated,
@@ -55,7 +64,7 @@ rei_core_dep = declare_dependency(
   link_with: rei_core,
   include_directories: inc,
   dependencies: core_deps,
-  sources: [xdg_shell_client_h, xdg_shell_server_h],
+  sources: [xdg_shell_client_h, xdg_shell_server_h, linux_dmabuf_server_h],
 )
 
 rei_wm = executable('rei-wm', 'main.c',
