@@ -14,7 +14,8 @@ struct rei_drawable {
 	struct rei_pixbuf *pix;      /* Exactly one of pix and dmabuf is set; holds a reference. */
 	struct rei_dmabuf *dmabuf;
 	float x, y, w, h;
-	bool opaque;             /* Safe to draw without blending. */
+	bool opaque;             /* Safe to draw without blending (and alpha is 1). */
+	float alpha;             /* Overall transparency, 0..1 (1: as is). */
 	bool has_clip;           /* Drawn only inside `clip` (global coordinates). */
 	float clip_x, clip_y, clip_w, clip_h;
 };
@@ -57,6 +58,9 @@ void rei_snapshot_add_dmabuf(struct rei_scene_snapshot *s, struct rei_dmabuf *bu
 			     float x, float y, float w, float h, bool opaque);
 
 void rei_snapshot_set_cursor(struct rei_scene_snapshot *s, struct rei_pixbuf *pix, float x, float y);
+
+/* Makes everything added since index `first` translucent (multiplied onto what each already has). */
+void rei_snapshot_set_alpha_from(struct rei_scene_snapshot *s, size_t first, float alpha);
 
 /* Only valid while the snapshot is still being built (before it is shared). */
 void rei_snapshot_add(struct rei_scene_snapshot *s, struct rei_pixbuf *pix,

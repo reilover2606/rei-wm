@@ -11,6 +11,7 @@ core_sources = files(
   'reload.c',
   'render_thread.c',
   'scene.c',
+  'theme.c',
   'toolbar.c',
   'tray.c',
   'icons.c',

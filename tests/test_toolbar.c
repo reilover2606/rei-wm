@@ -282,6 +282,10 @@ static struct rei_bar_state tray_state(enum rei_bar_position pos, int length, in
 	snprintf(st.font, sizeof st.font, "Sans 11");
 	snprintf(st.clock, sizeof st.clock, "12:34:56");
 	st.n_buttons = 2;
+	st.hover = -1;
+	st.tray_hover = -1;
+	st.drag_index = -1;
+	st.tray_min_percent = 50;
 	st.tray_mode = REI_TRAY_ICONS_NAMES;
 	st.n_tray = n_items;
 	for (int i = 0; i < n_items; i++) {
@@ -293,59 +297,162 @@ static struct rei_bar_state tray_state(enum rei_bar_position pos, int length, in
 
 static void test_tray_layout(void)
 {
-	struct rei_rect r[REI_BAR_MAX_TRAY];
+	struct rei_tray_layout lay;
 
 	/* Off, or nothing to show: no tiles. */
 	struct rei_bar_state st = tray_state(REI_BAR_TOP, 1200, 3, NULL);
 	st.tray_mode = REI_TRAY_OFF;
-	CHECK(rei_bar_tray_layout(&st, r) == 0);
+	rei_bar_tray_layout(&st, &lay);
+	CHECK(lay.n_visible == 0 && !lay.has_overflow);
 	st = tray_state(REI_BAR_TOP, 1200, 0, NULL);
-	CHECK(rei_bar_tray_layout(&st, r) == 0);
+	rei_bar_tray_layout(&st, &lay);
+	CHECK(lay.n_visible == 0 && !lay.has_overflow);
 
-	/* Three tiles with names on a wide bar: centred, in order, not overlapping, inside the bar. */
+	/* Three tiles with names on a wide bar: natural size, centred, inside the middle 3/5 (240..960). */
 	st = tray_state(REI_BAR_TOP, 1200, 3, NULL);
-	CHECK(rei_bar_tray_layout(&st, r) == 3);
-	int left = r[0].x, right = r[2].x + r[2].w;
+	rei_bar_tray_layout(&st, &lay);
+	CHECK(lay.n_visible == 3 && !lay.has_overflow && lay.drop_index == -1);
+	int left = lay.tile[0].x, right = lay.tile[2].x + lay.tile[2].w;
 	CHECK(abs((left + right) / 2 - 600) <= 2);
 	for (int i = 0; i < 3; i++) {
-		CHECK(r[i].y == 3 && r[i].h == 22 && r[i].w == 150);
+		CHECK(lay.tile[i].y == 3 && lay.tile[i].h == 22 && lay.tile[i].w == 150);
 		if (i)
-			CHECK(r[i].x >= r[i - 1].x + r[i - 1].w + 2);
+			CHECK(lay.tile[i].x >= lay.tile[i - 1].x + lay.tile[i - 1].w + 2);
 	}
-	/* The workspace buttons (2 x 28 px) and the clock stay clear. */
-	CHECK(left >= 2 * 28);
-	CHECK(right <= 1200 - 8 - 40);
 
-	/* Icon-only tiles are squares. */
+	/* The range is the middle three fifths: eight tiles shrink to fit it, and stay inside. */
+	st = tray_state(REI_BAR_TOP, 1200, 8, NULL);
+	rei_bar_tray_layout(&st, &lay);
+	CHECK(lay.n_visible == 8 && !lay.has_overflow);
+	CHECK(lay.tile[0].w < 150 && lay.tile[0].w >= 75);
+	CHECK(lay.tile[0].x >= 240 && lay.tile[7].x + lay.tile[7].w <= 960);
+
+	/* Twelve do not fit even at half width: the newest go under an overflow tile. */
+	st = tray_state(REI_BAR_TOP, 1200, 12, NULL);
+	rei_bar_tray_layout(&st, &lay);
+	CHECK(lay.has_overflow && lay.n_visible < 12 && lay.n_visible >= 6);
+	CHECK(lay.tile[0].w == 75);                                   /* shrunk exactly to 50% */
+	CHECK(lay.overflow_windows == (int)(12 - lay.n_visible));
+	CHECK(lay.overflow.x >= lay.tile[lay.n_visible - 1].x + lay.tile[lay.n_visible - 1].w);
+	CHECK(lay.overflow.x >= 240 && lay.overflow.x + lay.overflow.w <= 960);
+
+	/* A different floor: with 100% tiles cannot shrink, so overflow starts sooner. */
+	st.tray_min_percent = 100;
+	size_t full_floor = (rei_bar_tray_layout(&st, &lay), lay.n_visible);
+	CHECK(lay.has_overflow && full_floor < 6 && lay.tile[0].w == 150);
+
+	/* Windows beyond the list's capacity are always under the overflow tile. */
+	st = tray_state(REI_BAR_TOP, 1200, 2, NULL);
+	st.tray_extra_windows = 3;
+	rei_bar_tray_layout(&st, &lay);
+	CHECK(lay.n_visible == 2 && lay.has_overflow && lay.overflow_windows == 3);
+
+	/* Icon-only tiles: natural 30 px wide, and never below 18 px. */
+	st = tray_state(REI_BAR_TOP, 1200, 3, NULL);
 	st.tray_mode = REI_TRAY_ICONS;
-	CHECK(rei_bar_tray_layout(&st, r) == 3);
-	CHECK(r[0].w == 22 && r[0].h == 22);
+	rei_bar_tray_layout(&st, &lay);
+	CHECK(lay.tile[0].w == 30 && lay.tile[0].h == 22);
+	st = tray_state(REI_BAR_TOP, 1200, 24, NULL);
+	st.tray_mode = REI_TRAY_ICONS;
+	rei_bar_tray_layout(&st, &lay);
+	for (size_t i = 0; i < lay.n_visible; i++)
+		CHECK(lay.tile[i].w >= 18);
 
 	/* A stack of windows peeks out by 4 px per extra tile, up to four tiles. */
 	int counts[3] = { 3, 1, 9 };
 	st = tray_state(REI_BAR_TOP, 1200, 3, counts);
 	st.tray_mode = REI_TRAY_ICONS;
-	CHECK(rei_bar_tray_layout(&st, r) == 3);
-	CHECK(r[0].w == 22 + 2 * 4 && r[1].w == 22 && r[2].w == 22 + 3 * 4);
+	rei_bar_tray_layout(&st, &lay);
+	CHECK(lay.tile[0].w == 30 + 2 * 4 && lay.tile[1].w == 30 && lay.tile[2].w == 30 + 3 * 4);
 
-	/* A narrow bar shrinks the names before it drops tiles... */
-	st = tray_state(REI_BAR_TOP, 500, 3, NULL);
-	size_t n = rei_bar_tray_layout(&st, r);
-	CHECK(n == 3 && r[0].w < 150 && r[0].w >= 22);
-	/* ...and keeps every tile inside the free space. */
-	CHECK(r[0].x >= 2 * 28 && r[n - 1].x + r[n - 1].w <= 500 - 8 - 40);
+	/* Dragging: the grabbed tile follows the pointer; the others make room where it would land. */
+	st = tray_state(REI_BAR_TOP, 1200, 3, NULL);
+	rei_bar_tray_layout(&st, &lay);
+	struct rei_rect natural[3] = { lay.tile[0], lay.tile[1], lay.tile[2] };
+	st.drag_index = 0;
+	st.drag_pos = natural[2].x + natural[2].w - 10;   /* near the far end of the last tile */
+	rei_bar_tray_layout(&st, &lay);
+	CHECK(lay.drop_index == 2);
+	CHECK(lay.tile[1].x < natural[1].x && lay.tile[2].x < natural[2].x);          /* made room: shifted left */
+	CHECK(abs(lay.tile[0].x + lay.tile[0].w / 2 - st.drag_pos) <= 2);             /* under the pointer */
+	st.drag_pos = natural[0].x - 100;                                             /* back past the start */
+	rei_bar_tray_layout(&st, &lay);
+	CHECK(lay.drop_index == 0);
+	CHECK(lay.tile[0].x >= 240);                                                  /* held inside the range */
 
-	/* A bar too narrow even for icons shows as many tiles as fit. */
-	st = tray_state(REI_BAR_TOP, 330, 12, NULL);
-	n = rei_bar_tray_layout(&st, r);
-	CHECK(n > 0 && n < 12);
-
-	/* A vertical bar: tiles stacked down it, icon-only, centred along its length. */
+	/* A vertical bar: tiles stacked down it, icon-only, centred along its length (range 160..640). */
 	st = tray_state(REI_BAR_LEFT, 800, 3, NULL);
-	CHECK(rei_bar_tray_layout(&st, r) == 3);
-	CHECK(r[0].x == 3 && r[0].w == 22 && r[0].h == 22);
-	CHECK(r[1].y >= r[0].y + r[0].h && r[2].y >= r[1].y + r[1].h);
-	CHECK(abs((r[0].y + r[2].y + r[2].h) / 2 - 400) <= 2);
+	rei_bar_tray_layout(&st, &lay);
+	CHECK(lay.n_visible == 3);
+	CHECK(lay.tile[0].x == 3 && lay.tile[0].w == 22 && lay.tile[0].h == 30);
+	CHECK(lay.tile[1].y >= lay.tile[0].y + lay.tile[0].h && lay.tile[2].y >= lay.tile[1].y + lay.tile[1].h);
+	CHECK(abs((lay.tile[0].y + lay.tile[2].y + lay.tile[2].h) / 2 - 400) <= 2);
+	CHECK(lay.tile[0].y >= 160 && lay.tile[2].y + lay.tile[2].h <= 640);
+}
+
+static const uint8_t *px4(const struct rei_pixbuf *pb, int x, int y)
+{
+	return pb->data + ((size_t)y * (size_t)pb->width + (size_t)x) * 4;  /* B, G, R, A */
+}
+
+/* The theme drives the look: shape, opacity, shadow and colours of a tray tile and the bar. */
+static void test_theme_render(void)
+{
+	struct rei_bar_state st = tray_state(REI_BAR_TOP, 1200, 1, NULL);
+	st.tray_mode = REI_TRAY_ICONS;
+	st.styled = true;
+	rei_theme_defaults(&st.theme, 0x101010, 0xe0e0e0, 0x3060c0);
+	struct rei_style *tile = &st.theme.e[REI_ELEM_TRAY_TILE];
+	tile->color = 0xff0000;
+	tile->shape = REI_SHAPE_SQUARE;
+	tile->radius = 0;
+	struct rei_tray_layout lay;
+	rei_bar_tray_layout(&st, &lay);
+	struct rei_rect t = lay.tile[0];
+
+	/* Square corners: the corner pixel of the tile is the tile's colour. */
+	struct rei_pixbuf *pb = rei_bar_render(&st);
+	CHECK(pb && pb->opaque);
+	const uint8_t *c = px4(pb, t.x, t.y);
+	CHECK(c[2] == 255 && c[1] == 0 && c[0] == 0);
+	rei_pixbuf_unref(pb);
+
+	/* Rounded corners: the same pixel is the bar's background instead. */
+	tile->shape = REI_SHAPE_ROUNDED;
+	tile->radius = 8;
+	pb = rei_bar_render(&st);
+	c = px4(pb, t.x, t.y);
+	CHECK(c[2] == 0x10 && c[1] == 0x10 && c[0] == 0x10);
+	rei_pixbuf_unref(pb);
+
+	/* A shadow darkens the bar just below the tile; without one it is untouched. */
+	tile->shadow = (struct rei_shadow){ 0x000000, 0.0f, 0, 3, 6 };
+	pb = rei_bar_render(&st);
+	int below_y = t.y + t.h + 1;
+	uint8_t plain = px4(pb, t.x + t.w / 2, below_y)[2];
+	rei_pixbuf_unref(pb);
+	tile->shadow.opacity = 0.8f;
+	st.theme.e[REI_ELEM_TOOLBAR].color = 0x808080;   /* a light bar, so a shadow shows */
+	pb = rei_bar_render(&st);
+	CHECK(plain == 0x10);
+	CHECK(px4(pb, t.x + t.w / 2, below_y)[2] < 0x70);
+	rei_pixbuf_unref(pb);
+
+	/* Bar transparency: a translucent bar is not opaque and carries partial alpha. */
+	tile->shadow.opacity = 0;
+	st.theme.e[REI_ELEM_TOOLBAR].opacity = 0.5f;
+	pb = rei_bar_render(&st);
+	CHECK(pb && !pb->opaque);
+	CHECK(abs(px4(pb, 1000, 2)[3] - 128) <= 2);
+	rei_pixbuf_unref(pb);
+
+	/* Without a theme (styled = false) the legacy colours give the default look. */
+	struct rei_bar_state plain_st = tray_state(REI_BAR_TOP, 1200, 0, NULL);
+	plain_st.background = 0x204060;
+	pb = rei_bar_render(&plain_st);
+	c = px4(pb, 600, 14);
+	CHECK(c[2] == 0x20 && c[1] == 0x40 && c[0] == 0x60);
+	rei_pixbuf_unref(pb);
 }
 
 int main(void)
@@ -355,6 +462,7 @@ int main(void)
 	test_render();
 	test_config();
 	test_tray_layout();
+	test_theme_render();
 	rei_bar_render_cleanup();
 	puts("test_toolbar: ok");
 	return 0;

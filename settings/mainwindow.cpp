@@ -283,6 +283,11 @@ QWidget *MainWindow::buildToolbarTab()
 	addField(f, tr("Application tray"), "toolbar", "tray", Choice, "icon_and_name",
 		 { "icon_and_name", "icon", "off" }, 0, 0, 1,
 		 tr("The running windows, one tile per application, in the middle of the bar."));
+	addField(f, tr("Tray lists"), "toolbar", "tray_scope", Choice, "workspace", { "workspace", "output" }, 0, 0, 1,
+		 tr("This monitor's current workspace, or all of its workspaces. With \"workspace\", the 33rd window "
+		    "in a full tray opens on the next workspace."));
+	addField(f, tr("Tray tiles shrink to (percent)"), "toolbar", "tray_min_width", Int, 50, {}, 10, 100, 1,
+		 tr("Tiles shrink this far as the tray fills; after that new windows go under a \"+N\" tile."));
 	addField(f, tr("Font"), "toolbar", "font", Font, "Sans 11", {}, 0, 0, 1,
 		 tr("A Pango font description, e.g. “Sans 11”."));
 	addField(f, tr("Clock format"), "toolbar", "clock_format", String, "%H:%M:%S", {}, 0, 0, 1,

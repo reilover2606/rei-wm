@@ -56,15 +56,26 @@ meson test -C build
 
 ## The toolbar's application tray
 
-The middle of the toolbar lists every open window, one tile per application (icon and name, or just
-the icon: `[toolbar] tray = "icon_and_name" | "icon" | "off"`). Several windows of one application
-show as a stack of tiles; clicking it opens a list to pick from. A single window's tile focuses the
-window, and hides it again if it already has the focus. Hide windows with the notch's minimize
-button or `Mod+m`; a restored window goes back to the same place in the tiling grid (next to the same
-neighbour) or, if floating, to the same position. Only what is running is shown: nothing is pinned.
-Icons come from your desktop entries and icon theme (PNG; SVG-only themes are not read), with a
-coloured letter tile when none is found. The clock format is `[toolbar] clock_format` (any
-`strftime` string; default `%H:%M:%S`).
+The middle three fifths of the toolbar list the open windows, one tile per application (icon and name,
+or just the icon: `[toolbar] tray = "icon_and_name" | "icon" | "off"`). Several windows of one
+application show as a stack of tiles; clicking it opens a list to pick from. A single window's tile
+focuses the window, and hides it again if it already has the focus. Hide windows with the notch's
+minimize button or `Mod+m`; a restored window goes back to the same place in the tiling grid (next to
+the same neighbour) or, if floating, to the same position.
+
+- **Filling up:** as more windows open, tiles shrink in width, down to half their size
+  (`tray_min_width`). After that the newest windows go under a "+N" overflow tile, which opens a list
+  too. When 32 windows are under it, the next window opens on the next workspace (`tray_scope =
+  "workspace"`, the default, lists the current workspace's windows; `"output"` lists every workspace of
+  the monitor, with no cap).
+- **Hover:** a tile highlights the moment the pointer touches it; half a second later a tooltip with the
+  full title (or the list of windows) fades in.
+- **Reorder:** drag a tile along the bar to move it; the others make room.
+- Only what is running is shown: nothing is pinned. Icons come from your desktop entries and icon theme
+  (PNG; SVG-only themes are not read), with a coloured letter tile when none is found. The clock format
+  is `[toolbar] clock_format` (any `strftime` string; default `%H:%M:%S`).
+- **Look:** colours, corner shapes, transparency and shadows of these elements are a theme; see
+  [docs/THEME.md](docs/THEME.md).
 
 ## Settings
 

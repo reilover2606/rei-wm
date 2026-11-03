@@ -45,7 +45,17 @@ void rei_snapshot_add(struct rei_scene_snapshot *s, struct rei_pixbuf *pix,
 		.pix = rei_pixbuf_ref(pix),
 		.x = x, .y = y, .w = w, .h = h,
 		.opaque = opaque || pix->opaque,
+		.alpha = 1.0f,
 	};
+}
+
+void rei_snapshot_set_alpha_from(struct rei_scene_snapshot *s, size_t first, float alpha)
+{
+	for (size_t i = first; i < s->n_items; i++) {
+		s->items[i].alpha *= alpha;
+		if (s->items[i].alpha < 1.0f)
+			s->items[i].opaque = false;
+	}
 }
 
 void rei_snapshot_clip_from(struct rei_scene_snapshot *s, size_t first,
@@ -71,6 +81,7 @@ void rei_snapshot_add_dmabuf(struct rei_scene_snapshot *s, struct rei_dmabuf *bu
 		.dmabuf = rei_dmabuf_ref(buf),
 		.x = x, .y = y, .w = w, .h = h,
 		.opaque = opaque || buf->opaque,
+		.alpha = 1.0f,
 	};
 }
 

@@ -377,7 +377,26 @@ void rei_wm_add_view(struct rei_view *v)
 	if (!s->focused_output || !s->focused_output->workspace)
 		return;  /* No output: adopted when one appears. */
 
-	attach(v, s->focused_output->workspace, wants_float(s, v));
+	/* The tray holds only so many windows: past the overflow tile's 32, a new window opens on the
+	 * next workspace (which has a tray of its own). */
+	struct rei_workspace *target = s->focused_output->workspace;
+	if (s->config->toolbar_tray_scope == REI_TRAY_SCOPE_WORKSPACE) {
+		for (int guard = 0; guard < 99; guard++) {
+			struct rei_output *out = target->output ? target->output : s->focused_output;
+			if (rei_toolbar_overflow_windows(s, out, target) < REI_TRAY_OVERFLOW_CAP)
+				break;
+			struct rei_workspace *next = ws_find(s, target->number + 1);
+			if (!next)
+				next = ws_create(s, target->number + 1, out);
+			target = next;
+		}
+		if (target != s->focused_output->workspace)
+			rei_info("tray: workspace %d is full; the new window opens on workspace %d",
+				 s->focused_output->workspace->number, target->number);
+	}
+	attach(v, target, wants_float(s, v));
+	if (target != s->focused_output->workspace)
+		rei_wm_goto_workspace(s, target->number);
 	if (view_wants_fullscreen(v))
 		rei_wm_set_fullscreen(v, true);
 	else

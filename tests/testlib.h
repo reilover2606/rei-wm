@@ -786,13 +786,13 @@ static bool window_follow(struct client *c, struct window *w)
 /* ---- multi-window harness: clients that follow configure, keyboard chords ---- */
 
 static struct client *g_clients[4];
-static struct window *g_wins[16];
+static struct window *g_wins[64];
 static int g_nwins;
 
 static void track(struct client *c, struct window *w)
 {
 	(void)c;
-	CHECK(g_nwins < 16);
+	CHECK(g_nwins < 64);
 	g_wins[g_nwins++] = w;
 }
 

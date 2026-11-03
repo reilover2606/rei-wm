@@ -37,7 +37,7 @@ struct rei_gles {
 	bool has_dmabuf_import, has_dmabuf_modifiers;
 
 	GLuint program;
-	GLint u_rect, u_view, u_opaque, u_tex, u_bgra, u_flip;
+	GLint u_rect, u_view, u_opaque, u_tex, u_bgra, u_flip, u_alpha;
 	GLuint vao;
 
 	GLuint fbo, rbo;  /* The renderer's own target. */
@@ -75,13 +75,14 @@ static const char *fragment_src =
 	"uniform sampler2D u_tex;\n"
 	"uniform float u_opaque;\n"
 	"uniform float u_bgra;\n"  /* 1 for CPU pixels (stored B,G,R,A and uploaded as RGBA) */
+	"uniform float u_alpha;\n"  /* overall transparency, applied to the premultiplied colour */
 	"out vec4 o_color;\n"
 	"void main() {\n"
 	/* Premultiplied alpha throughout, so blending is ONE, 1-SRC_ALPHA. */
 	"  vec4 c = texture(u_tex, v_uv);\n"
 	"  c = mix(c, c.bgra, u_bgra);\n"
 	"  c.a = mix(c.a, 1.0, u_opaque);\n"
-	"  o_color = c;\n"
+	"  o_color = c * u_alpha;\n"
 	"}\n";
 
 static GLuint compile(GLenum type, const char *src)
@@ -131,6 +132,7 @@ static bool build_program(struct rei_gles *g)
 	g->u_tex = glGetUniformLocation(g->program, "u_tex");
 	g->u_bgra = glGetUniformLocation(g->program, "u_bgra");
 	g->u_flip = glGetUniformLocation(g->program, "u_flip");
+	g->u_alpha = glGetUniformLocation(g->program, "u_alpha");
 	return true;
 }
 
@@ -604,7 +606,8 @@ static void draw_one(struct rei_gles *g, const struct rei_drawable *d, const str
 	glUniform1f(g->u_opaque, d->opaque ? 1.0f : 0.0f);
 	glUniform1f(g->u_bgra, bgra ? 1.0f : 0.0f);
 	glUniform1f(g->u_flip, flip ? 1.0f : 0.0f);
-	if (d->opaque)
+	glUniform1f(g->u_alpha, d->alpha);
+	if (d->opaque && d->alpha >= 1.0f)
 		glDisable(GL_BLEND);
 	else
 		glEnable(GL_BLEND);
@@ -648,7 +651,7 @@ bool rei_gles_draw_into(struct rei_gles *g, const struct rei_scene_snapshot *sna
 	/* The software cursor goes last, on outputs that have no hardware one. */
 	if (t->draw_cursor && snap->cursor.pix) {
 		struct rei_drawable cur = {
-			.pix = snap->cursor.pix, .x = snap->cursor.x, .y = snap->cursor.y,
+			.pix = snap->cursor.pix, .x = snap->cursor.x, .y = snap->cursor.y, .alpha = 1.0f,
 			.w = (float)snap->cursor.pix->width, .h = (float)snap->cursor.pix->height,
 		};
 		draw_one(g, &cur, t);

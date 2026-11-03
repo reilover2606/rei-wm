@@ -34,7 +34,7 @@ struct rei_scene_snapshot *rei_scene_build(struct rei_server *s, uint64_t serial
 	rei_wm_emit_decorations(s, snap);
 	rei_xdg_emit_popups(s, snap);
 	rei_xwayland_emit_unmanaged(s, snap);
-	rei_tray_menu_emit(s, snap);
+	rei_tray_emit(s, snap);
 
 	const struct rei_cursor_image *cur = rei_cursor_default();
 	if (cur)

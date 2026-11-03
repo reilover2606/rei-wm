@@ -391,6 +391,31 @@ if that tile is gone it goes next to the focused window as usual. A floating win
 Icons: desktop entries are indexed lazily by file name, `StartupWMClass` and the program in `Exec=`;
 `Icon=` is looked up in themes as PNG (stb_image), else a hashed-colour letter tile.
 
+### The tray's layout, overflow and interaction
+
+`rei_bar_tray_layout` is pure and shared by the renderer, hit-testing and the window-add path. The tray
+lives in the middle three fifths of the bar (clamped clear of the workspace buttons and the
+volume/clock). Natural widths are 150 px with names and 30 px icon-only; when the groups do not fit, all
+tiles shrink evenly, never below `tray_min_width` percent (and never below 18 px); past that, the largest
+number of tiles that fit are kept and the rest go under a 34 px overflow tile. The renderer stores the
+layout it drew with the bar's cached picture, so pointer hit-testing and hover reuse it instead of
+re-measuring text on every motion.
+
+`src/tray.c` holds the interaction state on the event thread: the user's order of applications (a list of
+app ids, new ones appended, rewritten when a drag ends), the hover target with its 500 ms timer, the
+tooltip (rendered once, faded by a 16 ms tick that only runs during the fade: the opacity is a
+per-drawable `alpha` in the snapshot, applied in the fragment shader), and the press/drag state. Dragging
+only starts after 6 px of movement, so a click is still a click. `rei_wm_add_view` asks the toolbar how
+many windows would sit under a workspace's overflow tile; at 32 it tries the next workspace number
+(creating it) and switches there.
+
+### Themes (`src/theme.c`, `docs/THEME.md`)
+
+One `rei_style` per `rei_element`, defaults derived from the three base colours, overrides from
+`[theme.<element>]`. The bar state carries the whole theme (so a theme change redraws the bar), and every
+themed element is drawn through the same helpers (`shape_path`, `draw_shadow`, `draw_box`), which is what
+keeps the schema general: a new element is a style entry plus a call to `draw_box`.
+
 ## Audio (`src/audio.c`)
 
 rei-wm is a native PipeWire client (libpipewire, driven from the libevent loop by watching the
@@ -463,6 +488,9 @@ missing config is started from `rei-wm --print-default-config`.
 - `tray`: tiles per application and a stack for several windows, click to focus/hide/restore, the window
   list and Escape, minimize from the keyboard, a restored tile returning to its slot in the grid and a floating
   window to its position; `icons`: desktop-entry and icon-theme lookup; the tray layout is covered in `toolbar`;
+- `tray-ui`: hover highlight (immediate) and tooltip (delayed, fading), drag to reorder in both directions,
+  the overflow tile and its list, and the 32-window cap that opens the next window on the next workspace;
+  `theme`: defaults, overrides and validation, and the renderer applying shape, opacity and shadow;
 - `decoration`: notch geometry, hit-testing, hover/scale variants and artwork pixels;
 - `notch`: the notches end to end (focus-only, no resizing, hover, click and cancel,
   handle drag, the pull-back rule, drag-and-drop into a slot with the drop hint,
