@@ -91,10 +91,30 @@ with the server's event loop. Interface: `src/backend/backend.h`.
 |------------|------------------------------------------------------|-------|
 | `headless` | no display; for tests and GPU-less machines          | done  |
 | `nested`   | each output is a window in a parent compositor       | done (frames are read back and attached as shm buffers) |
-| `drm`      | real hardware: KMS, libinput, libseat, direct scanout| milestone 8 |
+| `drm`      | real hardware: KMS, libinput, libseat, direct scanout| written, untested on hardware ([DRM.md](DRM.md)) |
 
 `render_ops` on an output are the seam where a backend gives its render thread
-somewhere to draw: `init`, `present` and `fini` all run on the render thread.
+somewhere to draw; they all run on the render thread. There are two pacing styles.
+*Timer-driven* (nested): the thread simulates vblank, draws into its own
+framebuffer and calls `present`. *Vsync-driven* (`render` set; DRM, and headless with
+`REI_HEADLESS_VSYNC=1` for tests): the backend draws into its own buffers and queues
+a flip; the thread waits for `rei_render_notify_vblank()` (sent when the kernel's
+page-flip event is read on the event thread), and only then reports the frame as
+presented, so frame callbacks follow the real refresh. `REI_RMSG_PAUSE` stops
+drawing across a VT switch.
+
+### The DRM backend (`src/backend/drm/`)
+
+- `drm_logic.c`: pure decisions, unit-tested (`tests/test_drm_logic.c`): connector
+  names, refresh rates, mode picking, CRTC assignment by backtracking, plane choice,
+  `IN_FORMATS` parsing, direct-scanout eligibility, cursor placement.
+- `session.c`: libseat. `drm.c`: device selection (udev, boot GPU first), atomic
+  modesetting and flips, GBM swapchains imported into EGL, scanout of client buffers
+  with a `TEST_ONLY` check, hardware cursor, hotplug (udev monitor), VT pause/resume.
+- `src/input/libinput_input.c`: keyboards and pointers, opened through the session.
+- `src/proto/linux_dmabuf.c`: clients' GPU buffers. A surface holds a *lease* on the
+  `wl_buffer` it shows; `wl_buffer.release` is sent only after every output has
+  presented a frame built after the buffer was replaced.
 
 ## Window management (`src/layout.c`, `src/desktop.c`)
 
@@ -286,8 +306,8 @@ These are deliberate and tracked by later milestones:
   use xdg-shell as toplevels, and are not themable yet (the colours are built in).
   The bigger gap between stacked tiles (the notch height) is the price of keeping
   the lower window's tabs clear of the one above.
-- **No real hardware input.** libinput arrives with the DRM backend (milestone 8).
-  Until then input comes from the nested parent or the headless FIFO.
+- **Hardware input and output are untested.** The DRM and libinput code has never run on a
+  real machine (see DRM.md); only its decision logic and the vsync-driven frame path are tested.
 - **Interactive move and resize** work for floating windows only. Key repeat is
   done by clients from the `repeat_info` we send (as the protocol intends), not by
   the compositor.
@@ -300,8 +320,8 @@ These are deliberate and tracked by later milestones:
   redraws the whole output; damage tracking is future work.
 - **The toolbar is workspaces and a clock.** No other modules (volume, battery, tray) yet and
   no urgency highlighting; its colours and font are configurable but there are no themes.
-- **No server-side decorations** (`xdg-decoration`), `linux-dmabuf`, `viewporter`
-  or fractional scale yet.
+- **No server-side decorations** (`xdg-decoration`), `viewporter`
+  or fractional scale yet. `linux-dmabuf` exists only on the DRM backend.
 
 ## Multi-monitor
 
@@ -329,7 +349,7 @@ changing the core loader. All keybindings will be configurable there.
 | 5 | tiling tree (H/V splits), floating, fullscreen, gaps, per-output workspaces | done |
 | 6 | window notches: close/min/max (right), drag handle (left) | done |
 | 7 | toolbar (any edge): workspaces at the start, clock at the end | done |
-| 8 | DRM/KMS backend, libseat + libinput, dmabuf, direct scanout, hardware cursor | |
+| 8 | DRM/KMS backend, libseat + libinput, dmabuf, direct scanout, hardware cursor | written; awaiting hardware testing |
 | 9 | Xwayland window manager, cursor override | |
 | 10 | Qt settings application, config hot reload | |
 | 11 | PipeWire volume widget and media keys | |
@@ -355,6 +375,8 @@ changing the core loader. All keybindings will be configurable there.
   position and once on two outputs: the reduced window area, workspace buttons and highlighting,
   clicking, hover, the wheel, a fullscreen window covering the bar, a ticking clock, and one bar per
   output;
+- `drm_logic`: the DRM backend's pure decisions (see above); `*-vsync`: the render, input, wm, notch and
+  bar tests again with `REI_HEADLESS_VSYNC=1`, exercising the vsync-driven frame path;
 - `decoration`: notch geometry, hit-testing, hover/scale variants and artwork pixels;
 - `notch`: the notches end to end (focus-only, no resizing, hover, click and cancel,
   handle drag, the pull-back rule, drag-and-drop into a slot with the drop hint,

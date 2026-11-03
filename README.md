@@ -3,16 +3,17 @@
 A Wayland compositor, tiling/floating window manager and small desktop
 environment, written in C11. MIT licensed.
 
-**Status: early development.** Milestones 0–6 are done: the build, config,
+**Status: early development.** Milestones 0–8 are done (the DRM/KMS backend
+is written but still untested on real hardware: see [docs/DRM.md](docs/DRM.md)): the build, config,
 event loop and threading model, the core Wayland protocols, an OpenGL ES
 renderer, keyboard/pointer input with a configurable keybinding engine, the
 window manager (an i3-style tiling tree with configurable gaps, floating windows,
 fullscreen, per-output workspaces), the window notches (a drag handle and
 minimize/maximize/close tabs on the focused window), and a built-in toolbar with
 workspace buttons and a clock. Real applications can connect, be tiled, and be
-driven from the keyboard or mouse. There is no real hardware input yet (libinput
-arrives with the DRM backend), and the Qt settings app, Xwayland and PipeWire are
-still to come: see the roadmap in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+driven from the keyboard or mouse. On real hardware it drives displays through
+DRM/KMS with libinput, dma-buf clients, direct scanout and a hardware cursor. The
+Qt settings app, Xwayland and PipeWire are still to come: see the roadmap in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ![Two unmodified Weston demo clients tiled by rei-wm under the toolbar](docs/images/milestone-7-toolbar.png)
 
@@ -31,6 +32,9 @@ libegl-dev libgles-dev libxkbcommon-dev xkb-data
 libcairo2-dev libpango1.0-dev fontconfig
 ```
 
+For the DRM backend (optional): `libdrm-dev libgbm-dev libseat-dev libinput-dev
+libudev-dev`.
+
 and at least one font (e.g. `fonts-dejavu-core`) for the toolbar's text.
 
 Rendering uses OpenGL ES 3 through EGL's surfaceless platform, so it needs a
@@ -48,6 +52,9 @@ meson test -C build
 ```bash
 # Inside another Wayland session: each output becomes a window.
 ./build/src/rei-wm
+
+# On real hardware, from a text console (read docs/DRM.md first):
+./build/src/rei-wm --backend drm
 
 # Without a display (CI, containers): simulated monitors, no output.
 ./build/src/rei-wm --backend headless -v
