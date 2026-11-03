@@ -248,6 +248,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_enabled = true;
 	cfg->toolbar_position = REI_BAR_TOP;
 	cfg->toolbar_thickness = 28;
+	cfg->toolbar_tray = REI_TRAY_ICONS_NAMES;
 	cfg->toolbar_font = rei_xstrdup("Sans 11");
 	cfg->toolbar_clock_format = rei_xstrdup("%H:%M:%S");
 	cfg->toolbar_background = 0x161c26;
@@ -382,6 +383,14 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		}
 		free(pos);
 		read_int(&r, tb, "toolbar.", "thickness", &cfg->toolbar_thickness, 16, 96);
+		static const char *const trays[] = { "off", "icon", "icon_and_name", NULL };
+		char *tray = rei_xstrdup("icon_and_name");
+		read_choice(&r, tb, "toolbar.", "tray", &tray, trays);
+		for (int i = 0; trays[i]; i++) {
+			if (strcmp(tray, trays[i]) == 0)
+				cfg->toolbar_tray = (enum rei_tray_mode)i;
+		}
+		free(tray);
 		read_string(&r, tb, "toolbar.", "font", &cfg->toolbar_font);
 		read_string(&r, tb, "toolbar.", "clock_format", &cfg->toolbar_clock_format);
 		read_color(&r, tb, "toolbar.", "background", &cfg->toolbar_background);

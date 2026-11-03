@@ -107,6 +107,9 @@ void rei_actions_run(struct rei_server *s, const struct rei_action *action)
 	switch (action->type) {
 	case REI_ACTION_NONE:
 		break;
+	case REI_ACTION_MINIMIZE:
+		rei_wm_minimize_active(s);
+		break;
 	case REI_ACTION_VOLUME_UP:
 		rei_audio_change_volume(s, action->value);
 		break;

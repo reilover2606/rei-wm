@@ -54,6 +54,18 @@ ninja -C build
 meson test -C build
 ```
 
+## The toolbar's application tray
+
+The middle of the toolbar lists every open window, one tile per application (icon and name, or just
+the icon: `[toolbar] tray = "icon_and_name" | "icon" | "off"`). Several windows of one application
+show as a stack of tiles; clicking it opens a list to pick from. A single window's tile focuses the
+window, and hides it again if it already has the focus. Hide windows with the notch's minimize
+button or `Mod+m`; a restored window goes back to the same place in the tiling grid (next to the same
+neighbour) or, if floating, to the same position. Only what is running is shown: nothing is pinned.
+Icons come from your desktop entries and icon theme (PNG; SVG-only themes are not read), with a
+coloured letter tile when none is found. The clock format is `[toolbar] clock_format` (any
+`strftime` string; default `%H:%M:%S`).
+
 ## Settings
 
 `rei-settings` is a Qt app for everything in `~/.config/rei-wm/config.toml`: input, windows and

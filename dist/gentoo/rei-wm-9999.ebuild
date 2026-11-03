@@ -44,7 +44,7 @@ RDEPEND="
 "
 BDEPEND="
 	virtual/pkgconfig
-	dev-util/wayland-scanner
+	dev-libs/wayland
 "
 
 src_configure() {

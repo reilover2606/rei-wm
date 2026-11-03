@@ -42,6 +42,9 @@ void rei_xwindow_configure(struct rei_xwindow *xw, int32_t x, int32_t y, int32_t
 void rei_xwindow_set_activated(struct rei_xwindow *xw, bool activated);
 void rei_xwindow_close(struct rei_xwindow *xw);
 struct rei_surface *rei_xwindow_surface(const struct rei_xwindow *xw);
+const char *rei_xwindow_title(const struct rei_xwindow *xw);
+/* WM_CLASS's class part, the X11 counterpart of an app id. */
+const char *rei_xwindow_class(const struct rei_xwindow *xw);
 bool rei_xwindow_wants_float(const struct rei_xwindow *xw);
 bool rei_xwindow_wants_fullscreen(const struct rei_xwindow *xw);
 void rei_xwindow_set_fullscreen(struct rei_xwindow *xw, bool on);

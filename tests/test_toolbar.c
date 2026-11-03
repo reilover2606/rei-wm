@@ -271,12 +271,90 @@ static void test_config(void)
 	parse_fails("[toolbar]\nfont = 12\n", "toolbar.font");
 }
 
+static struct rei_bar_state tray_state(enum rei_bar_position pos, int length, int n_items, int counts[])
+{
+	struct rei_bar_state st;
+	memset(&st, 0, sizeof st);
+	st.position = pos;
+	st.thickness = 28;
+	st.length = length;
+	st.scale = 1;
+	snprintf(st.font, sizeof st.font, "Sans 11");
+	snprintf(st.clock, sizeof st.clock, "12:34:56");
+	st.n_buttons = 2;
+	st.tray_mode = REI_TRAY_ICONS_NAMES;
+	st.n_tray = n_items;
+	for (int i = 0; i < n_items; i++) {
+		snprintf(st.tray[i].label, sizeof st.tray[i].label, "Window %d", i);
+		st.tray[i].count = counts ? counts[i] : 1;
+	}
+	return st;
+}
+
+static void test_tray_layout(void)
+{
+	struct rei_rect r[REI_BAR_MAX_TRAY];
+
+	/* Off, or nothing to show: no tiles. */
+	struct rei_bar_state st = tray_state(REI_BAR_TOP, 1200, 3, NULL);
+	st.tray_mode = REI_TRAY_OFF;
+	CHECK(rei_bar_tray_layout(&st, r) == 0);
+	st = tray_state(REI_BAR_TOP, 1200, 0, NULL);
+	CHECK(rei_bar_tray_layout(&st, r) == 0);
+
+	/* Three tiles with names on a wide bar: centred, in order, not overlapping, inside the bar. */
+	st = tray_state(REI_BAR_TOP, 1200, 3, NULL);
+	CHECK(rei_bar_tray_layout(&st, r) == 3);
+	int left = r[0].x, right = r[2].x + r[2].w;
+	CHECK(abs((left + right) / 2 - 600) <= 2);
+	for (int i = 0; i < 3; i++) {
+		CHECK(r[i].y == 3 && r[i].h == 22 && r[i].w == 150);
+		if (i)
+			CHECK(r[i].x >= r[i - 1].x + r[i - 1].w + 2);
+	}
+	/* The workspace buttons (2 x 28 px) and the clock stay clear. */
+	CHECK(left >= 2 * 28);
+	CHECK(right <= 1200 - 8 - 40);
+
+	/* Icon-only tiles are squares. */
+	st.tray_mode = REI_TRAY_ICONS;
+	CHECK(rei_bar_tray_layout(&st, r) == 3);
+	CHECK(r[0].w == 22 && r[0].h == 22);
+
+	/* A stack of windows peeks out by 4 px per extra tile, up to four tiles. */
+	int counts[3] = { 3, 1, 9 };
+	st = tray_state(REI_BAR_TOP, 1200, 3, counts);
+	st.tray_mode = REI_TRAY_ICONS;
+	CHECK(rei_bar_tray_layout(&st, r) == 3);
+	CHECK(r[0].w == 22 + 2 * 4 && r[1].w == 22 && r[2].w == 22 + 3 * 4);
+
+	/* A narrow bar shrinks the names before it drops tiles... */
+	st = tray_state(REI_BAR_TOP, 500, 3, NULL);
+	size_t n = rei_bar_tray_layout(&st, r);
+	CHECK(n == 3 && r[0].w < 150 && r[0].w >= 22);
+	/* ...and keeps every tile inside the free space. */
+	CHECK(r[0].x >= 2 * 28 && r[n - 1].x + r[n - 1].w <= 500 - 8 - 40);
+
+	/* A bar too narrow even for icons shows as many tiles as fit. */
+	st = tray_state(REI_BAR_TOP, 330, 12, NULL);
+	n = rei_bar_tray_layout(&st, r);
+	CHECK(n > 0 && n < 12);
+
+	/* A vertical bar: tiles stacked down it, icon-only, centred along its length. */
+	st = tray_state(REI_BAR_LEFT, 800, 3, NULL);
+	CHECK(rei_bar_tray_layout(&st, r) == 3);
+	CHECK(r[0].x == 3 && r[0].w == 22 && r[0].h == 22);
+	CHECK(r[1].y >= r[0].y + r[0].h && r[2].y >= r[1].y + r[1].h);
+	CHECK(abs((r[0].y + r[2].y + r[2].h) / 2 - 400) <= 2);
+}
+
 int main(void)
 {
 	test_geometry();
 	test_mix();
 	test_render();
 	test_config();
+	test_tray_layout();
 	rei_bar_render_cleanup();
 	puts("test_toolbar: ok");
 	return 0;

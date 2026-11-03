@@ -62,6 +62,7 @@ struct rei_config {
 	bool toolbar_enabled;
 	enum rei_bar_position toolbar_position;
 	int32_t toolbar_thickness;   /* Pixels. */
+	enum rei_tray_mode toolbar_tray;  /* The application tray in the middle of the bar. */
 	char *toolbar_font;          /* Pango font description. */
 	char *toolbar_clock_format;  /* strftime; empty means no clock. */
 	uint32_t toolbar_background, toolbar_foreground, toolbar_highlight;  /* 0xRRGGBB */

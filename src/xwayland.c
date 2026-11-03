@@ -55,6 +55,7 @@ struct rei_xwindow {
 	bool fullscreen;
 
 	char *title;
+	char *wm_class;  /* WM_CLASS's class (the second string). */
 	int32_t min_w, min_h, max_w, max_h;
 	xcb_window_t transient_for;
 	bool dialog_type;
@@ -164,6 +165,24 @@ static void read_title(struct rei_xwayland *x, struct rei_xwindow *w)
 	}
 	if (r && xcb_get_property_value_length(r) > 0)
 		w->title = rei_xstrndup(xcb_get_property_value(r), (size_t)xcb_get_property_value_length(r));
+	free(r);
+}
+
+static void read_class(struct rei_xwayland *x, struct rei_xwindow *w)
+{
+	free(w->wm_class);
+	w->wm_class = NULL;
+	xcb_get_property_reply_t *r = get_prop(x, w->id, x->atoms.wm_class, XCB_ATOM_STRING, 128);
+	if (r && xcb_get_property_value_length(r) > 0) {
+		/* "instance\0class\0" */
+		const char *v = xcb_get_property_value(r);
+		int len = xcb_get_property_value_length(r);
+		int first = (int)strnlen(v, (size_t)len);
+		if (first + 1 < len)
+			w->wm_class = rei_xstrndup(v + first + 1, strnlen(v + first + 1, (size_t)(len - first - 1)));
+		else
+			w->wm_class = rei_xstrndup(v, (size_t)first);
+	}
 	free(r);
 }
 
@@ -295,6 +314,7 @@ static void window_destroy(struct rei_xwindow *w)
 		w->xsurface->window = NULL;
 	wl_list_remove(&w->link);
 	free(w->title);
+	free(w->wm_class);
 	free(w);
 }
 
@@ -432,6 +452,7 @@ static void on_map_request(struct rei_xwayland *x, const xcb_map_request_event_t
 		w = window_create(x, e->window, false, 0, 0, 1, 1);
 	}
 	read_title(x, w);
+	read_class(x, w);
 	read_hints(x, w);
 	set_wm_state(x, w->id, 1);
 	write_net_wm_state(x, w);
@@ -695,6 +716,9 @@ struct rei_surface *rei_xwindow_surface(const struct rei_xwindow *w)
 {
 	return w->xsurface ? w->xsurface->surface : NULL;
 }
+
+const char *rei_xwindow_title(const struct rei_xwindow *w) { return w->title; }
+const char *rei_xwindow_class(const struct rei_xwindow *w) { return w->wm_class; }
 
 bool rei_xwindow_wants_float(const struct rei_xwindow *w)
 {

@@ -420,6 +420,9 @@ static struct wl_buffer *make_buffer(struct client *c, int w, int h, uint32_t fo
 
 /* ---- windows --------------------------------------------------------- */
 
+/* The app id new test windows announce (tests set it to make distinct applications). */
+static const char *g_app_id = "rei-test";
+
 struct window {
 	struct client *c;
 	struct wl_surface *surface;
@@ -511,7 +514,7 @@ static void toplevel_create(struct client *c, struct window *w, const char *titl
 	w->tl = xdg_surface_get_toplevel(w->xs);
 	xdg_toplevel_add_listener(w->tl, &tl_listener, w);
 	xdg_toplevel_set_title(w->tl, title);
-	xdg_toplevel_set_app_id(w->tl, "rei-test");
+	xdg_toplevel_set_app_id(w->tl, g_app_id);
 	wl_surface_commit(w->surface);
 	CHECK(wait_for(c, &w->configured, 3000));
 }

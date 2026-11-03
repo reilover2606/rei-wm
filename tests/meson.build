@@ -6,7 +6,7 @@ test_env.set('LSAN_OPTIONS', 'suppressions=' + meson.current_source_dir() / 'lsa
 
 test_deps = [rei_core_dep]
 
-foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'keybindings', 'layout', 'decoration', 'toolbar']
+foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'keybindings', 'layout', 'decoration', 'toolbar', 'icons']
   exe = executable('test_' + t, 'test_' + t + '.c',
     include_directories: inc,
     dependencies: test_deps,
@@ -99,6 +99,12 @@ if have_audio
   )
   test('audio', audio_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
 endif
+
+tray_test = executable('test_tray', 'test_tray.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('tray', tray_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 120)
 
 bar_test = executable('test_bar', 'test_bar.c', xdg_shell_client_h, xdg_shell_code,
   include_directories: inc,

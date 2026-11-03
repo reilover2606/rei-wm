@@ -31,6 +31,7 @@ enum rei_bar_position {
 };
 
 #define REI_BAR_MAX_BUTTONS 32
+#define REI_BAR_MAX_TRAY 24
 
 /* ---- Geometry (pure) ---- */
 
@@ -49,6 +50,13 @@ struct rei_rect rei_bar_button_rect(struct rei_rect bar, enum rei_bar_position p
 /* The button under (x, y), or -1 (including when there are only `count` buttons). */
 int rei_bar_button_at(struct rei_rect bar, enum rei_bar_position pos, int count, double x, double y);
 
+/* How the application tray in the middle of the bar looks. */
+enum rei_tray_mode {
+	REI_TRAY_OFF,
+	REI_TRAY_ICONS,          /* icons only */
+	REI_TRAY_ICONS_NAMES,    /* icon and name */
+};
+
 /* ---- State and rendering (pure) ---- */
 
 enum rei_bar_button_kind {
@@ -64,6 +72,14 @@ struct rei_bar_button {
 
 /* Everything that determines how a bar looks. Compared byte for byte to decide
  * whether it needs redrawing, so it is always built from a zeroed struct. */
+struct rei_bar_tray_item {
+	char label[48];
+	int count;                  /* Windows of this application. */
+	bool active;                /* One of them has the focus. */
+	bool minimized;             /* All of them are hidden. */
+	struct rei_pixbuf *icon;    /* Borrowed from the icon cache; never NULL. */
+};
+
 struct rei_bar_state {
 	enum rei_bar_position position;
 	int thickness;  /* Logical pixels. */
@@ -74,6 +90,10 @@ struct rei_bar_state {
 	int hover;      /* Button under the pointer, or -1. */
 	char clock[64];
 	char font[96];  /* Pango font description, e.g. "Sans 11". */
+	/* The tray: one tile per application (a stack of tiles when it has several windows). */
+	enum rei_tray_mode tray_mode;
+	int n_tray;
+	struct rei_bar_tray_item tray[REI_BAR_MAX_TRAY];
 	char volume[16];  /* "73%", "muted"; empty when there is no audio sink. */
 	bool volume_muted;
 	uint32_t background, foreground, highlight;  /* 0xRRGGBB */
@@ -82,6 +102,39 @@ struct rei_bar_state {
 /* Where the volume text sits in the bar (bar-local logical pixels), for hit-testing.
  * False when the bar shows no volume. */
 bool rei_bar_volume_rect(const struct rei_bar_state *state, struct rei_rect *out);
+
+/*
+ * Where each tray tile sits (bar-local logical pixels, including the peeking edges of
+ * a stack), centred in the bar between the workspace buttons and the volume/clock.
+ * Writes up to REI_BAR_MAX_TRAY rectangles and returns how many tiles fit; tiles
+ * that do not fit are not drawn.
+ */
+size_t rei_bar_tray_layout(const struct rei_bar_state *state, struct rei_rect *out);
+
+/* ---- The window list that opens from a tray tile ---- */
+
+#define REI_MENU_MAX_ROWS 32
+
+struct rei_menu_row {
+	char label[96];
+	bool minimized;
+};
+
+struct rei_menu_state {
+	int n_rows;
+	struct rei_menu_row rows[REI_MENU_MAX_ROWS];
+	int hover;  /* Row under the pointer, or -1. */
+	int scale;
+	char font[96];
+	uint32_t background, foreground, highlight;
+};
+
+/* Logical size of the menu and of one row. */
+void rei_bar_menu_size(const struct rei_menu_state *state, int *w, int *h, int *row_h);
+struct rei_pixbuf *rei_bar_menu_render(const struct rei_menu_state *state);
+
+/* A coloured square with the first letter of `name`, for applications with no icon. */
+struct rei_pixbuf *rei_bar_letter_icon(const char *name);
 
 /* An opaque pixbuf of the bar at its physical resolution; NULL on failure. */
 struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *state);
@@ -118,6 +171,12 @@ bool rei_toolbar_hit(struct rei_server *server, double x, double y,
 /* Highlights the button for `workspace` on `output` (0 / NULL for none). */
 /* Whether (x, y) is on the volume text of an output's toolbar. */
 bool rei_toolbar_volume_at(struct rei_server *server, double x, double y);
+
+/* The tray tile under (x, y): sets the output and the index into that output's tray groups. */
+bool rei_toolbar_tray_at(struct rei_server *server, double x, double y, struct rei_output **output,
+			 int *index);
+/* A tray tile was clicked: acts on its application (see tray.h). */
+void rei_toolbar_tray_click(struct rei_server *server, struct rei_output *output, int index);
 
 void rei_toolbar_set_hover(struct rei_server *server, struct rei_output *output, int workspace);
 

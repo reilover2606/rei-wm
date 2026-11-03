@@ -27,3 +27,5 @@ bool rei_xwayland_surface_hidden(struct rei_surface *r) { (void)r; return false;
 void rei_xwayland_emit_unmanaged(struct rei_server *s, struct rei_scene_snapshot *n) { (void)s; (void)n; }
 bool rei_xwayland_pick_unmanaged(struct rei_server *s, double x, double y, struct rei_surface **o, double *sx, double *sy)
 { (void)s; (void)x; (void)y; (void)o; (void)sx; (void)sy; return false; }
+const char *rei_xwindow_title(const struct rei_xwindow *xw) { (void)xw; return NULL; }
+const char *rei_xwindow_class(const struct rei_xwindow *xw) { (void)xw; return NULL; }

@@ -12,6 +12,8 @@ core_sources = files(
   'render_thread.c',
   'scene.c',
   'toolbar.c',
+  'tray.c',
+  'icons.c',
   'toolbar_render.c',
   'server.c',
   'snapshot.c',

@@ -372,6 +372,25 @@ clients with the repeat rate), the wallpaper, libinput device settings (through 
 `config_changed` hook), and the window layout (`rei_wm_arrange_all`). `[[output]]` and the backend
 choice need a restart, and the log says so.
 
+## The application tray and minimize (`src/tray.c`, `src/icons.c`, `src/desktop.c`)
+
+`rei_tray_collect` groups the mapped windows of an output's workspaces by app id (an X11 window's
+WM_CLASS; a title stands in when there is none), in order of first appearance. The groups become part
+of `rei_bar_state`, so the bar redraws only when a title, count, focus or minimized state changes. The
+tile layout (`rei_bar_tray_layout`) is pure and shared by the renderer and by hit-testing: tiles are
+centred on the bar between the workspace buttons and the volume/clock, names shrink before tiles are
+dropped, and a stack is drawn as up to four tiles peeking out 4 px each. A click on a one-window tile
+focuses, restores or (if focused) minimizes it; on a stack it opens a compositor-drawn list
+(`rei_tray_menu_*`) that takes the next press, closes on Escape, and is rendered like the bar.
+
+Minimizing keeps a window in its workspace's focus list (so the workspace does not vanish) but takes it
+out of the tiling tree and every draw, pick and navigation path (`SHOWN()` in `desktop.c`). A tiled
+window records its nearest sibling leaf and the side, and `rei_tree_insert_beside` puts it back there;
+if that tile is gone it goes next to the focused window as usual. A floating window just keeps its
+`float_rect`. `Mod+m`, the notch button and a client's `xdg_toplevel.set_minimized` all minimize.
+Icons: desktop entries are indexed lazily by file name, `StartupWMClass` and the program in `Exec=`;
+`Icon=` is looked up in themes as PNG (stb_image), else a hashed-colour letter tile.
+
 ## Audio (`src/audio.c`)
 
 rei-wm is a native PipeWire client (libpipewire, driven from the libevent loop by watching the
@@ -441,6 +460,9 @@ missing config is started from `rei-wm --print-default-config`.
   driven offscreen against the real `rei-wm --check-config`;
 - `audio`: against a real PipeWire daemon the test starts itself, with a null sink: the media keys
   change volume and mute, raising un-mutes, the volume stops at `max_volume`, and the toolbar redraws;
+- `tray`: tiles per application and a stack for several windows, click to focus/hide/restore, the window
+  list and Escape, minimize from the keyboard, a restored tile returning to its slot in the grid and a floating
+  window to its position; `icons`: desktop-entry and icon-theme lookup; the tray layout is covered in `toolbar`;
 - `decoration`: notch geometry, hit-testing, hover/scale variants and artwork pixels;
 - `notch`: the notches end to end (focus-only, no resizing, hover, click and cancel,
   handle drag, the pull-back rule, drag-and-drop into a slot with the drop hint,

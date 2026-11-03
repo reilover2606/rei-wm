@@ -280,6 +280,9 @@ QWidget *MainWindow::buildToolbarTab()
 	addField(f, tr("Show the toolbar"), "toolbar", "enabled", Bool, true);
 	addField(f, tr("Position"), "toolbar", "position", Choice, "top", { "top", "bottom", "left", "right" });
 	addField(f, tr("Thickness (px)"), "toolbar", "thickness", Int, 28, {}, 16, 96);
+	addField(f, tr("Application tray"), "toolbar", "tray", Choice, "icon_and_name",
+		 { "icon_and_name", "icon", "off" }, 0, 0, 1,
+		 tr("The running windows, one tile per application, in the middle of the bar."));
 	addField(f, tr("Font"), "toolbar", "font", Font, "Sans 11", {}, 0, 0, 1,
 		 tr("A Pango font description, e.g. “Sans 11”."));
 	addField(f, tr("Clock format"), "toolbar", "clock_format", String, "%H:%M:%S", {}, 0, 0, 1,
@@ -315,7 +318,7 @@ QWidget *MainWindow::buildKeysTab()
 	auto *w = new QWidget;
 	auto *v = new QVBoxLayout(w);
 	auto *hint = new QLabel(tr("“Mod” is the composition key. Actions: exec &lt;command&gt;, close, quit, focus_next, "
-				   "focus_prev, focus|move left|right|up|down, split h|v, toggle_floating, fullscreen, "
+				   "focus_prev, focus|move left|right|up|down, split h|v, toggle_floating, fullscreen, minimize, "
 				   "workspace &lt;n&gt;, move_to_workspace &lt;n&gt;, none (removes a default binding)."));
 	hint->setWordWrap(true);
 	v->addWidget(hint);

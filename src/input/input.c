@@ -1,4 +1,5 @@
 #include "audio.h"
+#include "tray.h"
 #include "input/input.h"
 
 #include <math.h>
@@ -61,6 +62,7 @@ bool rei_input_init(struct rei_server *server, char *err, size_t errlen)
 {
 	struct rei_input *in = rei_xcalloc(1, sizeof *in);
 	in->server = server;
+	in->bar_press_tray = -1;
 	wl_list_init(&in->keyboard_focus_destroy.link);
 	wl_list_init(&in->pointer_focus_destroy.link);
 	wl_list_init(&in->grab_destroy.link);
@@ -208,6 +210,13 @@ void rei_input_key(struct rei_server *server, uint32_t time_ms, uint32_t code, b
 		return;
 
 	bool mods_changed = rei_xkb_update_key(in->xkb, code, pressed);
+
+	/* Escape closes the tray's window list. */
+	if (pressed && code == 1 && rei_tray_menu_is_open(server)) {
+		set_add(in->swallowed, &in->n_swallowed, REI_MAX_PRESSED, code);
+		rei_tray_menu_close(server);
+		return;
+	}
 
 	/* Ctrl+Alt+F1..F12 produce XF86Switch_VT_n, which only the compositor can act on. */
 	if (pressed && server->backend && server->backend->impl->switch_vt) {
@@ -402,6 +411,7 @@ static void update_pointer(struct rei_input *in, uint32_t time_ms, bool send_mot
 
 static void pointer_moved(struct rei_input *in, uint32_t time_ms)
 {
+	rei_tray_menu_motion(in->server, in->server->cursor_x, in->server->cursor_y);
 	rei_input_clamp_cursor(in->server);
 	update_pointer(in, time_ms, true);
 	rei_server_cursor_moved(in->server);  /* Drawn in the scene unless a hardware cursor shows it. */
@@ -436,6 +446,18 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 		    : !set_remove(in->buttons, &in->n_buttons, button))
 		return;
 
+	if (pressed && rei_tray_menu_is_open(s)) {
+		/* The window list takes the press (picking a row, or just closing). The release is
+		 * swallowed like a toolbar press's, so no client sees half a click. */
+		rei_tray_menu_press(s, s->cursor_x, s->cursor_y);
+		in->bar_press = true;
+		in->bar_press_ws = 0;
+		in->bar_press_volume = false;
+		in->bar_press_tray = -1;
+		rei_server_schedule_flush(s);
+		return;
+	}
+
 	if (pressed && in->n_buttons == 1 && button == 272 && !in->move_view && !in->resize_view) {
 		/* A press on a notch is the compositor's, not the client's. */
 		struct rei_view *nv;
@@ -466,6 +488,14 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 		if (rei_toolbar_hit(s, s->cursor_x, s->cursor_y, &bo, &ws)) {
 			in->bar_press = true;
 			in->bar_press_volume = ws == 0 && rei_toolbar_volume_at(s, s->cursor_x, s->cursor_y);
+			in->bar_press_tray = -1;
+			struct rei_output *tray_output;
+			int tray_index;
+			if (ws == 0 && !in->bar_press_volume &&
+			    rei_toolbar_tray_at(s, s->cursor_x, s->cursor_y, &tray_output, &tray_index)) {
+				in->bar_press_tray = tray_index;
+				bo = tray_output;
+			}
 			in->bar_press_ws = ws;
 			in->bar_press_output = bo;
 			rei_server_schedule_flush(s);
@@ -544,6 +574,8 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 			int bar_ws = in->bar_press_ws;
 			struct rei_output *bar_output = in->bar_press_output;
 			bool volume_press = in->bar_press_volume;
+			int tray_press = in->bar_press_tray;
+			in->bar_press_tray = -1;
 			in->bar_press = false;
 			in->bar_press_volume = false;
 			in->bar_press_ws = 0;
@@ -552,6 +584,15 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 			/* The volume text: a click toggles mute. */
 			if (bar_clicked && volume_press && rei_toolbar_volume_at(s, s->cursor_x, s->cursor_y))
 				rei_audio_toggle_mute(s);
+
+			/* A tray tile: clicked if released on the same one. */
+			if (bar_clicked && tray_press >= 0) {
+				struct rei_output *to;
+				int ti;
+				if (rei_toolbar_tray_at(s, s->cursor_x, s->cursor_y, &to, &ti) && to == bar_output &&
+				    ti == tray_press)
+					rei_toolbar_tray_click(s, to, ti);
+			}
 
 			/* A workspace button is clicked if the press and release are on it. */
 			if (bar_clicked && bar_ws > 0) {

@@ -60,6 +60,7 @@ struct rei_input {
 	bool bar_press;
 	int bar_press_ws;  /* The workspace button pressed (0: the bar itself). */
 	bool bar_press_volume;  /* The press was on the volume text. */
+	int bar_press_tray;     /* The tray tile pressed, or -1. */
 	struct rei_output *bar_press_output;
 
 	/* A notch button pressed and not yet released (the click is the release). */
