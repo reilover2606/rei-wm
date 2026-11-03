@@ -112,6 +112,12 @@ tray_ui_test = executable('test_tray_ui', 'test_tray_ui.c', xdg_shell_client_h, 
 )
 test('tray-ui', tray_ui_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 240)
 
+close_test = executable('test_close_sequence', 'test_close_sequence.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('close-sequence', close_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+
 bar_test = executable('test_bar', 'test_bar.c', xdg_shell_client_h, xdg_shell_code,
   include_directories: inc,
   dependencies: [wayland_client, m_dep],
