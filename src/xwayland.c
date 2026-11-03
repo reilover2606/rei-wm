@@ -997,14 +997,24 @@ static void on_ready(evutil_socket_t fd, short what, void *arg)
 {
 	(void)what;
 	struct rei_xwayland *x = arg;
-	char buf[32];
-	ssize_t n = read(fd, buf, sizeof buf);
-	if (n <= 0)
-		return;  /* Closed: the child exited; on_child reports that. */
-	event_free(x->ready_event);
-	x->ready_event = NULL;
-	close_fd(&x->ready_fd);
-	become_window_manager(x);
+	/* Xwayland writes the display number and then a newline, as two writes. Keep our end
+	 * open until the newline has arrived: closing it early makes the second write fail
+	 * with EPIPE, which kills Xwayland. */
+	char c;
+	ssize_t n;
+	while ((n = read(fd, &c, 1)) == 1) {
+		if (c != '\n')
+			continue;
+		event_free(x->ready_event);
+		x->ready_event = NULL;
+		close_fd(&x->ready_fd);
+		become_window_manager(x);
+		return;
+	}
+	if (n == 0 && x->ready_event) {  /* EOF before the newline: the child is gone. */
+		event_free(x->ready_event);
+		x->ready_event = NULL;
+	}
 }
 
 static void on_child(evutil_socket_t sig, short what, void *arg)
