@@ -250,6 +250,13 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_thickness = 28;
 	cfg->toolbar_tray = REI_TRAY_ICONS_NAMES;
 	cfg->toolbar_battery = true;
+	cfg->start_enabled = true;
+	cfg->start_label = rei_xstrdup("Start");
+	cfg->start_shutdown_command = rei_xstrdup("loginctl poweroff || systemctl poweroff || poweroff");
+	cfg->start_reboot_command = rei_xstrdup("loginctl reboot || systemctl reboot || reboot");
+	cfg->start_logout_command = rei_xstrdup("");
+	cfg->start_confirm_power = true;
+	cfg->start_run_font = rei_xstrdup("Sans 26");
 	cfg->toolbar_tray_scope = REI_TRAY_SCOPE_WORKSPACE;
 	cfg->toolbar_tray_min_width = 50;
 	cfg->toolbar_font = rei_xstrdup("Sans 11");
@@ -361,6 +368,47 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 			cfg->bindings[cfg->n_bindings].combo = rei_xstrdup(e->key);
 			cfg->bindings[cfg->n_bindings].action = rei_xstrdup(e->val->u.s);
 			cfg->n_bindings++;
+		}
+	}
+
+	const struct toml_table *sm = get_table(&r, root, "start_menu");
+	if (sm) {
+		const struct toml_value *en = get(&r, sm, "start_menu.", "enabled", TOML_BOOL);
+		if (en)
+			cfg->start_enabled = en->u.b;
+		read_string(&r, sm, "start_menu.", "label", &cfg->start_label);
+		read_string(&r, sm, "start_menu.", "shutdown_command", &cfg->start_shutdown_command);
+		read_string(&r, sm, "start_menu.", "reboot_command", &cfg->start_reboot_command);
+		read_string(&r, sm, "start_menu.", "logout_command", &cfg->start_logout_command);
+		read_string(&r, sm, "start_menu.", "run_font", &cfg->start_run_font);
+		const struct toml_value *cp = get(&r, sm, "start_menu.", "confirm_power", TOML_BOOL);
+		if (cp)
+			cfg->start_confirm_power = cp->u.b;
+		if (cfg->start_label[0] == '\0')
+			fail(&r, "start_menu.label: must not be empty (use enabled = false to remove the button)");
+	}
+	const struct toml_value *shorts = get(&r, root, "", "shortcut", TOML_ARRAY);
+	if (shorts) {
+		if (shorts->u.arr.len > 20)
+			fail(&r, "shortcut: at most 20 shortcuts (the menu would not fit on a screen)");
+		cfg->shortcuts = rei_xcalloc(shorts->u.arr.len ? shorts->u.arr.len : 1, sizeof *cfg->shortcuts);
+		for (size_t i = 0; i < shorts->u.arr.len && !r.failed; i++) {
+			const struct toml_value *item = shorts->u.arr.items[i];
+			if (item->type != TOML_TABLE) {
+				fail(&r, "shortcut[%zu]: expected a table with name and command", i);
+				break;
+			}
+			char prefix[32];
+			snprintf(prefix, sizeof prefix, "shortcut[%zu].", i);
+			const struct toml_value *name = get(&r, item->u.tbl, prefix, "name", TOML_STRING);
+			const struct toml_value *cmd = get(&r, item->u.tbl, prefix, "command", TOML_STRING);
+			if (!name || !cmd || !name->u.s[0] || !cmd->u.s[0]) {
+				fail(&r, "%sname and command are both required", prefix);
+				break;
+			}
+			cfg->shortcuts[cfg->n_shortcuts].name = rei_xstrdup(name->u.s);
+			cfg->shortcuts[cfg->n_shortcuts].command = rei_xstrdup(cmd->u.s);
+			cfg->n_shortcuts++;
 		}
 	}
 
@@ -584,6 +632,16 @@ void rei_config_free(struct rei_config *cfg)
 	free(cfg->backend);
 	free(cfg->composition_key);
 	free(cfg->toolbar_font);
+	free(cfg->start_label);
+	free(cfg->start_shutdown_command);
+	free(cfg->start_reboot_command);
+	free(cfg->start_logout_command);
+	free(cfg->start_run_font);
+	for (size_t i = 0; i < cfg->n_shortcuts; i++) {
+		free(cfg->shortcuts[i].name);
+		free(cfg->shortcuts[i].command);
+	}
+	free(cfg->shortcuts);
 	free(cfg->toolbar_clock_format);
 	free(cfg->kb_rules);
 	free(cfg->kb_model);

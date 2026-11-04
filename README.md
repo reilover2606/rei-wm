@@ -63,6 +63,16 @@ focuses the window, and hides it again if it already has the focus. Hide windows
 minimize button or `Mod+m`; a restored window goes back to the same place in the tiling grid (next to
 the same neighbour) or, if floating, to the same position.
 
+**Start menu.** A *Start* button sits at the start of the toolbar. It opens a list: your shortcuts
+at the top (defined as `[[shortcut]]` entries with a `name` and a `command`), then **Run**, then
+**Logout**, **Shutdown** and **Reboot**. The power rows ask for a second click (`confirm_power = false`
+turns that off), and their commands are configurable under `[start_menu]`. **Run** (or `Mod+r`)
+opens a large, see-through command prompt in the middle of the screen: type a command, press Enter
+to run it, Escape (or a click) to dismiss. Long commands wrap onto new lines and the box grows,
+staying centred; once it reaches 60% of the screen height, no more can be typed. Backspace,
+Ctrl+Backspace/Ctrl+W (word) and Ctrl+U (line) edit. Style it with `[theme.run_prompt]` and
+`[theme.start_button]`, and the font with `run_font`.
+
 - **Filling up:** as more windows open, tiles shrink in width, down to half their size
   (`tray_min_width`). After that the newest windows go under a "+N" overflow tile, which opens a list
   too. When 32 windows are under it, the next window opens on the next workspace (`tray_scope =

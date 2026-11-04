@@ -12,6 +12,9 @@
 #include "battery.h"
 #include "desktop.h"
 #include "icons.h"
+#include "popup.h"
+#include "runprompt.h"
+#include "startmenu.h"
 #include "tray.h"
 #include "server.h"
 #include "util/log.h"
@@ -96,6 +99,12 @@ static void build_state_for(struct rei_server *s, struct rei_output *o, const st
 	if (audio.muted && rei_bar_vertical(st->position))
 		snprintf(st->volume, sizeof st->volume, "mute");
 	st->volume_muted = audio.muted;
+	if (cfg->start_enabled) {
+		st->start_w = rei_bar_start_extent(st->position, st->thickness);
+		snprintf(st->start_label, sizeof st->start_label, "%s", cfg->start_label);
+		st->start_open = rei_popup_is_for(s, "start");
+		st->start_hover = s->start_hover;
+	}
 	struct rei_battery_info bat = rei_battery_state(s);
 	st->battery_present = bat.present;
 	st->battery_percent = bat.percent;
@@ -215,7 +224,17 @@ bool rei_toolbar_hit(struct rei_server *s, double x, double y, struct rei_output
 
 		struct rei_bar_button buttons[REI_BAR_MAX_BUTTONS];
 		int n = collect_buttons(s, o, buttons, REI_BAR_MAX_BUTTONS);
-		int i = rei_bar_button_at(r, s->config->toolbar_position, n, x, y);
+		struct rei_rect rb = r;  /* The buttons start after the Start button. */
+		int sw = s->config->start_enabled ? rei_bar_start_extent(s->config->toolbar_position,
+									   s->config->toolbar_thickness) : 0;
+		if (rei_bar_vertical(s->config->toolbar_position)) {
+			rb.y += sw;
+			rb.h -= sw;
+		} else {
+			rb.x += sw;
+			rb.w -= sw;
+		}
+		int i = rei_bar_button_at(rb, s->config->toolbar_position, n, x, y);
 		*out = o;
 		*workspace = i >= 0 ? buttons[i].number : 0;
 		return true;
@@ -243,6 +262,45 @@ bool rei_toolbar_volume_at(struct rei_server *s, double x, double y)
 		return lx >= v.x && ly >= v.y && lx < v.x + v.w && ly < v.y + v.h;
 	}
 	return false;
+}
+
+struct rei_output *rei_toolbar_output_at(struct rei_server *s, double x, double y)
+{
+	if (!bar_enabled(s))
+		return NULL;
+	struct rei_output *o;
+	wl_list_for_each(o, &s->outputs, link) {
+		struct rei_rect r = bar_rect(s, o);
+		if (x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h)
+			return o;
+	}
+	return NULL;
+}
+
+bool rei_toolbar_start_at(struct rei_server *s, double x, double y)
+{
+	if (!s->config->start_enabled)
+		return false;
+	struct rei_output *o = rei_toolbar_output_at(s, x, y);
+	if (!o || (o->workspace && o->workspace->fullscreen))
+		return false;
+	struct rei_rect r = bar_rect(s, o);
+	int sw = rei_bar_start_extent(s->config->toolbar_position, s->config->toolbar_thickness);
+	double along = rei_bar_vertical(s->config->toolbar_position) ? y - r.y : x - r.x;
+	return along < sw;
+}
+
+void rei_toolbar_start_click(struct rei_server *s, struct rei_output *o)
+{
+	if (rei_popup_is_for(s, "start")) {
+		rei_popup_close(s);
+		return;
+	}
+	struct rei_rect bar = bar_rect(s, o);
+	int sw = rei_bar_start_extent(s->config->toolbar_position, s->config->toolbar_thickness);
+	struct rei_rect anchor = rei_bar_vertical(s->config->toolbar_position)
+		? (struct rei_rect){ bar.x, bar.y, bar.w, sw } : (struct rei_rect){ bar.x, bar.y, sw, bar.h };
+	rei_startmenu_open(s, o, bar, s->config->toolbar_position, anchor);
 }
 
 struct rei_rect rei_toolbar_rect(const struct rei_server *s, const struct rei_output *o)
@@ -495,6 +553,9 @@ void rei_toolbar_finish(struct rei_server *s)
 		event_free(s->clock_event);
 		s->clock_event = NULL;
 	}
+	rei_prompt_finish(s);
+	rei_startmenu_finish(s);
+	rei_popup_finish(s);
 	rei_tray_finish(s);
 	rei_bar_render_cleanup();
 }

@@ -145,6 +145,12 @@ xkb_keysym_t rei_xkb_sym(const struct rei_xkb *x, uint32_t code)
 	return xkb_state_key_get_one_sym(x->state, code + 8);
 }
 
+size_t rei_xkb_utf8(const struct rei_xkb *x, uint32_t code, char *buf, size_t n)
+{
+	int len = xkb_state_key_get_utf8(x->state, code + 8, buf, n);
+	return len > 0 ? (size_t)len : 0;
+}
+
 struct rei_xkb_mods rei_xkb_serialize(const struct rei_xkb *x)
 {
 	return (struct rei_xkb_mods){

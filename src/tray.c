@@ -8,6 +8,7 @@
 
 #include "desktop.h"
 #include "icons.h"
+#include "popup.h"
 #include "proto/xdg_shell.h"
 #include "server.h"
 #include "util/log.h"
@@ -52,16 +53,9 @@ struct rei_tray_ui {
 	char **order;
 	size_t n_order;
 
-	/* The window list. */
-	bool menu_open;
-	struct rei_output *menu_output;
-	char menu_key[96];
+	/* The window list (shown by the generic popup; these are what its rows stand for). */
 	struct rei_view *menu_views[REI_TRAY_MAX_VIEWS];
 	int menu_n;
-	struct rei_rect menu_rect;  /* The box, global logical. */
-	int menu_margin, menu_row_h;
-	struct rei_menu_state menu_state;
-	struct rei_pixbuf *menu_pixbuf;
 
 	/* Hover, and the tooltip it earns. */
 	bool hover_valid;
@@ -82,7 +76,6 @@ struct rei_tray_ui {
 };
 
 static void on_hover_timer(evutil_socket_t fd, short what, void *arg);
-static void menu_motion(struct rei_tray_ui *u, double x, double y);
 static void on_tick(evutil_socket_t fd, short what, void *arg);
 
 static struct rei_tray_ui *ui_of(struct rei_server *s)
@@ -240,7 +233,7 @@ static void on_hover_timer(evutil_socket_t fd, short what, void *arg)
 	(void)fd; (void)what;
 	struct rei_tray_ui *u = arg;
 	struct rei_server *s = u->server;
-	if (!u->hover_valid || u->drag || u->press || u->menu_open)
+	if (!u->hover_valid || u->drag || u->press || rei_popup_is_open(s))
 		return;
 	struct rei_output *o = u->hover_output;
 
@@ -385,7 +378,7 @@ static void update_hover(struct rei_tray_ui *u, double x, double y)
 	u->hover_output = o;
 	snprintf(u->hover_key, sizeof u->hover_key, "%s", key);
 	rei_server_schedule_damage(s);
-	if (!u->menu_open && !u->drag && !u->press) {
+	if (!rei_popup_is_open(s) && !u->drag && !u->press) {
 		struct timeval tv = { 0, HOVER_DELAY_MS * 1000 };
 		evtimer_add(u->hover_timer, &tv);
 	}
@@ -443,15 +436,20 @@ int rei_tray_drag_index(const struct rei_server *s, const struct rei_output *o, 
 
 void rei_tray_pointer_moved(struct rei_server *s, double x, double y)
 {
+	bool over_start = rei_toolbar_start_at(s, x, y);
+	if (over_start != s->start_hover) {
+		s->start_hover = over_start;
+		rei_server_schedule_damage(s);
+	}
 	if (!s->tray_ui && s->config->toolbar_tray == REI_TRAY_OFF)
 		return;
 	struct rei_tray_ui *u = ui_of(s);
-	menu_motion(u, x, y);  /* The list's hover row follows the pointer. */
+	rei_popup_motion(s, x, y);  /* The open list's hover row follows the pointer. */
 
 	if (u->press && strcmp(u->press_key, REI_TRAY_OVERFLOW_KEY) != 0) {
 		if (!u->drag && hypot(x - u->press_x, y - u->press_y) > DRAG_THRESHOLD) {
 			u->drag = true;
-			rei_tray_menu_close(s);
+			rei_popup_close(s);
 			tip_hide(u);
 		}
 		if (u->drag) {
@@ -523,14 +521,18 @@ bool rei_tray_release(struct rei_server *s)
 }
 
 /* ------------------------------------------------------------------------ */
-/* The window list                                                          */
+/* The window list (a generic popup whose rows are windows)                 */
 /* ------------------------------------------------------------------------ */
 
-static void menu_redraw(struct rei_tray_ui *u)
+static bool menu_pick(struct rei_server *s, int row, void *data)
 {
-	rei_pixbuf_unref(u->menu_pixbuf);
-	u->menu_pixbuf = rei_bar_menu_render(&u->menu_state);
-	rei_server_schedule_damage(u->server);
+	struct rei_tray_ui *u = data;
+	if (row >= 0 && row < u->menu_n) {
+		struct rei_view *picked = u->menu_views[row];
+		rei_popup_close(s);
+		rei_wm_activate_view(picked);
+	}
+	return true;
 }
 
 void rei_tray_menu_open(struct rei_server *s, struct rei_output *o, const char *key,
@@ -541,116 +543,59 @@ void rei_tray_menu_open(struct rei_server *s, struct rei_output *o, const char *
 	const struct rei_config *cfg = s->config;
 	tip_hide(u);
 
-	u->menu_open = true;
-	u->menu_output = o;
-	snprintf(u->menu_key, sizeof u->menu_key, "%s", key);
-	u->menu_n = n_views > REI_TRAY_MAX_VIEWS ? REI_TRAY_MAX_VIEWS : n_views;
+	u->menu_n = n_views > REI_MENU_MAX_ROWS ? REI_MENU_MAX_ROWS : n_views;
+	if (u->menu_n > REI_TRAY_MAX_VIEWS)
+		u->menu_n = REI_TRAY_MAX_VIEWS;
 	memcpy(u->menu_views, views, (size_t)u->menu_n * sizeof *views);
 
-	struct rei_menu_state *st = &u->menu_state;
-	memset(st, 0, sizeof *st);
-	st->n_rows = u->menu_n > REI_MENU_MAX_ROWS ? REI_MENU_MAX_ROWS : u->menu_n;
-	for (int i = 0; i < st->n_rows; i++) {
+	struct rei_menu_state st;
+	memset(&st, 0, sizeof st);
+	st.n_rows = u->menu_n;
+	for (int i = 0; i < st.n_rows; i++) {
 		const struct rei_view *v = u->menu_views[i];
 		const char *title = rei_view_title(v);
-		snprintf(st->rows[i].label, sizeof st->rows[i].label, "%.80s%s",
+		snprintf(st.rows[i].label, sizeof st.rows[i].label, "%.80s%s",
 			 title[0] ? title : rei_view_app_id(v), v->minimized ? "  (minimized)" : "");
-		st->rows[i].minimized = v->minimized;
+		st.rows[i].minimized = v->minimized;
 	}
-	st->hover = -1;
-	st->scale = (int)ceil(o->scale);
-	snprintf(st->font, sizeof st->font, "%s", cfg->toolbar_font);
-	st->menu = cfg->theme.e[REI_ELEM_MENU];
-	st->row = cfg->theme.e[REI_ELEM_MENU_ROW];
-
-	int w, h, row_h, m;
-	rei_bar_menu_size(st, &w, &h, &row_h, &m);
-	u->menu_row_h = row_h;
-	u->menu_margin = m;
-
-	/* Beside the tile, on the side away from the screen's edge the bar sits on. */
-	struct rei_rect r = { anchor.x, anchor.y, w, h };
-	switch (position) {
-	case REI_BAR_TOP: r.y = bar.y + bar.h + 2; break;
-	case REI_BAR_BOTTOM: r.y = bar.y - h - 2; break;
-	case REI_BAR_LEFT: r.x = bar.x + bar.w + 2; break;
-	case REI_BAR_RIGHT: r.x = bar.x - w - 2; break;
-	}
-	int32_t ow, oh;
-	rei_output_logical_size(o, &ow, &oh);
-	if (r.x + r.w > o->x + ow) r.x = o->x + ow - r.w;
-	if (r.y + r.h > o->y + oh) r.y = o->y + oh - r.h;
-	if (r.x < o->x) r.x = o->x;
-	if (r.y < o->y) r.y = o->y;
-	u->menu_rect = r;
-	menu_redraw(u);
+	st.hover = -1;
+	snprintf(st.font, sizeof st.font, "%s", cfg->toolbar_font);
+	st.menu = cfg->theme.e[REI_ELEM_MENU];
+	st.row = cfg->theme.e[REI_ELEM_MENU_ROW];
+	rei_popup_open(s, o, key, &st, menu_pick, u, bar, position, anchor);
 }
 
 void rei_tray_menu_close(struct rei_server *s)
 {
-	struct rei_tray_ui *u = s->tray_ui;
-	if (!u || !u->menu_open)
-		return;
-	u->menu_open = false;
-	rei_pixbuf_unref(u->menu_pixbuf);
-	u->menu_pixbuf = NULL;
-	rei_server_schedule_damage(s);
+	rei_popup_close(s);
 }
 
 bool rei_tray_menu_is_open(const struct rei_server *s)
 {
-	return s->tray_ui && s->tray_ui->menu_open;
+	return rei_popup_is_open(s);
 }
 
 bool rei_tray_menu_is_for(const struct rei_server *s, const char *key)
 {
-	return rei_tray_menu_is_open(s) && strcmp(s->tray_ui->menu_key, key) == 0;
-}
-
-static int row_at(const struct rei_tray_ui *u, double x, double y)
-{
-	const struct rei_rect *r = &u->menu_rect;
-	if (x < r->x || y < r->y || x >= r->x + r->w || y >= r->y + r->h)
-		return -1;
-	double bw = ceil(u->menu_state.menu.border_width);
-	int row = (int)((y - r->y - bw) / u->menu_row_h);
-	return row >= 0 && row < u->menu_state.n_rows ? row : -1;
+	return rei_popup_is_for(s, key);
 }
 
 void rei_tray_menu_press(struct rei_server *s, double x, double y)
 {
-	struct rei_tray_ui *u = s->tray_ui;
-	if (!u || !u->menu_open)
-		return;
-	int row = row_at(u, x, y);
-	struct rei_view *picked = row >= 0 ? u->menu_views[row] : NULL;
-	rei_tray_menu_close(s);
-	if (picked)
-		rei_wm_activate_view(picked);
-}
-
-static void menu_motion(struct rei_tray_ui *u, double x, double y)
-{
-	if (!u->menu_open)
-		return;
-	int row = row_at(u, x, y);
-	if (row != u->menu_state.hover) {
-		u->menu_state.hover = row;
-		menu_redraw(u);
-	}
+	rei_popup_press(s, x, y);
 }
 
 void rei_tray_menu_view_gone(struct rei_server *s, const struct rei_view *v)
 {
 	struct rei_tray_ui *u = s->tray_ui;
-	if (!u)
+	if (!u || !rei_popup_is_open(s))
 		return;
-	if (u->menu_open)
-		for (int i = 0; i < u->menu_n; i++)
-			if (u->menu_views[i] == v) {
-				rei_tray_menu_close(s);
-				break;
-			}
+	/* Only a window list holds windows; the Start menu's keys never start like these. */
+	for (int i = 0; i < u->menu_n; i++)
+		if (u->menu_views[i] == v && !rei_popup_is_for(s, "start")) {
+			rei_popup_close(s);
+			return;
+		}
 }
 
 /* ------------------------------------------------------------------------ */
@@ -660,11 +605,6 @@ void rei_tray_emit(struct rei_server *s, struct rei_scene_snapshot *snap)
 	struct rei_tray_ui *u = s->tray_ui;
 	if (!u)
 		return;
-	if (u->menu_open && u->menu_pixbuf) {
-		int m = u->menu_margin;
-		rei_snapshot_add(snap, u->menu_pixbuf, (float)(u->menu_rect.x - m), (float)(u->menu_rect.y - m),
-				 (float)(u->menu_rect.w + 2 * m), (float)(u->menu_rect.h + 2 * m), false);
-	}
 	if (u->tip_on && u->tip) {
 		double t = (double)(rei_now_ns() - u->tip_start_ns) / ((double)FADE_MS * 1e6);
 		t = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -680,7 +620,6 @@ void rei_tray_finish(struct rei_server *s)
 {
 	struct rei_tray_ui *u = s->tray_ui;
 	if (u) {
-		rei_pixbuf_unref(u->menu_pixbuf);
 		rei_pixbuf_unref(u->tip);
 		if (u->hover_timer)
 			event_free(u->hover_timer);

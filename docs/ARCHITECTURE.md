@@ -537,3 +537,14 @@ compiles but has only been exercised for presentation. CI-style sanitizer builds
 meson setup build-asan -Db_sanitize=address,undefined -Db_lundef=false
 meson setup build-tsan -Db_sanitize=thread -Db_lundef=false
 ```
+
+## The Start menu and Run prompt (`src/startmenu.c`, `src/runprompt.c`, `src/popup.c`)
+
+`popup.c` is the generic compositor-drawn list (shared with the tray's window list; one open at a
+time, the press that closes or picks is consumed). `startmenu.c` builds the Start list from the
+config (shortcuts, Run, then the power unit; power rows need a second click) and handles picks.
+`runprompt.c` is the floating prompt: while open it intercepts every key in `rei_input_key`
+(VT switching still works), edits a UTF-8 buffer, repeats held keys with timers, blinks a cursor
+(`REI_PROMPT_BLINK_MS` for tests), re-renders via `rei_bar_prompt_render` (Pango, `PANGO_WRAP_CHAR`)
+and is emitted centred on the focused output; text is refused once the box would exceed 60% of the
+output height. Tested by `tests/test_start.c`; the popup logs row centres so tests can click rows.

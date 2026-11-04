@@ -16,6 +16,7 @@
 #include "proto/surface.h"
 #include "proto/xdg_shell.h"
 #include "backend/backend.h"
+#include "runprompt.h"
 #include "server.h"
 #include "toolbar.h"
 #include "util/log.h"
@@ -215,6 +216,15 @@ void rei_input_key(struct rei_server *server, uint32_t time_ms, uint32_t code, b
 	if (pressed && code == 1 && rei_tray_menu_is_open(server)) {
 		set_add(in->swallowed, &in->n_swallowed, REI_MAX_PRESSED, code);
 		rei_tray_menu_close(server);
+		return;
+	}
+
+	/* The Run prompt takes every key (VT switching below still works, so check it first). */
+	if (rei_prompt_is_open(server) && !(pressed && rei_xkb_sym(in->xkb, code) >= XKB_KEY_XF86Switch_VT_1 &&
+					    rei_xkb_sym(in->xkb, code) <= XKB_KEY_XF86Switch_VT_12)) {
+		if (pressed)
+			set_add(in->swallowed, &in->n_swallowed, REI_MAX_PRESSED, code);
+		rei_prompt_key(server, code, pressed);
 		return;
 	}
 
@@ -446,6 +456,16 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 		    : !set_remove(in->buttons, &in->n_buttons, button))
 		return;
 
+	if (pressed && rei_prompt_is_open(s)) {
+		rei_prompt_press(s);
+		in->bar_press = true;
+		in->bar_press_ws = 0;
+		in->bar_press_volume = false;
+		in->bar_press_tray = -1;
+		rei_server_schedule_flush(s);
+		return;
+	}
+
 	if (pressed && rei_tray_menu_is_open(s)) {
 		/* The window list takes the press (picking a row, or just closing). The release is
 		 * swallowed like a toolbar press's, so no client sees half a click. */
@@ -491,6 +511,13 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 			in->bar_press_tray = -1;
 			struct rei_output *tray_output;
 			int tray_index;
+			if (ws == 0 && rei_toolbar_start_at(s, s->cursor_x, s->cursor_y)) {
+				in->bar_press_ws = 0;
+				in->bar_press_output = bo;
+				rei_toolbar_start_click(s, bo);
+				rei_server_schedule_flush(s);
+				return;
+			}
 			if (ws == 0 && !in->bar_press_volume &&
 			    rei_toolbar_tray_at(s, s->cursor_x, s->cursor_y, &tray_output, &tray_index)) {
 				in->bar_press_tray = tray_index;

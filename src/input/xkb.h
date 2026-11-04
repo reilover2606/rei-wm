@@ -47,6 +47,9 @@ xkb_keysym_t rei_xkb_base_sym(const struct rei_xkb *xkb, uint32_t evdev_code);
 /* The symbol the key produces with the current modifiers. */
 xkb_keysym_t rei_xkb_sym(const struct rei_xkb *xkb, uint32_t evdev_code);
 
+/* The text a key press produces with the current modifiers (UTF-8, NUL-terminated); 0 if none. */
+size_t rei_xkb_utf8(const struct rei_xkb *xkb, uint32_t evdev_code, char *buf, size_t n);
+
 struct rei_xkb_mods {
 	uint32_t depressed, latched, locked, group;
 };

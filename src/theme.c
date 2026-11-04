@@ -8,7 +8,7 @@
 #include "util/util.h"
 
 static const char *const element_names[REI_ELEM_COUNT] = {
-	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "battery",
+	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "start_button", "run_prompt", "battery",
 };
 static const char *const shape_names[] = { "square", "rounded", "pill", "bevel" };
 
@@ -85,6 +85,20 @@ void rei_theme_defaults(struct rei_theme *t, uint32_t bg, uint32_t fg, uint32_t 
 	menu->shadow = (struct rei_shadow){ 0x000000, 0.30f, 0, 2, 6 };
 	/* Menu rows have no fill until hovered. */
 
+	struct rei_style *start = &t->e[REI_ELEM_START_BUTTON];
+	start->color = rei_color_mix(bg, hi, 0.55);
+	start->shape = REI_SHAPE_ROUNDED;
+	start->radius = 4;
+
+	/* The Run prompt: a see-through box, so what is behind it stays faintly visible. */
+	struct rei_style *run = &t->e[REI_ELEM_RUN_PROMPT];
+	run->color = rei_color_mix(bg, 0x000000, 0.25);
+	run->opacity = 0.80f;
+	run->shape = REI_SHAPE_ROUNDED;
+	run->radius = 14;
+	run->border_width = 1;
+	run->shadow = (struct rei_shadow){ 0x000000, 0.45f, 0, 4, 18 };
+
 	/* The battery icon: its level fill, a green one while charging, a red one when low. The outline
 	 * is the border. */
 	struct rei_style *bat = &t->e[REI_ELEM_BATTERY];
@@ -148,7 +162,7 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				idx = e;
 		if (idx < 0) {
 			snprintf(err, errlen, "theme.%s: unknown element (known: toolbar, workspace_button, "
-				 "tray_tile, tray_overflow, tooltip, menu, menu_row, battery)", el->key);
+				 "tray_tile, tray_overflow, tooltip, menu, menu_row, start_button, run_prompt, battery)", el->key);
 			return false;
 		}
 		if (el->val->type != TOML_TABLE) {
