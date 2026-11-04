@@ -188,6 +188,61 @@ bool rei_bar_volume_rect(const struct rei_bar_state *st, struct rei_rect *out)
 }
 
 
+/* ---- The battery: an icon and a percentage, just before the volume (or the clock) ---- */
+
+#define BATT_BODY_W 24.0
+#define BATT_BODY_H 12.0
+#define BATT_NUB_W 2.5
+#define BATT_ICON_W (BATT_BODY_W + BATT_NUB_W)
+#define BATT_GAP 5.0     /* icon to text */
+#define BATT_LOW 15
+
+static void battery_text(const struct rei_bar_state *st, char *out, size_t n)
+{
+	snprintf(out, n, "%d%%", st->battery_percent);
+}
+
+/* Where the battery widget goes, and the size of its text. */
+static void battery_layout(cairo_t *cr, PangoFontDescription *font, const struct rei_bar_state *st,
+			   double *x, double *y, double *w, double *h, double *tw_out, double *th_out)
+{
+	bool vertical = rei_bar_vertical(st->position);
+	int lw = vertical ? st->thickness : st->length;
+	int lh = vertical ? st->length : st->thickness;
+	char text[16];
+	battery_text(st, text, sizeof text);
+	PangoLayout *l = make_layout(cr, font, text);
+	int tw, th;
+	pango_layout_get_pixel_size(l, &tw, &th);
+	g_object_unref(l);
+	*tw_out = tw;
+	*th_out = th;
+
+	/* Whatever is already at the end: the volume if shown, else the clock. */
+	double cw, ch, cl;
+	clock_extent(cr, font, st, &cw, &ch, &cl);
+	double edge;  /* The near edge of what is already there, along the bar. */
+	if (st->volume[0]) {
+		double vx, vy, vw, vh;
+		volume_layout(cr, font, st, &vx, &vy, &vw, &vh);
+		edge = vertical ? vy : vx;
+	} else {
+		edge = vertical ? lh - BAR_PAD - ch : lw - BAR_PAD - cw;
+	}
+	bool anything = st->volume[0] || st->clock[0];
+	if (!vertical) {
+		*w = BATT_ICON_W + BATT_GAP + tw;
+		*h = th > BATT_BODY_H ? th : BATT_BODY_H;
+		*x = edge - (anything ? VOLUME_GAP : 0) - *w;
+		*y = (lh - *h) / 2.0;
+	} else {
+		*w = tw > BATT_ICON_W ? tw : BATT_ICON_W;
+		*h = BATT_BODY_H + 3 + th;
+		*x = (lw - *w) / 2.0;
+		*y = edge - (anything ? VOLUME_GAP : 0) - *h;
+	}
+}
+
 /* ---- Styles: one drawing path for every themed element ---- */
 
 static void set_rgba(cairo_t *cr, uint32_t rgb, double a)
@@ -306,6 +361,11 @@ static void tray_bounds(const struct rei_bar_state *st, double *start, double *e
 		double vx, vy, vw, vh;
 		volume_layout(cr, font, st, &vx, &vy, &vw, &vh);
 		*end = vertical ? vy : vx;
+	}
+	if (st->battery_present) {
+		double bx, by, bw, bh, btw, bth;
+		battery_layout(cr, font, st, &bx, &by, &bw, &bh, &btw, &bth);
+		*end = vertical ? by : bx;
 	}
 	*end -= 12;
 	pango_font_description_free(font);
@@ -555,6 +615,77 @@ static void draw_tray(cairo_t *cr, PangoFontDescription *font, const struct rei_
 			      st->tray_hover == REI_TRAY_HOVER_OVERFLOW);
 	if (st->drag_index >= 0 && (size_t)st->drag_index < lay.n_visible)
 		draw_tile(cr, font, st, theme, &st->tray[st->drag_index], lay.tile[st->drag_index], true, 2.0);
+}
+
+/* The battery: a horizontal cell that fills in proportion to the charge, then the percentage. */
+static void draw_battery(cairo_t *cr, PangoFontDescription *font, const struct rei_bar_state *st,
+			 const struct rei_theme *theme)
+{
+	const struct rei_style *bs = &theme->e[REI_ELEM_BATTERY];
+	const struct rei_style *bar = &theme->e[REI_ELEM_TOOLBAR];
+	bool vertical = rei_bar_vertical(st->position);
+	double x, y, w, h, tw, th;
+	battery_layout(cr, font, st, &x, &y, &w, &h, &tw, &th);
+
+	int pct = st->battery_percent < 0 ? 0 : st->battery_percent > 100 ? 100 : st->battery_percent;
+	bool low = pct <= BATT_LOW && !st->battery_charging;
+	uint32_t level = st->battery_charging ? bs->active_color : low ? bs->inactive_color : bs->color;
+
+	double ix = vertical ? x + (w - BATT_ICON_W) / 2.0 : x;
+	double iy = vertical ? y : y + (h - BATT_BODY_H) / 2.0;
+	double bw = bs->border_width > 0.01f ? bs->border_width : 0.0;
+
+	/* The body (outline), and the little terminal on its right end. */
+	if (bw > 0) {
+		shape_path(cr, bs->shape, ix + bw / 2, iy + bw / 2, BATT_BODY_W - bw, BATT_BODY_H - bw, bs->radius - bw / 2);
+		cairo_set_line_width(cr, bw);
+		set_rgba(cr, bs->border_color, 1.0);
+		cairo_stroke(cr);
+	}
+	set_rgba(cr, bs->border_color, 1.0);
+	cairo_rectangle(cr, ix + BATT_BODY_W, iy + 3.5, BATT_NUB_W, BATT_BODY_H - 7);
+	cairo_fill(cr);
+
+	/* The level: grows from the left, inside the outline. */
+	double pad = bw + 1.5;
+	double full_w = BATT_BODY_W - 2 * pad, fh = BATT_BODY_H - 2 * pad;
+	double fw = full_w * pct / 100.0;
+	if (pct > 0 && fw < 1.5)
+		fw = 1.5;  /* A nearly empty battery still shows a sliver. */
+	if (fw > 0) {
+		struct rei_style cell = *bs;
+		cell.shadow.opacity = 0;
+		cell.border_width = 0;
+		cell.radius = fmax(0.0, bs->radius - pad);
+		draw_box(cr, &cell, ix + pad, iy + pad, fw, fh, level, 1.0);
+	}
+
+	/* Charging: a small bolt over the cell. */
+	if (st->battery_charging) {
+		double cx = ix + BATT_BODY_W / 2.0, cy = iy + BATT_BODY_H / 2.0;
+		cairo_new_path(cr);
+		cairo_move_to(cr, cx + 1.5, cy - 4.5);
+		cairo_line_to(cr, cx - 3.0, cy + 0.8);
+		cairo_line_to(cr, cx - 0.2, cy + 0.8);
+		cairo_line_to(cr, cx - 1.5, cy + 4.5);
+		cairo_line_to(cr, cx + 3.0, cy - 0.8);
+		cairo_line_to(cr, cx + 0.2, cy - 0.8);
+		cairo_close_path(cr);
+		set_rgba(cr, bar->color, 0.9);
+		cairo_fill(cr);
+	}
+
+	/* The percentage. */
+	char text[16];
+	battery_text(st, text, sizeof text);
+	set_color(cr, low ? bs->inactive_color : bs->text_color);
+	PangoLayout *l = make_layout(cr, font, text);
+	if (!vertical)
+		cairo_move_to(cr, ix + BATT_ICON_W + BATT_GAP, y + (h - th) / 2.0);
+	else
+		cairo_move_to(cr, x + (w - tw) / 2.0, y + BATT_BODY_H + 3);
+	pango_cairo_show_layout(cr, l);
+	g_object_unref(l);
 }
 
 /* ---- Tooltip ---- */
@@ -808,6 +939,8 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 	}
 
 	draw_tray(cr, font, st, &theme);
+	if (st->battery_present)
+		draw_battery(cr, font, st, &theme);
 
 	/* The volume, just before the clock. */
 	if (st->volume[0]) {

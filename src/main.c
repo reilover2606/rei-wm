@@ -1,4 +1,7 @@
+#include <execinfo.h>
 #include <getopt.h>
+#include <signal.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +36,38 @@ static void usage(FILE *out)
 		out);
 }
 
+/*
+ * If rei-wm crashes (a segfault, or glibc aborting on a corrupted heap), print where, so a
+ * bug report can say more than "it crashed". Not strictly async-signal-safe, but the process is
+ * already dying and this has proven reliable in practice.
+ */
+static void crash_handler(int sig)
+{
+	static volatile sig_atomic_t in_handler;
+	if (in_handler)
+		_exit(128 + sig);
+	in_handler = 1;
+	void *frames[64];
+	int n = backtrace(frames, 64);
+	const char head[] = "\nrei-wm crashed (signal ";
+	ssize_t r = write(STDERR_FILENO, head, sizeof head - 1);
+	char num[8] = { (char)('0' + sig / 10), (char)('0' + sig % 10), ')', ':', '\n', 0 };
+	r = write(STDERR_FILENO, num, 5);
+	(void)r;
+	backtrace_symbols_fd(frames, n, STDERR_FILENO);
+	signal(sig, SIG_DFL);
+	raise(sig);
+}
+
+static void install_crash_handler(void)
+{
+	void *warm[2];
+	backtrace(warm, 2);  /* Loads libgcc now, not inside the handler. */
+	static const int sigs[] = { SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL };
+	for (size_t i = 0; i < sizeof sigs / sizeof sigs[0]; i++)
+		signal(sigs[i], crash_handler);
+}
+
 int main(int argc, char **argv)
 {
 	static const struct option long_opts[] = {
@@ -53,6 +88,7 @@ int main(int argc, char **argv)
 	bool verbose = false, check_only = false;
 
 	rei_log_set_thread_name("main");
+	install_crash_handler();
 	const char *env_level = getenv("REI_LOG");
 	if (env_level) {
 		int lvl = rei_log_parse_level(env_level);

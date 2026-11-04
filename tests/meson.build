@@ -6,7 +6,7 @@ test_env.set('LSAN_OPTIONS', 'suppressions=' + meson.current_source_dir() / 'lsa
 
 test_deps = [rei_core_dep]
 
-foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'keybindings', 'layout', 'decoration', 'toolbar', 'icons', 'theme']
+foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'keybindings', 'layout', 'decoration', 'toolbar', 'icons', 'theme', 'battery']
   exe = executable('test_' + t, 'test_' + t + '.c',
     include_directories: inc,
     dependencies: test_deps,
@@ -111,6 +111,18 @@ tray_ui_test = executable('test_tray_ui', 'test_tray_ui.c', xdg_shell_client_h, 
   dependencies: [wayland_client, m_dep],
 )
 test('tray-ui', tray_ui_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 240)
+
+close_test = executable('test_close_sequence', 'test_close_sequence.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('close-sequence', close_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+
+battbar_test = executable('test_battery_bar', 'test_battery_bar.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('battery-bar', battbar_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
 
 bar_test = executable('test_bar', 'test_bar.c', xdg_shell_client_h, xdg_shell_code,
   include_directories: inc,

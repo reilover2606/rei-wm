@@ -83,3 +83,20 @@ scanned out directly. The pointer is a hardware cursor when the monitor's scale 
   hand is not renegotiated.
 - Touchpad gestures, tablets, touch and key-repeat for the compositor itself are not handled.
 - Kinetic touchpad scrolling ends without an `axis_stop`, so some apps may glide.
+
+## If rei-wm crashes
+
+rei-wm now prints a backtrace to stderr when it crashes, so run it with the log redirected
+(`./build/src/rei-wm --backend drm 2> rei.log`) and send the end of `rei.log`.
+
+For a crash that looks like memory corruption (for example `corrupted double-linked list`,
+`free(): invalid pointer`), the most useful thing is a run of an AddressSanitizer build, which stops at
+the exact bad access rather than later:
+
+```bash
+meson setup build-asan -Db_sanitize=address -Db_lundef=false
+ninja -C build-asan
+ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 ./build-asan/src/rei-wm --backend drm -v 2> rei-asan.log
+```
+
+then do whatever made it crash and send `rei-asan.log`. (It runs a little slower; that is expected.)

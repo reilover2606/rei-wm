@@ -785,7 +785,7 @@ static bool window_follow(struct client *c, struct window *w)
 
 /* ---- multi-window harness: clients that follow configure, keyboard chords ---- */
 
-static struct client *g_clients[4];
+static struct client *g_clients[8];
 static struct window *g_wins[64];
 static int g_nwins;
 

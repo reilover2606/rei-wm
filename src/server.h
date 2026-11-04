@@ -21,6 +21,7 @@ struct rei_input;
 struct rei_image;
 struct rei_xwayland;
 struct rei_audio;
+struct rei_battery;
 struct rei_tray_ui;
 struct wl_protocol_logger;
 
@@ -83,6 +84,7 @@ struct rei_server {
 	struct wl_protocol_logger *protocol_logger;
 	struct rei_xwayland *xwayland;
 	struct rei_audio *audio;
+	struct rei_battery *battery;
 	struct rei_tray_ui *tray_ui;
 
 	/* Config hot reload (src/reload.c). Superseded configs are kept until exit, since

@@ -45,6 +45,7 @@ Colours are `"#rrggbb"`. Hovering a tile or button lightens its fill by a fixed 
 | `tray_overflow` | the "+N" tile that holds what no longer fits | everything |
 | `tooltip` | the hover tooltip | `color`, `text_color`, shape, border, `opacity`, shadow |
 | `menu` | the pop-up window list | `color`, border, shape, `opacity`, shadow |
+| `battery` | the battery icon: `color` is the level fill, `active_color` the fill while charging (with a bolt), `inactive_color` the fill and text at 15% or less; `border_color`/`border_width` the outline, `shape`/`radius` the cell's corners | `color`, `active_color`, `inactive_color`, `text_color`, border, `shape`, `radius` |
 | `menu_row` | one row of a list | `active_color` (hovered row), `text_color`, `active_text_color`, `inactive_text_color` (minimized windows) |
 
 Defaults at a glance: tiles, buttons and tooltips have `shape = "rounded"` with `radius = 4`; the

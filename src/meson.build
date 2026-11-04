@@ -1,4 +1,5 @@
 core_sources = files(
+  'battery.c',
   'config.c',
   'config_default.c',
   'cursor.c',
@@ -91,5 +92,6 @@ rei_core_dep = declare_dependency(
 
 rei_wm = executable('rei-wm', 'main.c',
   dependencies: rei_core_dep,
+  link_args: ['-rdynamic'],  # so a crash backtrace shows function names
   install: true,
 )

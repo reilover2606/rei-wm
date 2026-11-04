@@ -112,6 +112,9 @@ struct rei_bar_state {
 	int drag_pos;            /* Where the pointer is along the bar (bar-local), while dragging. */
 	bool styled;             /* `theme` is set; otherwise the legacy colours below give the default look. */
 	struct rei_theme theme;
+	bool battery_present;   /* The machine has a battery (the widget shows). */
+	int battery_percent;    /* 0..100 */
+	bool battery_charging;
 	char volume[16];  /* "73%", "muted"; empty when there is no audio sink. */
 	bool volume_muted;
 	uint32_t background, foreground, highlight;  /* 0xRRGGBB */
