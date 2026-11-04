@@ -1,3 +1,4 @@
+#include "icons.h"
 #include "server.h"
 #include "proto/linux_dmabuf.h"
 
@@ -486,6 +487,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 
 	struct rei_server *s = rei_xcalloc(1, sizeof *s);
 	s->config = config;
+	rei_flavor_icons_configure(config->flavor_icons);
 	wl_list_init(&s->outputs);
 	wl_list_init(&s->surfaces);
 	wl_list_init(&s->views);

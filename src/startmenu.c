@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "confirm.h"
+#include "icons.h"
 #include "popup.h"
 #include "runprompt.h"
 #include "server.h"
@@ -117,6 +118,13 @@ void rei_startmenu_open(struct rei_server *s, struct rei_output *o, struct rei_r
 		st.rows[m->n].gap_before = i == 0 ? 9 : 0;
 		m->n++;
 	}
+	/* Flavor icons, when on: every row gets one (stable per label). */
+	if (cfg->theme.e[REI_ELEM_MENU_ROW].icon)
+		for (int i = 0; i < m->n; i++) {
+			char key[120];
+			snprintf(key, sizeof key, "start-menu:%s", st.rows[i].label);
+			st.rows[i].icon = rei_flavor_icon(key);
+		}
 	st.n_rows = m->n;
 	st.hover = -1;
 	snprintf(st.font, sizeof st.font, "%s", cfg->toolbar_font);

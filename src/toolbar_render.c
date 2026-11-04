@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "toolbar.h"
+#include "sysinfo.h"
 #include "util/util.h"
 
 /* ------------------------------------------------------------------------ */
@@ -121,10 +122,12 @@ static const double BAR_PAD = 8, VOLUME_GAP = 14;
 /* The CPU/RAM readout: "CPU 12%  RAM 34%" (two short lines, "12%" over "34%", on a vertical bar). */
 static void sysinfo_text(const struct rei_bar_state *st, char *out, size_t n)
 {
-	if (rei_bar_vertical(st->position))
-		snprintf(out, n, "%d%%\n%d%%", st->sysinfo_cpu, st->sysinfo_mem);
+	char mem[32];
+	rei_sysinfo_format_mem(st->sysinfo_mem_used_kb, st->sysinfo_mem_total_kb, mem, sizeof mem);
+	if (rei_bar_vertical(st->position))   /* no room for the total: "12%" over "5.2G" */
+		snprintf(out, n, "%d%%\n%.1fG", st->sysinfo_cpu, (double)st->sysinfo_mem_used_kb / 1048576.0);
 	else
-		snprintf(out, n, "CPU %d%%   RAM %d%%", st->sysinfo_cpu, st->sysinfo_mem);
+		snprintf(out, n, "CPU %d%%   RAM %s", st->sysinfo_cpu, mem);
 }
 
 /* The readout's box: its size; (0, 0) when it is off. */
@@ -673,6 +676,13 @@ static void draw_tile(cairo_t *cr, PangoFontDescription *font, const struct rei_
 		icon = main_w - 6;
 	if (!vertical && main_w < icon + 6)
 		icon = main_w - 6;
+	if (ts->icon_size > 0 && ts->icon_size < icon) {   /* theme: tray_tile.icon_size */
+		if (!vertical)
+			iy += (icon - ts->icon_size) / 2.0;
+		else
+			ix += (icon - ts->icon_size) / 2.0;
+		icon = ts->icon_size;
+	}
 	draw_icon(cr, it->icon, ix, iy, icon, it->minimized ? 0.5 : 1.0);
 
 	if (!vertical && st->tray_mode == REI_TRAY_ICONS_NAMES && main_w > tile + 14) {
@@ -1023,6 +1033,21 @@ struct rei_pixbuf *rei_bar_confirm_render(const struct rei_confirm_state *st, in
 #define MENU_MIN_W 180
 #define MENU_MAX_W 400
 
+/* A row's icon: its size in pixels (0 = none), and the room it takes at the row's front. */
+static int menu_icon_size(const struct rei_menu_state *st, int i)
+{
+	if (!st->rows[i].icon || !st->row.icon)
+		return 0;
+	int size = st->row.icon_size > 0 ? (int)st->row.icon_size : MENU_ROW_H - 6;
+	return size > MENU_ROW_H - 4 ? MENU_ROW_H - 4 : size;
+}
+
+static int menu_icon_room(const struct rei_menu_state *st, int i)
+{
+	int size = menu_icon_size(st, i);
+	return size > 0 ? size + 8 : 0;
+}
+
 void rei_bar_menu_size(const struct rei_menu_state *st, int *w, int *h, int *row_h, int *margin)
 {
 	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
@@ -1034,6 +1059,7 @@ void rei_bar_menu_size(const struct rei_menu_state *st, int *w, int *h, int *row
 		int iw, ih;
 		pango_layout_get_pixel_size(l, &iw, &ih);
 		g_object_unref(l);
+		iw += menu_icon_room(st, i);
 		widest = iw > widest ? iw : widest;
 	}
 	pango_font_description_free(font);
@@ -1105,15 +1131,19 @@ struct rei_pixbuf *rei_bar_menu_render(const struct rei_menu_state *st)
 					draw_box(cr, &hover, m + bw, y, lw - 2 * bw, row_h, rs->active_color, 1.0);
 				}
 			} else {
+				int room = menu_icon_room(st, i);
+				if (room > 0)
+					draw_icon(cr, st->rows[i].icon, m + bw + MENU_PAD_X, y + (row_h - (room - 8)) / 2.0,
+						  room - 8, 1.0);
 				PangoLayout *l = make_layout(cr, font, st->rows[i].label);
-				pango_layout_set_width(l, (int)((lw - 2 * MENU_PAD_X - 2 * bw) * PANGO_SCALE));
+				pango_layout_set_width(l, (int)((lw - 2 * MENU_PAD_X - 2 * bw - room) * PANGO_SCALE));
 				pango_layout_set_ellipsize(l, PANGO_ELLIPSIZE_END);
 				int tw, th;
 				pango_layout_get_pixel_size(l, &tw, &th);
 				uint32_t text = lit ? rs->active_text_color
 						    : st->rows[i].minimized ? rs->inactive_text_color : rs->text_color;
 				set_color(cr, text);
-				cairo_move_to(cr, m + bw + MENU_PAD_X, y + (row_h - th) / 2.0);
+				cairo_move_to(cr, m + bw + MENU_PAD_X + room, y + (row_h - th) / 2.0);
 				pango_cairo_show_layout(cr, l);
 				g_object_unref(l);
 			}
@@ -1217,8 +1247,25 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 			fill = rei_bar_mix(fill, sbs->text_color, 0.15);
 		draw_box(cr, sbs, cell.x + 2, cell.y + 2, cell.w - 4, cell.h - 4, fill, 1.0);
 		set_color(cr, st->start_open ? sbs->active_text_color : sbs->text_color);
+		int isz = st->start_icon ? (st->start_icon_size > 0 ? st->start_icon_size : 16) : 0;
+		if (isz > (int)fmin(cell.w, cell.h) - 6)
+			isz = (int)fmin(cell.w, cell.h) - 6;
 		if (!vertical) {
-			draw_centered(cr, font, st->start_label, cell.x + cell.w / 2.0, cell.y + cell.h / 2.0);
+			if (isz > 0) {   /* icon, then the word, together centred */
+				PangoLayout *l = make_layout(cr, font, st->start_label);
+				int tw, th;
+				pango_layout_get_pixel_size(l, &tw, &th);
+				double total = isz + 5 + tw;
+				double x0 = cell.x + (cell.w - total) / 2.0;
+				draw_icon(cr, st->start_icon, x0, cell.y + (cell.h - isz) / 2.0, isz, 1.0);
+				cairo_move_to(cr, x0 + isz + 5, cell.y + (cell.h - th) / 2.0);
+				pango_cairo_show_layout(cr, l);
+				g_object_unref(l);
+			} else {
+				draw_centered(cr, font, st->start_label, cell.x + cell.w / 2.0, cell.y + cell.h / 2.0);
+			}
+		} else if (isz > 0) {
+			draw_icon(cr, st->start_icon, cell.x + (cell.w - isz) / 2.0, cell.y + (cell.h - isz) / 2.0, isz, 1.0);
 		} else {
 			/* No room for the word on a narrow bar: the three-bar "menu" mark. */
 			double cx = cell.x + cell.w / 2.0, cy = cell.y + cell.h / 2.0;

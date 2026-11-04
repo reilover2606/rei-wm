@@ -24,7 +24,8 @@ int main(void)
 	struct rei_cpu_sample a, b;
 
 	CHECK(!rei_sysinfo_read_cpu(g_root, &a));   /* nothing there */
-	CHECK(rei_sysinfo_read_mem_percent(g_root) < 0);
+	long long used, total;
+	CHECK(!rei_sysinfo_read_mem(g_root, &used, &total));
 
 	/* user nice system idle iowait irq softirq steal */
 	put("stat", "cpu  100 0 100 700 100 0 0 0\ncpu0 50 0 50 350 50 0 0 0\nintr 1\n");
@@ -37,9 +38,9 @@ int main(void)
 	CHECK(rei_sysinfo_cpu_percent(&b, &b) == -1);   /* no time passed */
 
 	put("meminfo", "MemTotal:       8000000 kB\nMemFree: 100 kB\nMemAvailable:   6000000 kB\n");
-	CHECK(rei_sysinfo_read_mem_percent(g_root) == 25);
+	CHECK(rei_sysinfo_read_mem(g_root, &used, &total) && total == 8000000 && used == 2000000);
 	put("meminfo", "MemTotal: 1000 kB\n");   /* no MemAvailable: unusable */
-	CHECK(rei_sysinfo_read_mem_percent(g_root) < 0);
+	CHECK(!rei_sysinfo_read_mem(g_root, &used, &total));
 
 	char cmd[400];
 	snprintf(cmd, sizeof cmd, "rm -rf %s", g_root);

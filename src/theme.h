@@ -55,6 +55,8 @@ struct rei_style {
 	float radius;         /* pixels (rounded, bevel) */
 	float opacity;        /* 0..1: how opaque the element's fill is (transparency) */
 	struct rei_shadow shadow;
+	bool icon;            /* Iconable elements only: show an icon at the front (default on) */
+	float icon_size;      /* ...this many pixels square, at most 64; 0 = fit the element */
 	struct rei_glow glow;  /* a soft halo outside the element (hovered rows, dialogs, the Run prompt) */
 };
 
@@ -73,6 +75,9 @@ enum rei_element {
 	REI_ELEM_BATTERY,           /* the battery icon: color (level), active_color (charging), inactive_color (low) */
 	REI_ELEM_COUNT,
 };
+
+/* The iconable category: elements that can show a 1:1 icon (at most 64x64) at their front. */
+bool rei_element_iconable(enum rei_element e);
 
 struct rei_theme {
 	struct rei_style e[REI_ELEM_COUNT];

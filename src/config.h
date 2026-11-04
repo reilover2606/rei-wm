@@ -73,6 +73,7 @@ struct rei_config {
 	bool toolbar_battery;             /* Show the battery, if the machine has one. */
 	enum rei_tray_scope toolbar_tray_scope;
 	int32_t toolbar_tray_min_width;   /* Percent of its natural width a tile may shrink to. */
+	char *flavor_icons;          /* [theme] flavor_icons: a directory of icons for the iconable elements; "" = off. */
 	char *toolbar_font;          /* Pango font description. */
 	char *toolbar_clock_format;  /* strftime; empty means no clock. */
 	uint32_t toolbar_background, toolbar_foreground, toolbar_highlight;  /* 0xRRGGBB */

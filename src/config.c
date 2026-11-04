@@ -262,6 +262,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_tray_scope = REI_TRAY_SCOPE_WORKSPACE;
 	cfg->toolbar_tray_min_width = 50;
 	cfg->toolbar_font = rei_xstrdup("Sans 11");
+	cfg->flavor_icons = rei_xstrdup("");
 	cfg->toolbar_clock_format = rei_xstrdup("%H:%M:%S");
 	cfg->toolbar_background = 0x161c26;
 	cfg->toolbar_foreground = 0xd6dde8;
@@ -465,6 +466,11 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 	}
 
 	rei_theme_defaults(&cfg->theme, cfg->toolbar_background, cfg->toolbar_foreground, cfg->toolbar_highlight);
+	{
+		const struct toml_value *th = toml_table_get(root, "theme");
+		if (th && th->type == TOML_TABLE)
+			read_string(&r, th->u.tbl, "theme.", "flavor_icons", &cfg->flavor_icons);
+	}
 	if (!r.failed) {
 		char theme_err[300];
 		if (!rei_theme_read(&cfg->theme, root, theme_err, sizeof theme_err))
@@ -637,6 +643,7 @@ void rei_config_free(struct rei_config *cfg)
 	free(cfg->backend);
 	free(cfg->composition_key);
 	free(cfg->toolbar_font);
+	free(cfg->flavor_icons);
 	free(cfg->start_label);
 	free(cfg->start_shutdown_command);
 	free(cfg->start_reboot_command);

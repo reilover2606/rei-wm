@@ -106,12 +106,19 @@ static void build_state_for(struct rei_server *s, struct rei_output *o, const st
 		snprintf(st->start_label, sizeof st->start_label, "%s", cfg->start_label);
 		st->start_open = rei_popup_is_for(s, "start");
 		st->start_hover = s->start_hover;
+		const struct rei_style *ss = &cfg->theme.e[REI_ELEM_START_BUTTON];
+		if (ss->icon) {
+			st->start_icon = rei_flavor_icon("start-button");
+			st->start_icon_size = (int)ss->icon_size;
+		}
 	}
-	int cpu, mem;
-	if (cfg->toolbar_sysinfo && rei_sysinfo_state(s, &cpu, &mem)) {
+	int cpu;
+	long long mem_used, mem_total;
+	if (cfg->toolbar_sysinfo && rei_sysinfo_state(s, &cpu, &mem_used, &mem_total)) {
 		st->sysinfo_on = true;
 		st->sysinfo_cpu = cpu;
-		st->sysinfo_mem = mem;
+		st->sysinfo_mem_used_kb = mem_used;
+		st->sysinfo_mem_total_kb = mem_total;
 	}
 	st->mode_w = st->thickness;
 	st->mode_float = s->float_new_set ? s->float_new : cfg->float_new_windows;
@@ -134,7 +141,9 @@ static void build_state_for(struct rei_server *s, struct rei_output *o, const st
 			it->active = set.groups[i].active;
 			it->minimized = set.groups[i].minimized;
 			const char *title = set.groups[i].n_views ? rei_view_title(set.groups[i].views[0]) : "";
-			it->icon = rei_icon_for_app(set.groups[i].app_id, title);
+			const struct rei_style *ts = &cfg->theme.e[REI_ELEM_TRAY_TILE];
+			struct rei_pixbuf *flavor = ts->icon ? rei_flavor_icon(set.groups[i].app_id[0] ? set.groups[i].app_id : title) : NULL;
+			it->icon = !ts->icon ? NULL : flavor ? flavor : rei_icon_for_app(set.groups[i].app_id, title);
 		}
 		st->tray_extra_windows = set.extra_windows;
 		if (!only) {  /* Hover and drag belong to what is actually on screen. */

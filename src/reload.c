@@ -14,6 +14,7 @@
 #include "desktop.h"
 #include "input/input.h"
 #include "proto/seat.h"
+#include "icons.h"
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
@@ -64,6 +65,7 @@ bool rei_reload_config(struct rei_server *s, char *err, size_t errlen)
 	s->old_configs = rei_xrealloc(s->old_configs, (s->n_old_configs + 1) * sizeof *s->old_configs);
 	s->old_configs[s->n_old_configs++] = cfg;  /* Freed at exit with the others. */
 	s->config = cfg;
+	rei_flavor_icons_configure(cfg->flavor_icons);
 	s->float_new_set = false;   /* The file's new_windows applies again. */
 	rei_input_commit_reload(s, &in);
 

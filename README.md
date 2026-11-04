@@ -226,9 +226,19 @@ Configuration lives in `~/.config/rei-wm/config.toml` (or
 
 ## CPU/RAM readout and glow
 
-- **CPU and RAM:** one small box just left of the clock shows `CPU 12%   RAM 34%` (the busy share of all cores,
-  and memory in use), refreshed every two seconds. `[toolbar] sysinfo = false` removes it; style it with
+- **CPU and RAM:** one small box just left of the clock shows `CPU 12%   RAM 5.2/16.0GB` (the busy share of all cores,
+  and memory used / total in GiB, one decimal), refreshed every two seconds. `[toolbar] sysinfo = false` removes it; style it with
   `[theme.sysinfo]`.
 - **Glow:** hovered menu rows, confirmation dialogs and the Run prompt have a white halo. Per element:
   `glow_color`, `glow_size` (pixels; 0 turns it off) and `glow_opacity` under `[theme.menu_row]`,
   `[theme.dialog]` or `[theme.run_prompt]`; any other element can be given one the same way.
+
+## Icons
+
+Three elements are **iconable** (they can show a square icon, at most 64x64, at their front): the tray's
+window tiles, the Start button, and every row of the Start menu. Tiles show the application's icon, as
+before. Set `[theme] flavor_icons = "/path/to/dir"` and *every* iconable element instead gets a random icon
+from that directory (stable for a given element during a session, so icons don't flicker). Only `.png` files
+that are **square (1:1) and at most 64x64** are used; anything else is skipped with a warning in the log.
+Transparency is respected. Per element, `[theme.tray_tile]`, `[theme.start_button]` or `[theme.menu_row]`
+accept `icon = false` (no icon) and `icon_size` (pixels, up to 64; 0 fits the element).

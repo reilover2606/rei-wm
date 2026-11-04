@@ -7,6 +7,8 @@
 
 #include <sys/stat.h>
 
+#include "pngw.h"
+
 #define OUT_W 800
 #define OUT_H 600
 
@@ -137,21 +139,39 @@ int main(int argc, char **argv)
 		snprintf(path, sizeof path, "%s/stat", proc);
 		write_text(path, "cpu  100 0 100 700 100 0 0 0\n");
 		snprintf(path, sizeof path, "%s/meminfo", proc);
-		write_text(path, "MemTotal: 1000 kB\nMemAvailable: 590 kB\n");
+		write_text(path, "MemTotal: 16777216 kB\nMemAvailable: 11324621 kB\n");
 	}
 	setenv("REI_PROC_DIR", proc, 1);
 	setenv("REI_SYSINFO_POLL_MS", "200", 1);
 
-	char config[1600];
+	/* Flavor icons: two solid, opaque 32x32 images (magenta, cyan), and two that must be rejected. */
+	crc_init();
+	char flavor[200];
+	snprintf(flavor, sizeof flavor, "%s/flavor", g_dir);
+	CHECK(mkdir(flavor, 0700) == 0);
+	{
+		char path[260];
+		snprintf(path, sizeof path, "%s/magenta.png", flavor);
+		write_png(path, 32, 32, 255, 0, 255, 255);
+		snprintf(path, sizeof path, "%s/cyan.png", flavor);
+		write_png(path, 32, 32, 0, 255, 255, 255);
+		snprintf(path, sizeof path, "%s/toobig.png", flavor);
+		write_png(path, 128, 128, 255, 255, 0, 255);
+		snprintf(path, sizeof path, "%s/notsquare.png", flavor);
+		write_png(path, 32, 20, 255, 255, 0, 255);
+	}
+
+	char config[1900];
 	snprintf(config, sizeof config,
 		 "[toolbar]\nenabled = true\nthickness = 28\n"
 		 "[start_menu]\nshutdown_command = \"touch %s/shutdown\"\nreboot_command = \"touch %s/reboot\"\n"
 		 "run_font = \"Sans 20\"\n"
 		 "[[shortcut]]\nname = \"Alpha\"\ncommand = \"touch %s/alpha\"\n"
 		 "[[shortcut]]\nname = \"Beta\"\ncommand = \"touch %s/beta\"\n"
+		 "[theme]\nflavor_icons = \"%s\"\n"
 		 "[theme.run_prompt]\ncolor = \"#e0a000\"\nopacity = 1.0\nshadow_opacity = 0.0\nborder_width = 0\n"
 		 "[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n",
-		 g_marks, g_marks, g_marks, g_marks, OUT_W, OUT_H);
+		 g_marks, g_marks, g_marks, g_marks, flavor, OUT_W, OUT_H);
 	start_compositor(argv[1], config, true);
 
 	struct client c;
@@ -290,6 +310,32 @@ int main(int argc, char **argv)
 	CHECK(!near_px(&after, 400, 300, 0xe0, 0xa0, 0x00, 4));
 	free(after.rgb);
 
+	/* Flavor icons: the rejected files are reported, the Start button and menu rows show an icon. */
+	CHECK(log_has("flavor icons: toobig.png: 128x128 is larger than 64x64; skipped"));
+	CHECK(log_has("flavor icons: notsquare.png: 32x20 is not square (1:1); skipped"));
+	CHECK(log_has("flavor icons: 2 usable"));
+	{
+		struct ppm img = screenshot();
+		bool m = false, c = false;
+		for (int y = 4; y < 24; y++)
+			for (int x = 2; x < 30; x++) {
+				m |= near_px(&img, x, y, 255, 0, 255, 6);
+				c |= near_px(&img, x, y, 0, 255, 255, 6);
+			}
+		CHECK(m || c);   /* the Start button's icon, at its front */
+		free(img.rgb);
+		click_at(20, 14);
+		int rx, ry = row_y(0, &rx);
+		img = screenshot();
+		bool row_icon = false;
+		for (int y = ry - 9; y < ry + 9; y++)
+			for (int x = 6; x < 30; x++)
+				row_icon |= near_px(&img, x, y, 255, 0, 255, 6) || near_px(&img, x, y, 0, 255, 255, 6);
+		CHECK(row_icon);   /* ...and the first menu row's */
+		free(img.rgb);
+		click_at(0, 0);
+	}
+
 	/* The CPU/RAM box: it is drawn left of the clock, and follows /proc. */
 	{
 		struct ppm a = screenshot();
@@ -297,7 +343,7 @@ int main(int argc, char **argv)
 		snprintf(path, sizeof path, "%s/stat", proc);
 		write_text(path, "cpu  300 0 300 700 100 0 0 0\n");   /* 500 busy of 600 more: 83% */
 		snprintf(path, sizeof path, "%s/meminfo", proc);
-		write_text(path, "MemTotal: 1000 kB\nMemAvailable: 100 kB\n");
+		write_text(path, "MemTotal: 16777216 kB\nMemAvailable: 2097152 kB\n");
 		sleep_ms(700);
 		struct ppm b = screenshot();
 		CHECK(diff_px(&a, &b, 560, 2, 700, 26) > 20);   /* the numbers changed */

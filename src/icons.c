@@ -7,8 +7,11 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "toolbar.h"
+#include "util/log.h"
 #include "util/util.h"
 #include "wallpaper.h"
 
@@ -307,8 +310,126 @@ const char *rei_icon_app_name(const char *app_id)
 	return e ? e->name : NULL;
 }
 
+/* ------------------------------------------------------------------------ */
+/* Flavor icons                                                             */
+/* ------------------------------------------------------------------------ */
+
+static struct rei_pixbuf **flavor, **flavor_all;
+static size_t n_flavor, n_flavor_all;
+static char *flavor_dir;
+static uint32_t flavor_seed;
+
+int rei_flavor_icons_count(void)
+{
+	return (int)n_flavor;
+}
+
+int rei_flavor_icons_configure(const char *dir)
+{
+	if (!dir || !dir[0]) {
+		n_flavor = 0;   /* (what was loaded stays alive: a drawn bar may still point at it) */
+		free(flavor_dir);
+		flavor_dir = NULL;
+		return 0;
+	}
+	if (flavor_dir && strcmp(flavor_dir, dir) == 0)
+		return (int)n_flavor;
+	free(flavor_dir);
+	flavor_dir = rei_xstrdup(dir);
+	if (!flavor_seed) {
+		flavor_seed = (uint32_t)time(NULL) * 2654435761u ^ (uint32_t)getpid();
+		if (!flavor_seed)
+			flavor_seed = 1;
+	}
+
+	char expanded[1024];
+	const char *home = getenv("HOME");
+	if (dir[0] == '~' && (dir[1] == '/' || dir[1] == '\0') && home)
+		snprintf(expanded, sizeof expanded, "%s%s", home, dir + 1);
+	else
+		snprintf(expanded, sizeof expanded, "%s", dir);
+
+	n_flavor = 0;
+	free(flavor);
+	flavor = NULL;
+	DIR *d = opendir(expanded);
+	if (!d) {
+		rei_warn("flavor icons: cannot read %s", expanded);
+		return 0;
+	}
+	/* Sorted names, so which icon a key gets does not depend on directory order. */
+	char **names = NULL;
+	size_t nn = 0;
+	struct dirent *de;
+	while ((de = readdir(d))) {
+		size_t len = strlen(de->d_name);
+		if (len > 4 && strcasecmp(de->d_name + len - 4, ".png") == 0) {
+			names = rei_xrealloc(names, (nn + 1) * sizeof *names);
+			names[nn++] = rei_xstrdup(de->d_name);
+		}
+	}
+	closedir(d);
+	for (size_t i = 0; i < nn; i++)
+		for (size_t j = i + 1; j < nn; j++)
+			if (strcmp(names[j], names[i]) < 0) {
+				char *t = names[i];
+				names[i] = names[j];
+				names[j] = t;
+			}
+
+	struct rei_pixbuf **set = rei_xcalloc(nn ? nn : 1, sizeof *set);
+	size_t ns = 0;
+	for (size_t i = 0; i < nn; i++) {
+		char path[1400];
+		snprintf(path, sizeof path, "%s/%s", expanded, names[i]);
+		struct rei_pixbuf *pb = load_png(path);
+		if (!pb) {
+			rei_warn("flavor icons: %s: not a readable PNG; skipped", names[i]);
+		} else if (pb->width != pb->height) {
+			rei_warn("flavor icons: %s: %dx%d is not square (1:1); skipped", names[i], pb->width, pb->height);
+			rei_pixbuf_unref(pb);
+		} else if (pb->width > REI_ICON_MAX_SIZE) {
+			rei_warn("flavor icons: %s: %dx%d is larger than %dx%d; skipped", names[i], pb->width, pb->height,
+				 REI_ICON_MAX_SIZE, REI_ICON_MAX_SIZE);
+			rei_pixbuf_unref(pb);
+		} else {
+			set[ns++] = pb;
+		}
+		free(names[i]);
+	}
+	free(names);
+	/* Kept until exit even if the directory changes: a bar already drawn may point at them. */
+	flavor_all = rei_xrealloc(flavor_all, (n_flavor_all + ns + 1) * sizeof *flavor_all);
+	for (size_t i = 0; i < ns; i++)
+		flavor_all[n_flavor_all++] = set[i];
+	flavor = set;
+	n_flavor = ns;
+	rei_info("flavor icons: %zu usable from %s", ns, expanded);
+	return (int)ns;
+}
+
+struct rei_pixbuf *rei_flavor_icon(const char *key)
+{
+	if (n_flavor == 0)
+		return NULL;
+	uint32_t h = 2166136261u ^ flavor_seed;
+	for (const char *p = key; p && *p; p++)
+		h = (h ^ (uint8_t)*p) * 16777619u;
+	h ^= h >> 15;
+	return flavor[h % n_flavor];
+}
+
 void rei_icons_cleanup(void)
 {
+	for (size_t i = 0; i < n_flavor_all; i++)
+		rei_pixbuf_unref(flavor_all[i]);
+	free(flavor_all);
+	free(flavor);
+	free(flavor_dir);
+	flavor_all = flavor = NULL;
+	flavor_dir = NULL;
+	n_flavor = n_flavor_all = 0;
+
 	for (size_t i = 0; i < n_cache; i++) {
 		free(cache[i].key);
 		rei_pixbuf_unref(cache[i].icon);

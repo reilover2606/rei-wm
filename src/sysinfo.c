@@ -43,13 +43,13 @@ int rei_sysinfo_cpu_percent(const struct rei_cpu_sample *a, const struct rei_cpu
 	return p < 0 ? 0 : p > 100 ? 100 : (int)(p + 0.5);
 }
 
-int rei_sysinfo_read_mem_percent(const char *dir)
+bool rei_sysinfo_read_mem(const char *dir, long long *used, long long *total_out)
 {
 	char path[600];
 	snprintf(path, sizeof path, "%s/meminfo", dir);
 	FILE *f = fopen(path, "r");
 	if (!f)
-		return -1;
+		return false;
 	char line[256];
 	long long total = -1, avail = -1;
 	while (fgets(line, sizeof line, f)) {
@@ -57,10 +57,16 @@ int rei_sysinfo_read_mem_percent(const char *dir)
 		sscanf(line, "MemAvailable: %lld", &avail);
 	}
 	fclose(f);
-	if (total <= 0 || avail < 0)
-		return -1;
-	double p = 100.0 * (double)(total - avail) / (double)total;
-	return p < 0 ? 0 : p > 100 ? 100 : (int)(p + 0.5);
+	if (total <= 0 || avail < 0 || avail > total)
+		return false;
+	*used = total - avail;
+	*total_out = total;
+	return true;
+}
+
+void rei_sysinfo_format_mem(long long used_kb, long long total_kb, char *out, unsigned long n)
+{
+	snprintf(out, n, "%.1f/%.1fGB", (double)used_kb / 1048576.0, (double)total_kb / 1048576.0);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -70,7 +76,8 @@ struct rei_sysinfo {
 	char dir[512];
 	struct event *timer;
 	struct rei_cpu_sample last;
-	int cpu, mem;
+	int cpu;
+	long long mem_used, mem_total;
 };
 
 static int poll_ms(void)
@@ -82,18 +89,19 @@ static int poll_ms(void)
 static void poll(struct rei_sysinfo *s)
 {
 	struct rei_cpu_sample now;
-	int cpu = s->cpu, mem = rei_sysinfo_read_mem_percent(s->dir);
+	int cpu = s->cpu;
+	long long used = s->mem_used, total = s->mem_total;
+	rei_sysinfo_read_mem(s->dir, &used, &total);   /* keeps the old values if unreadable */
 	if (rei_sysinfo_read_cpu(s->dir, &now)) {
 		int p = rei_sysinfo_cpu_percent(&s->last, &now);
 		if (p >= 0)
 			cpu = p;
 		s->last = now;
 	}
-	if (mem < 0)
-		mem = s->mem;
-	if (cpu != s->cpu || mem != s->mem) {
+	if (cpu != s->cpu || used != s->mem_used || total != s->mem_total) {
 		s->cpu = cpu;
-		s->mem = mem;
+		s->mem_used = used;
+		s->mem_total = total;
 		rei_server_schedule_damage(s->server);
 	}
 }
@@ -117,13 +125,12 @@ void rei_sysinfo_start(struct rei_server *server)
 	s->server = server;
 	snprintf(s->dir, sizeof s->dir, "%s", dir && dir[0] ? dir : "/proc");
 	struct rei_cpu_sample first;
-	if (!rei_sysinfo_read_cpu(s->dir, &first) || rei_sysinfo_read_mem_percent(s->dir) < 0) {
+	if (!rei_sysinfo_read_cpu(s->dir, &first) || !rei_sysinfo_read_mem(s->dir, &s->mem_used, &s->mem_total)) {
 		rei_info("sysinfo: %s is not readable; the toolbar shows no CPU/RAM", s->dir);
 		free(s);
 		return;
 	}
 	s->last = first;
-	s->mem = rei_sysinfo_read_mem_percent(s->dir);
 	s->cpu = 0;
 	s->timer = evtimer_new(server->base, on_timer, s);
 	int ms = poll_ms();
@@ -143,11 +150,12 @@ void rei_sysinfo_stop(struct rei_server *server)
 	free(s);
 }
 
-bool rei_sysinfo_state(const struct rei_server *server, int *cpu, int *mem)
+bool rei_sysinfo_state(const struct rei_server *server, int *cpu, long long *mem_used, long long *mem_total)
 {
 	if (!server->sysinfo)
 		return false;
 	*cpu = server->sysinfo->cpu;
-	*mem = server->sysinfo->mem;
+	*mem_used = server->sysinfo->mem_used;
+	*mem_total = server->sysinfo->mem_total;
 	return true;
 }

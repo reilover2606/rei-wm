@@ -63,3 +63,9 @@ the wallpaper and the cursor are the next elements to join it, with the same pro
 Elements and properties are added in `src/theme.h` (the `rei_style` and `rei_element` types) and
 `src/theme.c` (names, defaults, parsing); the drawing helpers that apply a style
 (`draw_box` and friends in `src/toolbar_render.c`) are the model for how a new element is wired in.
+
+## Icons (the iconable elements)
+
+`tray_tile`, `start_button` and `menu_row` are *iconable*. Their style also takes `icon` (true/false) and
+`icon_size` (0-64 pixels; 0 fits the element). `[theme] flavor_icons = "dir"` gives each of them a random icon
+from that directory of PNGs; files that are not square or are larger than 64x64 are rejected (logged).

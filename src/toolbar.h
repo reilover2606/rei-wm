@@ -119,7 +119,10 @@ struct rei_bar_state {
 	bool start_open, start_hover;
 	char start_label[24];
 	bool sysinfo_on;        /* The CPU/RAM readout shows. */
-	int sysinfo_cpu, sysinfo_mem;   /* 0..100 */
+	int sysinfo_cpu;                /* 0..100 */
+	long long sysinfo_mem_used_kb, sysinfo_mem_total_kb;
+	struct rei_pixbuf *start_icon;   /* On the Start button (borrowed); NULL for none. */
+	int start_icon_size;
 	int mode_w;             /* Width of the tiled/floating switch after the Start button (0: none). */
 	bool mode_float;        /* New windows float. */
 	bool mode_hover;
@@ -160,6 +163,7 @@ struct rei_menu_row {
 	char label[96];
 	bool minimized;   /* Drawn dimmed. */
 	bool emphasis;    /* Drawn highlighted regardless of the pointer (a row waiting for confirmation). */
+	struct rei_pixbuf *icon;   /* Drawn at the front of the row (borrowed, process lifetime); NULL for none. */
 	int gap_before;   /* Extra space above this row, with a separator line in it (starts a new group). */
 };
 

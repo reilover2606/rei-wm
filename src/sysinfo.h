@@ -19,13 +19,15 @@ struct rei_cpu_sample {
 bool rei_sysinfo_read_cpu(const char *proc_dir, struct rei_cpu_sample *out);
 /* The busy percentage (0..100) between two samples; -1 if no time passed. */
 int rei_sysinfo_cpu_percent(const struct rei_cpu_sample *before, const struct rei_cpu_sample *after);
-/* Memory in use, 0..100, from <proc_dir>/meminfo; -1 if unreadable. */
-int rei_sysinfo_read_mem_percent(const char *proc_dir);
+/* Memory in use and in total, in kB, from <proc_dir>/meminfo (used = MemTotal - MemAvailable). */
+bool rei_sysinfo_read_mem(const char *proc_dir, long long *used_kb, long long *total_kb);
+/* "5.2/16.0GB" (GiB, one decimal). */
+void rei_sysinfo_format_mem(long long used_kb, long long total_kb, char *out, unsigned long n);
 
 /* Polls every 2 seconds if [toolbar] sysinfo is on. */
 void rei_sysinfo_start(struct rei_server *server);
 void rei_sysinfo_stop(struct rei_server *server);
-/* The last readings (0..100); false when the widget is off or /proc is unreadable. */
-bool rei_sysinfo_state(const struct rei_server *server, int *cpu, int *mem);
+/* The last readings (CPU 0..100; memory in kB); false when the widget is off or /proc is unreadable. */
+bool rei_sysinfo_state(const struct rei_server *server, int *cpu, long long *mem_used_kb, long long *mem_total_kb);
 
 #endif
