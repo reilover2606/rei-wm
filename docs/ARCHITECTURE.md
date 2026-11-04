@@ -416,6 +416,18 @@ One `rei_style` per `rei_element`, defaults derived from the three base colours,
 themed element is drawn through the same helpers (`shape_path`, `draw_shadow`, `draw_box`), which is what
 keeps the schema general: a new element is a style entry plus a call to `draw_box`.
 
+## Battery (`src/battery.c`)
+
+`rei_battery_read(dir, &info)` is pure apart from reading files, so it is tested against a fake
+`power_supply` tree. Every supply with `type = Battery`, not `scope = Device`, and not
+`present = 0` counts. Each contributes (charge, capacity) in energy units (`energy_*` in µWh;
+`charge_*` in µAh converted with the design voltage; a bare `capacity` percentage as a
+100-unit battery), and the percentage is the sum of charge over the sum of capacity. Charging is
+"any battery reports Charging". The server polls every 15 s (a timer; the sysfs has no change
+notification worth depending on) and damages the scene only if the result changed; the toolbar
+state carries percent and charging, so the bar redraws exactly then. The icon is drawn by
+`draw_battery`, positioned left of the volume (or the clock), and the tray's range stops short of it.
+
 ## Audio (`src/audio.c`)
 
 rei-wm is a native PipeWire client (libpipewire, driven from the libevent loop by watching the
@@ -491,6 +503,8 @@ missing config is started from `rei-wm --print-default-config`.
 - `tray-ui`: hover highlight (immediate) and tooltip (delayed, fading), drag to reorder in both directions,
   the overflow tile and its list, and the 32-window cap that opens the next window on the next workspace;
   `theme`: defaults, overrides and validation, and the renderer applying shape, opacity and shadow;
+- `battery`: aggregation of several batteries (energy, charge+voltage, percent-only), ignoring peripherals
+  and empty bays; `battery-bar`: the widget on the bar with a fake sysfs, following a change to charging;
 - `decoration`: notch geometry, hit-testing, hover/scale variants and artwork pixels;
 - `notch`: the notches end to end (focus-only, no resizing, hover, click and cancel,
   handle drag, the pull-back rule, drag-and-drop into a slot with the drop hint,

@@ -59,6 +59,7 @@ enum rei_element {
 	REI_ELEM_TOOLTIP,
 	REI_ELEM_MENU,              /* a pop-up list (the tray's window list) */
 	REI_ELEM_MENU_ROW,
+	REI_ELEM_BATTERY,           /* the battery icon: color (level), active_color (charging), inactive_color (low) */
 	REI_ELEM_COUNT,
 };
 

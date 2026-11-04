@@ -9,6 +9,7 @@
 #include <time.h>
 
 #include "audio.h"
+#include "battery.h"
 #include "desktop.h"
 #include "icons.h"
 #include "tray.h"
@@ -95,6 +96,10 @@ static void build_state_for(struct rei_server *s, struct rei_output *o, const st
 	if (audio.muted && rei_bar_vertical(st->position))
 		snprintf(st->volume, sizeof st->volume, "mute");
 	st->volume_muted = audio.muted;
+	struct rei_battery_info bat = rei_battery_state(s);
+	st->battery_present = bat.present;
+	st->battery_percent = bat.percent;
+	st->battery_charging = bat.charging;
 	st->tray_mode = cfg->toolbar_tray;
 	st->tray_min_percent = cfg->toolbar_tray_min_width;
 	st->tray_hover = -1;

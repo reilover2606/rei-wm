@@ -8,7 +8,7 @@
 #include "util/util.h"
 
 static const char *const element_names[REI_ELEM_COUNT] = {
-	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row",
+	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "battery",
 };
 static const char *const shape_names[] = { "square", "rounded", "pill", "bevel" };
 
@@ -84,6 +84,17 @@ void rei_theme_defaults(struct rei_theme *t, uint32_t bg, uint32_t fg, uint32_t 
 	menu->shape = REI_SHAPE_SQUARE;
 	menu->shadow = (struct rei_shadow){ 0x000000, 0.30f, 0, 2, 6 };
 	/* Menu rows have no fill until hovered. */
+
+	/* The battery icon: its level fill, a green one while charging, a red one when low. The outline
+	 * is the border. */
+	struct rei_style *bat = &t->e[REI_ELEM_BATTERY];
+	bat->color = rei_color_mix(bg, fg, 0.9);
+	bat->active_color = 0x6bc46d;
+	bat->inactive_color = 0xe5534b;
+	bat->border_color = rei_color_mix(bg, fg, 0.75);
+	bat->border_width = 1.2f;
+	bat->shape = REI_SHAPE_ROUNDED;
+	bat->radius = 2.5f;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -137,7 +148,7 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				idx = e;
 		if (idx < 0) {
 			snprintf(err, errlen, "theme.%s: unknown element (known: toolbar, workspace_button, "
-				 "tray_tile, tray_overflow, tooltip, menu, menu_row)", el->key);
+				 "tray_tile, tray_overflow, tooltip, menu, menu_row, battery)", el->key);
 			return false;
 		}
 		if (el->val->type != TOML_TABLE) {

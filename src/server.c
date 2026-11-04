@@ -20,6 +20,7 @@
 #include "proto/wl_output.h"
 #include "proto/xdg_shell.h"
 #include "audio.h"
+#include "battery.h"
 #include "reload.h"
 #include "render_thread.h"
 #include "scene.h"
@@ -592,6 +593,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	rei_xwayland_start(s);
 	rei_reload_start(s);
 	rei_audio_start(s);
+	rei_battery_start(s);
 
 	rei_info("rei-wm listening on WAYLAND_DISPLAY=%s (backend: %s)",
 		 s->socket_name, s->backend->impl->name);
@@ -647,6 +649,7 @@ void rei_server_destroy(struct rei_server *s)
 		wl_display_destroy_clients(s->display);
 	if (s->display)
 		rei_wl_output_finish(s);
+	rei_battery_stop(s);
 	rei_audio_stop(s);
 	rei_reload_stop(s);
 	rei_xwayland_stop(s);

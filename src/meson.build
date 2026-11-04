@@ -1,4 +1,5 @@
 core_sources = files(
+  'battery.c',
   'config.c',
   'config_default.c',
   'cursor.c',

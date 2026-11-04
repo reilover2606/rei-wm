@@ -249,6 +249,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_position = REI_BAR_TOP;
 	cfg->toolbar_thickness = 28;
 	cfg->toolbar_tray = REI_TRAY_ICONS_NAMES;
+	cfg->toolbar_battery = true;
 	cfg->toolbar_tray_scope = REI_TRAY_SCOPE_WORKSPACE;
 	cfg->toolbar_tray_min_width = 50;
 	cfg->toolbar_font = rei_xstrdup("Sans 11");
@@ -399,6 +400,9 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		read_choice(&r, tb, "toolbar.", "tray_scope", &scope, scopes);
 		cfg->toolbar_tray_scope = strcmp(scope, "output") == 0 ? REI_TRAY_SCOPE_OUTPUT : REI_TRAY_SCOPE_WORKSPACE;
 		free(scope);
+		const struct toml_value *bat = get(&r, tb, "toolbar.", "battery", TOML_BOOL);
+		if (bat)
+			cfg->toolbar_battery = bat->u.b;
 		read_int(&r, tb, "toolbar.", "tray_min_width", &cfg->toolbar_tray_min_width, 10, 100);
 		read_string(&r, tb, "toolbar.", "font", &cfg->toolbar_font);
 		read_string(&r, tb, "toolbar.", "clock_format", &cfg->toolbar_clock_format);

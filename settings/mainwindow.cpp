@@ -283,6 +283,9 @@ QWidget *MainWindow::buildToolbarTab()
 	addField(f, tr("Application tray"), "toolbar", "tray", Choice, "icon_and_name",
 		 { "icon_and_name", "icon", "off" }, 0, 0, 1,
 		 tr("The running windows, one tile per application, in the middle of the bar."));
+	addField(f, tr("Show the battery"), "toolbar", "battery", Bool, true, {}, 0, 0, 1,
+		 tr("An icon and percentage before the volume and clock. Appears only if the machine has a battery; "
+		    "several batteries are combined."));
 	addField(f, tr("Tray lists"), "toolbar", "tray_scope", Choice, "workspace", { "workspace", "output" }, 0, 0, 1,
 		 tr("This monitor's current workspace, or all of its workspaces. With \"workspace\", the 33rd window "
 		    "in a full tray opens on the next workspace."));

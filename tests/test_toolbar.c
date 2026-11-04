@@ -396,6 +396,76 @@ static const uint8_t *px4(const struct rei_pixbuf *pb, int x, int y)
 }
 
 /* The theme drives the look: shape, opacity, shadow and colours of a tray tile and the bar. */
+/* The battery cell fills from the left in proportion to the charge. */
+static void test_battery_render(void)
+{
+	struct rei_bar_state st = tray_state(REI_BAR_TOP, 1200, 0, NULL);
+	st.background = 0x161c26;
+	st.foreground = 0xd6dde8;
+	st.highlight = 0x3c6ebe;
+	st.battery_present = true;
+	st.battery_percent = 100;
+	struct rei_pixbuf *full = rei_bar_render(&st);
+	st.battery_percent = 50;
+	struct rei_pixbuf *half = rei_bar_render(&st);
+	st.battery_present = false;
+	struct rei_pixbuf *none = rei_bar_render(&st);
+	CHECK(full && half && none);
+
+	/* Find the cell in each picture: the first light pixel (the level colour) at the bar's middle row,
+	 * just left of the clock, then the unbroken run of light pixels from there. The widget is anchored
+	 * on the right, so it starts further left when its text is wider. */
+	int mid = 14, first = -1;
+	int run[2], start[2];
+	struct rei_pixbuf *imgs[2] = { full, half };
+	for (int k = 0; k < 2; k++) {
+		int x = 700;
+		for (; x < 1150; x++) {
+			const uint8_t *q = imgs[k]->data + ((size_t)mid * 1200 + (size_t)x) * 4;
+			if (q[2] > 180 && q[1] > 180 && q[0] > 180)
+				break;
+		}
+		start[k] = x;
+		for (; x < 1150; x++) {
+			const uint8_t *q = imgs[k]->data + ((size_t)mid * 1200 + (size_t)x) * 4;
+			if (!(q[2] > 180 && q[1] > 180 && q[0] > 180))
+				break;
+		}
+		run[k] = x - start[k];
+	}
+	first = start[0];
+	CHECK(first > 0 && first < 1150);
+	CHECK(run[0] >= 15 && run[0] <= 22);                   /* nearly the cell's inner width */
+	CHECK(abs(run[1] * 2 - run[0]) <= 3);                  /* half the width for half the charge */
+	(void)none;
+
+	/* Low battery is red, charging is green. */
+	st.battery_present = true;
+	st.battery_percent = 10;
+	struct rei_pixbuf *low = rei_bar_render(&st);
+	bool red = false;
+	for (int x = 700; x < 1150 && !red; x++) {
+		const uint8_t *p = low->data + ((size_t)mid * 1200 + (size_t)x) * 4;
+		red = p[2] > 180 && p[1] < 120 && p[0] < 120;
+	}
+	CHECK(red);
+	st.battery_charging = true;
+	st.battery_percent = 60;
+	struct rei_pixbuf *chg = rei_bar_render(&st);
+	bool green = false;
+	for (int x = 700; x < 1150 && !green; x++) {
+		const uint8_t *p = chg->data + ((size_t)mid * 1200 + (size_t)x) * 4;
+		green = p[1] > 150 && p[2] < 160 && p[0] < 160;
+	}
+	CHECK(green);
+
+	rei_pixbuf_unref(full);
+	rei_pixbuf_unref(half);
+	rei_pixbuf_unref(none);
+	rei_pixbuf_unref(low);
+	rei_pixbuf_unref(chg);
+}
+
 static void test_theme_render(void)
 {
 	struct rei_bar_state st = tray_state(REI_BAR_TOP, 1200, 1, NULL);
@@ -463,6 +533,7 @@ int main(void)
 	test_config();
 	test_tray_layout();
 	test_theme_render();
+	test_battery_render();
 	rei_bar_render_cleanup();
 	puts("test_toolbar: ok");
 	return 0;

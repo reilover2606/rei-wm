@@ -77,6 +77,16 @@ the same neighbour) or, if floating, to the same position.
 - **Look:** colours, corner shapes, transparency and shadows of these elements are a theme; see
   [docs/THEME.md](docs/THEME.md).
 
+## The battery
+
+If the machine has a battery, the toolbar shows a horizontal battery icon that fills in proportion
+to the charge, with the percentage, just before the volume and clock (green with a bolt while
+charging, red at 15% or less). It is found in `/sys/class/power_supply`: batteries of type
+`Battery` that belong to the machine are combined into one (total charge over total capacity, so
+two batteries of different sizes weigh correctly); a wireless mouse's or phone's battery is
+ignored. A desktop with no battery shows nothing. `[toolbar] battery = false` turns it off. It is
+re-read every 15 seconds. Colours and shape are the `battery` theme element.
+
 ## Settings
 
 `rei-settings` is a Qt app for everything in `~/.config/rei-wm/config.toml`: input, windows and
