@@ -10,6 +10,7 @@
 
 #include "audio.h"
 #include "battery.h"
+#include "sysinfo.h"
 #include "desktop.h"
 #include "icons.h"
 #include "popup.h"
@@ -105,6 +106,12 @@ static void build_state_for(struct rei_server *s, struct rei_output *o, const st
 		snprintf(st->start_label, sizeof st->start_label, "%s", cfg->start_label);
 		st->start_open = rei_popup_is_for(s, "start");
 		st->start_hover = s->start_hover;
+	}
+	int cpu, mem;
+	if (cfg->toolbar_sysinfo && rei_sysinfo_state(s, &cpu, &mem)) {
+		st->sysinfo_on = true;
+		st->sysinfo_cpu = cpu;
+		st->sysinfo_mem = mem;
 	}
 	st->mode_w = st->thickness;
 	st->mode_float = s->float_new_set ? s->float_new : cfg->float_new_windows;

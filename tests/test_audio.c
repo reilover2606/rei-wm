@@ -170,7 +170,7 @@ int main(int argc, char **argv)
 
 	char config[300];
 	snprintf(config, sizeof config,
-		 "[toolbar]\nenabled = true\n[audio]\nvolume_step = 5\nmax_volume = 100\n"
+		 "[toolbar]\nenabled = true\nsysinfo = false\n[audio]\nvolume_step = 5\nmax_volume = 100\n"
 		 "[[output]]\nname = \"OUT\"\nwidth = 800\nheight = 600\n");
 	start_compositor(argv[1], config, true);
 	for (int t = 0; !log_has("audio: sink 'test-sink'") || !log_has("volume 100%"); t += 50) {

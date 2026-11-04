@@ -8,7 +8,7 @@
 #include "util/util.h"
 
 static const char *const element_names[REI_ELEM_COUNT] = {
-	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "start_button", "run_prompt", "dialog", "battery",
+	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "start_button", "run_prompt", "sysinfo", "dialog", "battery",
 };
 static const char *const shape_names[] = { "square", "rounded", "pill", "bevel" };
 
@@ -83,7 +83,8 @@ void rei_theme_defaults(struct rei_theme *t, uint32_t bg, uint32_t fg, uint32_t 
 	menu->border_width = 1;
 	menu->shape = REI_SHAPE_SQUARE;
 	menu->shadow = (struct rei_shadow){ 0x000000, 0.30f, 0, 2, 6 };
-	/* Menu rows have no fill until hovered. */
+	/* Menu rows have no fill until hovered; then they glow a little. */
+	t->e[REI_ELEM_MENU_ROW].glow = (struct rei_glow){ 0xffffff, 0.55f, 6 };
 
 	struct rei_style *start = &t->e[REI_ELEM_START_BUTTON];
 	start->color = rei_color_mix(bg, hi, 0.55);
@@ -98,6 +99,13 @@ void rei_theme_defaults(struct rei_theme *t, uint32_t bg, uint32_t fg, uint32_t 
 	run->radius = 14;
 	run->border_width = 1;
 	run->shadow = (struct rei_shadow){ 0x000000, 0.45f, 0, 4, 18 };
+	run->glow = (struct rei_glow){ 0xffffff, 0.45f, 14 };
+
+	/* The CPU/RAM readout: a quiet rounded box. */
+	struct rei_style *sys = &t->e[REI_ELEM_SYSINFO];
+	sys->color = rei_color_mix(bg, hi, 0.30);
+	sys->shape = REI_SHAPE_ROUNDED;
+	sys->radius = 4;
 
 	/* Confirmation dialogs: like the menus, but rounder and more opaque. */
 	struct rei_style *dlg = &t->e[REI_ELEM_DIALOG];
@@ -107,6 +115,7 @@ void rei_theme_defaults(struct rei_theme *t, uint32_t bg, uint32_t fg, uint32_t 
 	dlg->radius = 12;
 	dlg->border_width = 1;
 	dlg->shadow = (struct rei_shadow){ 0x000000, 0.5f, 0, 6, 24 };
+	dlg->glow = (struct rei_glow){ 0xffffff, 0.5f, 12 };
 
 	/* The battery icon: its level fill, a green one while charging, a red one when low. The outline
 	 * is the border. */
@@ -171,7 +180,7 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				idx = e;
 		if (idx < 0) {
 			snprintf(err, errlen, "theme.%s: unknown element (known: toolbar, workspace_button, "
-				 "tray_tile, tray_overflow, tooltip, menu, menu_row, start_button, run_prompt, dialog, battery)", el->key);
+				 "tray_tile, tray_overflow, tooltip, menu, menu_row, start_button, run_prompt, sysinfo, dialog, battery)", el->key);
 			return false;
 		}
 		if (el->val->type != TOML_TABLE) {
@@ -192,7 +201,7 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				{ "inactive_color", &st->inactive_color }, { "text_color", &st->text_color },
 				{ "active_text_color", &st->active_text_color },
 				{ "inactive_text_color", &st->inactive_text_color },
-				{ "border_color", &st->border_color }, { "shadow_color", &st->shadow.color },
+				{ "border_color", &st->border_color }, { "shadow_color", &st->shadow.color }, { "glow_color", &st->glow.color },
 			};
 			bool done = false;
 			for (size_t c = 0; c < REI_ARRAY_LEN(colors) && !done; c++) {
@@ -212,6 +221,7 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				{ "opacity", &st->opacity, 0, 1 }, { "shadow_opacity", &st->shadow.opacity, 0, 1 },
 				{ "shadow_offset_x", &st->shadow.dx, -50, 50 },
 				{ "shadow_offset_y", &st->shadow.dy, -50, 50 }, { "shadow_blur", &st->shadow.blur, 0, 50 },
+				{ "glow_size", &st->glow.size, 0, 60 }, { "glow_opacity", &st->glow.opacity, 0, 1 },
 			};
 			for (size_t n = 0; n < REI_ARRAY_LEN(nums) && !done; n++) {
 				if (strcmp(key, nums[n].name) != 0)

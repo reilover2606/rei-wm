@@ -56,6 +56,19 @@ int main(void)
 	CHECK(c->theme.e[REI_ELEM_TRAY_OVERFLOW].color != 0x223344);  /* elements are independent */
 	rei_config_free(c);
 
+	/* Glow: white by default on hovered rows, dialogs and the Run prompt; colour and size are editable. */
+	c = parse_ok("");
+	CHECK(c->theme.e[REI_ELEM_MENU_ROW].glow.color == 0xffffff && c->theme.e[REI_ELEM_MENU_ROW].glow.size > 0);
+	CHECK(c->theme.e[REI_ELEM_DIALOG].glow.size > 0 && c->theme.e[REI_ELEM_RUN_PROMPT].glow.size > 0);
+	CHECK(c->theme.e[REI_ELEM_TOOLBAR].glow.size == 0);
+	rei_config_free(c);
+	c = parse_ok("[theme.dialog]\nglow_color = \"#ff8800\"\nglow_size = 20\nglow_opacity = 0.9\n"
+		     "[theme.menu_row]\nglow_size = 0\n");
+	CHECK(c->theme.e[REI_ELEM_DIALOG].glow.color == 0xff8800 && c->theme.e[REI_ELEM_DIALOG].glow.size == 20);
+	CHECK(c->theme.e[REI_ELEM_DIALOG].glow.opacity == 0.9f && c->theme.e[REI_ELEM_MENU_ROW].glow.size == 0);
+	rei_config_free(c);
+	parse_fails("[theme.dialog]\nglow_size = 100\n", "theme.dialog.glow_size");
+
 	/* Typos are errors that say where. */
 	parse_fails("[theme.tray_tyle]\ncolor = \"#000000\"\n", "theme.tray_tyle: unknown element");
 	parse_fails("[theme.tray_tile]\ncolour = \"#000000\"\n", "theme.tray_tile.colour: unknown property");

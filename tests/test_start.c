@@ -128,6 +128,20 @@ int main(int argc, char **argv)
 	snprintf(g_marks, sizeof g_marks, "%s/marks", g_dir);
 	CHECK(mkdir(g_marks, 0700) == 0);
 
+	/* A fake /proc so the CPU/RAM box has known numbers. */
+	char proc[200];
+	snprintf(proc, sizeof proc, "%s/proc", g_dir);
+	CHECK(mkdir(proc, 0700) == 0);
+	{
+		char path[260];
+		snprintf(path, sizeof path, "%s/stat", proc);
+		write_text(path, "cpu  100 0 100 700 100 0 0 0\n");
+		snprintf(path, sizeof path, "%s/meminfo", proc);
+		write_text(path, "MemTotal: 1000 kB\nMemAvailable: 590 kB\n");
+	}
+	setenv("REI_PROC_DIR", proc, 1);
+	setenv("REI_SYSINFO_POLL_MS", "200", 1);
+
 	char config[1600];
 	snprintf(config, sizeof config,
 		 "[toolbar]\nenabled = true\nthickness = 28\n"
@@ -276,6 +290,45 @@ int main(int argc, char **argv)
 	CHECK(!near_px(&after, 400, 300, 0xe0, 0xa0, 0x00, 4));
 	free(after.rgb);
 
+	/* The CPU/RAM box: it is drawn left of the clock, and follows /proc. */
+	{
+		struct ppm a = screenshot();
+		char path[260];
+		snprintf(path, sizeof path, "%s/stat", proc);
+		write_text(path, "cpu  300 0 300 700 100 0 0 0\n");   /* 500 busy of 600 more: 83% */
+		snprintf(path, sizeof path, "%s/meminfo", proc);
+		write_text(path, "MemTotal: 1000 kB\nMemAvailable: 100 kB\n");
+		sleep_ms(700);
+		struct ppm b = screenshot();
+		CHECK(diff_px(&a, &b, 560, 2, 700, 26) > 20);   /* the numbers changed */
+		/* The box has a fill that differs from the plain bar behind it. */
+		CHECK(!near_px(&b, 600, 4, 22, 28, 38, 3));
+		free(a.rgb);
+		free(b.rgb);
+	}
+
+	/* Hover glow: a hovered menu row is ringed by light that fades outward. */
+	{
+		struct ppm quiet = screenshot();
+		click_at(20, 14);
+		int rx;
+		int ry = row_y(1, &rx);
+		inject_lines("motion_abs 90 1\n");   /* off the rows, still on the bar */
+		settle_all();
+		struct ppm before = screenshot();
+		char mv[64];
+		snprintf(mv, sizeof mv, "motion_abs %d %d\n", rx, ry);
+		inject_lines(mv);
+		settle_all();
+		struct ppm hov = screenshot();
+		/* Just outside the menu's right edge (x = 180), beside the hovered row, light has appeared. */
+		CHECK(lum(&hov, 183, ry) > lum(&before, 183, ry) + 20);
+		click_at(0, 0);
+		free(quiet.rgb);
+		free(before.rgb);
+		free(hov.rgb);
+	}
+
 	/* Looking around (only with REI_SHOT_DIR): windows, the menu, the dialog, the prompt, fullscreen. */
 	struct window wt, wf, wt2;
 	open_win(&c, &wt, "T", 0x3a7bd5);
@@ -295,7 +348,14 @@ int main(int argc, char **argv)
 	settle_all();
 	shot("1-desktop");
 	click_at(20, 14);
-	shot("2-start-menu");
+	{
+		int hx, hy = row_y(1, &hx);
+		char mv[64];
+		snprintf(mv, sizeof mv, "motion_abs %d %d\n", hx, hy);
+		inject_lines(mv);
+		settle_all();
+		shot("2-start-menu");
+	}
 	y = row_y(4, &x);
 	click_at(x, y);
 	shot("3-confirm-dialog");

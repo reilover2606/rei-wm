@@ -250,6 +250,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_thickness = 28;
 	cfg->toolbar_tray = REI_TRAY_ICONS_NAMES;
 	cfg->toolbar_battery = true;
+	cfg->toolbar_sysinfo = true;
 	cfg->start_enabled = true;
 	cfg->focus_follows_mouse = true;
 	cfg->start_label = rei_xstrdup("Start");
@@ -449,6 +450,9 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		read_choice(&r, tb, "toolbar.", "tray_scope", &scope, scopes);
 		cfg->toolbar_tray_scope = strcmp(scope, "output") == 0 ? REI_TRAY_SCOPE_OUTPUT : REI_TRAY_SCOPE_WORKSPACE;
 		free(scope);
+		const struct toml_value *sysi = get(&r, tb, "toolbar.", "sysinfo", TOML_BOOL);
+		if (sysi)
+			cfg->toolbar_sysinfo = sysi->u.b;
 		const struct toml_value *bat = get(&r, tb, "toolbar.", "battery", TOML_BOOL);
 		if (bat)
 			cfg->toolbar_battery = bat->u.b;

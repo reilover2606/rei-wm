@@ -118,6 +118,8 @@ struct rei_bar_state {
 	int start_w;             /* The Start button's extent along the bar (0: none). */
 	bool start_open, start_hover;
 	char start_label[24];
+	bool sysinfo_on;        /* The CPU/RAM readout shows. */
+	int sysinfo_cpu, sysinfo_mem;   /* 0..100 */
 	int mode_w;             /* Width of the tiled/floating switch after the Start button (0: none). */
 	bool mode_float;        /* New windows float. */
 	bool mode_hover;

@@ -6,7 +6,7 @@ test_env.set('LSAN_OPTIONS', 'suppressions=' + meson.current_source_dir() / 'lsa
 
 test_deps = [rei_core_dep]
 
-foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'keybindings', 'layout', 'decoration', 'toolbar', 'icons', 'theme', 'battery']
+foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'keybindings', 'layout', 'decoration', 'toolbar', 'icons', 'theme', 'battery', 'sysinfo']
   exe = executable('test_' + t, 'test_' + t + '.c',
     include_directories: inc,
     dependencies: test_deps,

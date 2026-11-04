@@ -149,6 +149,8 @@ const char *rei_config_default_text(void)
 "# A battery icon and percentage before the volume and clock. It appears only if the machine has a\n"
 "# battery; several are combined into one.\n"
 "battery = true\n"
+"\n# CPU and RAM use in one box, just left of the clock (updated every two seconds).\n"
+"sysinfo = true\n"
 "tray_min_width = 50\n"
 "# The clock at the end of the bar. Any strftime format: \"%H:%M:%S\" (24 h with seconds),\n"
 "# \"%H:%M\", \"%I:%M %p\" (12 h), \"%a %d %b  %H:%M\"; empty for no clock.\n"

@@ -104,7 +104,7 @@ int main(int argc, char **argv)
 
 	char config[500];
 	snprintf(config, sizeof config,
-		 "[toolbar]\nenabled = true\nthickness = 28\n[layout]\nnew_windows = \"float\"\n"
+		 "[toolbar]\nenabled = true\nsysinfo = false\nthickness = 28\n[layout]\nnew_windows = \"float\"\n"
 		 "[theme.tooltip]\ncolor = \"#ffffff\"\nopacity = 1.0\nshadow_opacity = 0.0\nborder_width = 0\n"
 		 "[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n", OUT_W, OUT_H);
 	start_compositor(argv[1], config, true);

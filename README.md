@@ -223,3 +223,12 @@ Configuration lives in `~/.config/rei-wm/config.toml` (or
   config reload resets it to that.
 - **Fullscreen** fills everything beside the toolbar, but keeps the outer gap (`gap_outer`), so the toolbar
   stays visible and usable. Style the confirmation dialog with `[theme.dialog]`.
+
+## CPU/RAM readout and glow
+
+- **CPU and RAM:** one small box just left of the clock shows `CPU 12%   RAM 34%` (the busy share of all cores,
+  and memory in use), refreshed every two seconds. `[toolbar] sysinfo = false` removes it; style it with
+  `[theme.sysinfo]`.
+- **Glow:** hovered menu rows, confirmation dialogs and the Run prompt have a white halo. Per element:
+  `glow_color`, `glow_size` (pixels; 0 turns it off) and `glow_opacity` under `[theme.menu_row]`,
+  `[theme.dialog]` or `[theme.run_prompt]`; any other element can be given one the same way.
