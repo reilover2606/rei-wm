@@ -216,7 +216,7 @@ static void arrange(struct rei_output *o)
 	}
 
 	if (ws->fullscreen)
-		apply_to_view(ws->fullscreen, output_rect(o), false, true);
+		apply_to_view(ws->fullscreen, inset(output_usable(o), o->server->config->gap_outer), false, true);
 
 	rei_server_schedule_damage(s);
 }
@@ -253,7 +253,9 @@ struct rei_view *rei_wm_active_view(struct rei_server *s)
 /* Exactly one window, the active one, shows as activated. */
 static void update_activation(struct rei_server *s)
 {
-	struct rei_view *active = rei_wm_active_view(s);
+	/* With the pointer over no window, the last window is still the target of keyboard actions
+	 * (rei_wm_active_view) but nothing is activated or receives keys. */
+	struct rei_view *active = s->focus_cleared ? NULL : rei_wm_active_view(s);
 	struct rei_view *v;
 	wl_list_for_each(v, &s->views, link)
 		if (v->xwin)
@@ -264,11 +266,21 @@ static void update_activation(struct rei_server *s)
 	rei_server_schedule_damage(s);
 }
 
+/* Nothing is focused (the pointer left every window). The next focus_view undoes it. */
+void rei_wm_clear_focus(struct rei_server *s)
+{
+	if (s->focus_cleared)
+		return;
+	s->focus_cleared = true;
+	update_activation(s);
+}
+
 void rei_wm_focus_view(struct rei_view *v)
 {
 	struct rei_server *s = v->server;
 	if (!rei_view_visible(v) || !SHOWN(v))
 		return;
+	s->focus_cleared = false;
 
 	s->focused_output = v->ws->output;
 	wl_list_remove(&v->focus_link);
@@ -345,12 +357,13 @@ static void detach(struct rei_view *v)
 /* Dialogs, and windows that can't be resized, are better off floating. */
 static bool wants_float(struct rei_server *s, const struct rei_view *v)
 {
+	bool float_new = s->float_new_set ? s->float_new : s->config->float_new_windows;
 	if (v->xwin)
-		return s->config->float_new_windows || rei_xwindow_wants_float(v->xwin);
+		return float_new || rei_xwindow_wants_float(v->xwin);
 	const struct rei_xdg_toplevel *tl = v->toplevel;
 	bool fixed_size = tl->min_w > 0 && tl->min_h > 0 &&
 			  tl->min_w == tl->max_w && tl->min_h == tl->max_h;
-	return s->config->float_new_windows || tl->has_parent || fixed_size;
+	return float_new || tl->has_parent || fixed_size;
 }
 
 struct rei_view *rei_view_create_x(struct rei_server *s, struct rei_xwindow *xwin)
@@ -767,6 +780,7 @@ void rei_wm_goto_workspace(struct rei_server *s, int number)
 	struct rei_output *out = s->focused_output;
 	if (!out)
 		return;
+	s->focus_cleared = false;
 
 	struct rei_workspace *ws = ws_find(s, number);
 	if (ws && ws->output && ws->output->workspace == ws) {
@@ -1281,7 +1295,7 @@ bool rei_wm_pick(struct rei_server *s, double x, double y,
 
 struct rei_surface *rei_wm_keyboard_surface(struct rei_server *s)
 {
-	struct rei_view *v = rei_wm_active_view(s);
+	struct rei_view *v = s->focus_cleared ? NULL : rei_wm_active_view(s);
 	return v ? view_surface(v) : NULL;
 }
 

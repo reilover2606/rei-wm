@@ -100,6 +100,23 @@ static void type(const char *keys)  /* evdev codes, space-separated */
 	settle_all();
 }
 
+/* With REI_SHOT_DIR set, saves the screen as a PPM there (for looking at, not for checking). */
+static void shot(const char *name)
+{
+	const char *dir = getenv("REI_SHOT_DIR");
+	if (!dir)
+		return;
+	struct ppm img = screenshot();
+	char path[256];
+	snprintf(path, sizeof path, "%s/%s.ppm", dir, name);
+	FILE *f = fopen(path, "wb");
+	CHECK(f);
+	fprintf(f, "P6\n%d %d\n255\n", img.w, img.h);
+	fwrite(img.rgb, 3, (size_t)img.w * (size_t)img.h, f);
+	fclose(f);
+	free(img.rgb);
+}
+
 int main(int argc, char **argv)
 {
 	CHECK(argc == 2);
@@ -157,21 +174,42 @@ int main(int argc, char **argv)
 	click_at(x, y);
 	CHECK(wait_exists("beta"));
 
-	/* Power rows need a second click. */
+	/* Power rows ask in a dialog. Cancel is highlighted at first, so Enter alone is safe. */
+	int dlg_confirm_x = 511, dlg_cancel_x = 367, dlg_y = 342;
 	click_at(20, 14);
 	y = row_y(4, &x);
 	click_at(x, y);
+	CHECK(log_count("confirm: Shut down?") == 1);
+	type("28");                                  /* Enter */
 	sleep_ms(300);
 	CHECK(!exists("shutdown"));
-	CHECK(log_has("popup start:"));
+	CHECK(log_has("confirm: cancelled"));
+
+	click_at(20, 14);
 	y = row_y(4, &x);
 	click_at(x, y);
+	type("1");                                   /* Escape */
+	CHECK(log_count("confirm: cancelled") == 2);
+
+	click_at(20, 14);
+	y = row_y(4, &x);
+	click_at(x, y);
+	click_at(dlg_cancel_x, dlg_y);               /* the Cancel button */
+	CHECK(log_count("confirm: cancelled") == 3);
+	CHECK(!exists("shutdown"));
+
+	click_at(20, 14);
+	y = row_y(4, &x);
+	click_at(x, y);
+	type("15");                                  /* Tab: highlights the confirm button */
+	type("28");                                  /* Enter */
 	CHECK(wait_exists("shutdown"));
+
 	click_at(20, 14);
 	y = row_y(5, &x);
 	click_at(x, y);
-	y = row_y(5, &x);
-	click_at(x, y);
+	CHECK(log_count("confirm: Restart?") == 1);
+	click_at(dlg_confirm_x, dlg_y);              /* the Restart button */
 	CHECK(wait_exists("reboot"));
 
 	/* Run opens the prompt: a box in the middle that blinks. */
@@ -237,6 +275,44 @@ int main(int argc, char **argv)
 	struct ppm after = screenshot();
 	CHECK(!near_px(&after, 400, 300, 0xe0, 0xa0, 0x00, 4));
 	free(after.rgb);
+
+	/* Looking around (only with REI_SHOT_DIR): windows, the menu, the dialog, the prompt, fullscreen. */
+	struct window wt, wf, wt2;
+	open_win(&c, &wt, "T", 0x3a7bd5);
+	CHECK(wt.cfg_tiled);
+	open_win(&c, &wt2, "T2", 0x7bd53a);
+	CHECK(wt2.cfg_tiled);
+	click_at(68 + 14, 14);      /* The tiled/floating switch decides how new windows open. */
+	CHECK(log_has("new windows: floating"));
+	open_win(&c, &wf, "F", 0xd5a03a);
+	CHECK(!wf.cfg_tiled);
+	click_at(68 + 14, 14);
+	CHECK(log_has("new windows: tiled"));
+	struct window wt3;
+	open_win(&c, &wt3, "T3", 0xaa55cc);
+	CHECK(wt3.cfg_tiled);
+	inject_lines("motion_abs 100 400\n");
+	settle_all();
+	shot("1-desktop");
+	click_at(20, 14);
+	shot("2-start-menu");
+	y = row_y(4, &x);
+	click_at(x, y);
+	shot("3-confirm-dialog");
+	type("1");
+	click_at(20, 14);
+	y = row_y(2, &x);
+	click_at(x, y);
+	type("33 23 19 18 33 24 45 57 24 49 33");   /* "firefox ofe" */
+	shot("4-run-prompt");
+	type("1");
+	inject_lines("motion_abs 400 300\n");
+	settle_all();
+	inject_lines("key 125 1\nkey 33 1\nkey 33 0\nkey 125 0\n");   /* Mod+f */
+	settle_all();
+	shot("5-fullscreen");
+	inject_lines("key 125 1\nkey 33 1\nkey 33 0\nkey 125 0\n");
+	settle_all();
 
 	CHECK(stop_compositor() == 0);
 	printf("start: ok\n");

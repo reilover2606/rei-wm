@@ -64,6 +64,7 @@ bool rei_reload_config(struct rei_server *s, char *err, size_t errlen)
 	s->old_configs = rei_xrealloc(s->old_configs, (s->n_old_configs + 1) * sizeof *s->old_configs);
 	s->old_configs[s->n_old_configs++] = cfg;  /* Freed at exit with the others. */
 	s->config = cfg;
+	s->float_new_set = false;   /* The file's new_windows applies again. */
 	rei_input_commit_reload(s, &in);
 
 	rei_seat_keyboards_reconfigured(s->seat, in.keymap_changed);

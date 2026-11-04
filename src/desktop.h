@@ -110,6 +110,8 @@ bool rei_wm_surface_hidden(struct rei_surface *root);
 /* ---- Focus ---- */
 struct rei_view *rei_wm_active_view(struct rei_server *server);
 void rei_wm_focus_view(struct rei_view *view);
+/* Nothing has the focus until the next rei_wm_focus_view (the pointer is over no window). */
+void rei_wm_clear_focus(struct rei_server *server);
 /* Makes the output under (x, y) the focused one. */
 void rei_wm_focus_output_at(struct rei_server *server, double x, double y);
 bool rei_view_visible(const struct rei_view *view);

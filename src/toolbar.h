@@ -118,6 +118,9 @@ struct rei_bar_state {
 	int start_w;             /* The Start button's extent along the bar (0: none). */
 	bool start_open, start_hover;
 	char start_label[24];
+	int mode_w;             /* Width of the tiled/floating switch after the Start button (0: none). */
+	bool mode_float;        /* New windows float. */
+	bool mode_hover;
 	bool battery_present;   /* The machine has a battery (the widget shows). */
 	int battery_percent;    /* 0..100 */
 	bool battery_charging;
@@ -192,6 +195,26 @@ int rei_bar_prompt_height(const struct rei_prompt_state *state);
 /* The picture, which includes the shadow's margin around the box. */
 struct rei_pixbuf *rei_bar_prompt_render(const struct rei_prompt_state *state, int *box_h, int *margin);
 
+/* ---- The confirmation dialog's picture ---- */
+
+#define REI_DIALOG_W 400
+#define REI_DIALOG_H 170
+
+struct rei_confirm_state {
+	char title[96];
+	char message[160];
+	char confirm_label[32];
+	int selected;   /* 0 = Cancel, 1 = the confirm button: Enter presses it. */
+	int hover;      /* -1, 0 or 1: the button under the pointer. */
+	int scale;
+	char font[96];
+	struct rei_style box, button;
+};
+
+/* The two buttons' rectangles in the box (logical, relative to the box): 0 = Cancel, 1 = confirm. */
+void rei_bar_confirm_buttons(struct rei_rect out[2]);
+struct rei_pixbuf *rei_bar_confirm_render(const struct rei_confirm_state *state, int *margin);
+
 /* A tooltip: `text` in a box styled by `style`. Returns the picture, which includes the box's
  * shadow; the box itself is box_w x box_h with `margin` pixels of picture around it. */
 struct rei_pixbuf *rei_bar_tooltip_render(const char *text, const char *font, const struct rei_style *style,
@@ -256,6 +279,8 @@ int rei_toolbar_overflow_windows(struct rei_server *server, struct rei_output *o
 				 const struct rei_workspace *workspace);
 
 /* Whether (x, y) is on the Start button of an output's toolbar. */
+bool rei_toolbar_mode_at(struct rei_server *server, double x, double y);
+void rei_toolbar_mode_click(struct rei_server *server);
 bool rei_toolbar_start_at(struct rei_server *server, double x, double y);
 /* The Start button was clicked: opens or closes its menu. */
 void rei_toolbar_start_click(struct rei_server *server, struct rei_output *output);

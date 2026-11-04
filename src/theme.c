@@ -8,7 +8,7 @@
 #include "util/util.h"
 
 static const char *const element_names[REI_ELEM_COUNT] = {
-	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "start_button", "run_prompt", "battery",
+	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "start_button", "run_prompt", "dialog", "battery",
 };
 static const char *const shape_names[] = { "square", "rounded", "pill", "bevel" };
 
@@ -99,6 +99,15 @@ void rei_theme_defaults(struct rei_theme *t, uint32_t bg, uint32_t fg, uint32_t 
 	run->border_width = 1;
 	run->shadow = (struct rei_shadow){ 0x000000, 0.45f, 0, 4, 18 };
 
+	/* Confirmation dialogs: like the menus, but rounder and more opaque. */
+	struct rei_style *dlg = &t->e[REI_ELEM_DIALOG];
+	*dlg = t->e[REI_ELEM_MENU];
+	dlg->opacity = 0.97f;
+	dlg->shape = REI_SHAPE_ROUNDED;
+	dlg->radius = 12;
+	dlg->border_width = 1;
+	dlg->shadow = (struct rei_shadow){ 0x000000, 0.5f, 0, 6, 24 };
+
 	/* The battery icon: its level fill, a green one while charging, a red one when low. The outline
 	 * is the border. */
 	struct rei_style *bat = &t->e[REI_ELEM_BATTERY];
@@ -162,7 +171,7 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				idx = e;
 		if (idx < 0) {
 			snprintf(err, errlen, "theme.%s: unknown element (known: toolbar, workspace_button, "
-				 "tray_tile, tray_overflow, tooltip, menu, menu_row, start_button, run_prompt, battery)", el->key);
+				 "tray_tile, tray_overflow, tooltip, menu, menu_row, start_button, run_prompt, dialog, battery)", el->key);
 			return false;
 		}
 		if (el->val->type != TOML_TABLE) {

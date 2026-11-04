@@ -225,7 +225,7 @@ static void test_config_validation(void)
 static void test_wm_config(void)
 {
 	struct rei_config *c = config_from("");
-	CHECK(!c->float_new_windows && !c->focus_follows_mouse);  /* tile, click to focus */
+	CHECK(!c->float_new_windows && c->focus_follows_mouse);  /* tile, click to focus */
 	rei_config_free(c);
 	c = config_from("[general]\nfocus_follows_mouse = true\n[layout]\nnew_windows = \"float\"\n");
 	CHECK(c->float_new_windows && c->focus_follows_mouse);

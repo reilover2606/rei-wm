@@ -54,6 +54,7 @@ static struct box bar_of(int ox, int ow, int oh)
 /* Button `i`'s cell. */
 static struct box button_of(struct box bar, int i)
 {
+	i++;   /* The tiled/floating switch comes first. */
 	return vertical() ? (struct box){ bar.x, bar.y + i * T, T, T}
 			  : (struct box){ bar.x + i * T, bar.y, T, T };
 }
@@ -191,24 +192,25 @@ static void test_workspaces(struct client *c, struct window *w1, struct window *
 	move_to(OUT_W / 2, OUT_H / 2);
 }
 
-static void test_fullscreen_covers_bar(struct window *w1)
+static void test_fullscreen_keeps_bar(struct window *w1)
 {
 	CHECK(w1->activated);
 	struct box bar = bar_of(0, OUT_W, OUT_H);
+	int tw = 0, th = 0;
 	mod(KEY_F);
 	settle_all();
+	CHECK(w1->cfg_fullscreen);
+	/* Fullscreen fills the same area: the bar stays, and the outer gap is respected. */
+	/* Fullscreen fills the area beside the bar, less the outer gap (10) on every side. */
+	int ew = vertical() ? OUT_W - T - 20 : OUT_W - 20, eh = vertical() ? OUT_H - 20 : OUT_H - T - 20;
+	CHECK(w1->cfg_w == ew && w1->cfg_h == eh);
+	(void)tw; (void)th;
 	struct ppm img = screenshot();
-	expect_px(&img, bar.x + bar.w / 2, bar.y + bar.h / 2, 255, 0, 0, 0, "a fullscreen window covers the bar");
+	probe(&img, button_of(bar, 0), BAR_FOCUSED, "the bar is still there");
 	free(img.rgb);
-	/* ...and a click there reaches the window, not a workspace button. */
-	struct box b = button_of(bar, 1);
-	click_at(b.x + T / 2, b.y + T / 2);
-	CHECK(w1->activated);
 	mod(KEY_F);
 	settle_all();
-	img = screenshot();
-	probe(&img, button_of(bar, 0), BAR_FOCUSED, "the bar is back");
-	free(img.rgb);
+	CHECK(!w1->cfg_fullscreen);
 }
 
 static void test_clock_ticks(void)
@@ -246,7 +248,7 @@ static void test_multi_output(struct client *c)
 	free(img2.rgb);
 
 	/* Clicking the other output's button moves focus there. Its bar is at x >= 800. */
-	click_at(OUT_W + T / 2, T / 2);
+	{ struct box b2 = button_of(bar2, 0); click_at(OUT_W + b2.x + T / 2, b2.y + T / 2); }
 	move_to(OUT_W / 2, OUT_H / 2);   /* off the hovered button */
 	img = screenshot();
 	probe(&img, button_of(bar1, 0), BAR_VISIBLE, "OUT: no longer focused");
@@ -311,7 +313,7 @@ int main(int argc, char **argv)
 	} else {
 		test_exclusive_zone_and_buttons(&c, &w1);
 		test_workspaces(&c, &w1, &w2);
-		test_fullscreen_covers_bar(&w1);
+		test_fullscreen_keeps_bar(&w1);
 		if (g_pos == TOP)
 			test_clock_ticks();
 	}

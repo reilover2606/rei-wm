@@ -107,7 +107,16 @@ static void start_compositor(const char *binary, const char *config_text, bool w
 	snprintf(g_log, sizeof g_log, "%s/log.txt", g_dir);
 	snprintf(g_shot, sizeof g_shot, "%s/rei-wm-OUT.ppm", g_dir);
 	snprintf(g_fifo, sizeof g_fifo, "%s/input.fifo", g_dir);
-	write_text(cfg, config_text);
+	if (strstr(config_text, "[general]")) {
+		write_text(cfg, config_text);
+	} else {
+		/* Most tests click to focus or leave the pointer on the desktop; hover focus has its own. */
+		char *full = malloc(strlen(config_text) + 64);
+		CHECK(full);
+		sprintf(full, "[general]\nfocus_follows_mouse = false\n%s", config_text);
+		write_text(cfg, full);
+		free(full);
+	}
 	if (with_fifo)
 		CHECK(mkfifo(g_fifo, 0600) == 0);
 

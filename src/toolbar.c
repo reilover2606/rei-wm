@@ -13,6 +13,7 @@
 #include "desktop.h"
 #include "icons.h"
 #include "popup.h"
+#include "confirm.h"
 #include "runprompt.h"
 #include "startmenu.h"
 #include "tray.h"
@@ -105,6 +106,9 @@ static void build_state_for(struct rei_server *s, struct rei_output *o, const st
 		st->start_open = rei_popup_is_for(s, "start");
 		st->start_hover = s->start_hover;
 	}
+	st->mode_w = st->thickness;
+	st->mode_float = s->float_new_set ? s->float_new : cfg->float_new_windows;
+	st->mode_hover = s->mode_hover;
 	struct rei_battery_info bat = rei_battery_state(s);
 	st->battery_present = bat.present;
 	st->battery_percent = bat.percent;
@@ -216,8 +220,6 @@ bool rei_toolbar_hit(struct rei_server *s, double x, double y, struct rei_output
 		return false;
 	struct rei_output *o;
 	wl_list_for_each(o, &s->outputs, link) {
-		if (o->workspace && o->workspace->fullscreen)
-			continue;  /* A fullscreen window covers the bar. */
 		struct rei_rect r = bar_rect(s, o);
 		if (x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h)
 			continue;
@@ -225,8 +227,9 @@ bool rei_toolbar_hit(struct rei_server *s, double x, double y, struct rei_output
 		struct rei_bar_button buttons[REI_BAR_MAX_BUTTONS];
 		int n = collect_buttons(s, o, buttons, REI_BAR_MAX_BUTTONS);
 		struct rei_rect rb = r;  /* The buttons start after the Start button. */
-		int sw = s->config->start_enabled ? rei_bar_start_extent(s->config->toolbar_position,
-									   s->config->toolbar_thickness) : 0;
+		int sw = s->config->toolbar_thickness +   /* the tiled/floating switch */
+			 (s->config->start_enabled ? rei_bar_start_extent(s->config->toolbar_position,
+									    s->config->toolbar_thickness) : 0);
 		if (rei_bar_vertical(s->config->toolbar_position)) {
 			rb.y += sw;
 			rb.h -= sw;
@@ -248,8 +251,6 @@ bool rei_toolbar_volume_at(struct rei_server *s, double x, double y)
 		return false;
 	struct rei_output *o;
 	wl_list_for_each(o, &s->outputs, link) {
-		if (o->workspace && o->workspace->fullscreen)
-			continue;
 		struct rei_rect r = bar_rect(s, o);
 		if (x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h)
 			continue;
@@ -282,12 +283,33 @@ bool rei_toolbar_start_at(struct rei_server *s, double x, double y)
 	if (!s->config->start_enabled)
 		return false;
 	struct rei_output *o = rei_toolbar_output_at(s, x, y);
-	if (!o || (o->workspace && o->workspace->fullscreen))
+	if (!o)
 		return false;
 	struct rei_rect r = bar_rect(s, o);
 	int sw = rei_bar_start_extent(s->config->toolbar_position, s->config->toolbar_thickness);
 	double along = rei_bar_vertical(s->config->toolbar_position) ? y - r.y : x - r.x;
 	return along < sw;
+}
+
+bool rei_toolbar_mode_at(struct rei_server *s, double x, double y)
+{
+	struct rei_output *o = rei_toolbar_output_at(s, x, y);
+	if (!o)
+		return false;
+	struct rei_rect r = bar_rect(s, o);
+	int sw = s->config->start_enabled ? rei_bar_start_extent(s->config->toolbar_position,
+								  s->config->toolbar_thickness) : 0;
+	double along = rei_bar_vertical(s->config->toolbar_position) ? y - r.y : x - r.x;
+	return along >= sw && along < sw + s->config->toolbar_thickness;
+}
+
+void rei_toolbar_mode_click(struct rei_server *s)
+{
+	bool now = s->float_new_set ? s->float_new : s->config->float_new_windows;
+	s->float_new_set = true;
+	s->float_new = !now;
+	rei_info("new windows: %s", s->float_new ? "floating" : "tiled");
+	rei_server_schedule_damage(s);
 }
 
 void rei_toolbar_start_click(struct rei_server *s, struct rei_output *o)
@@ -328,8 +350,6 @@ bool rei_toolbar_tray_target(struct rei_server *s, double x, double y, struct re
 		return false;
 	struct rei_output *o;
 	wl_list_for_each(o, &s->outputs, link) {
-		if (o->workspace && o->workspace->fullscreen)
-			continue;
 		struct rei_rect r = bar_rect(s, o);
 		if (x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h)
 			continue;
@@ -553,6 +573,7 @@ void rei_toolbar_finish(struct rei_server *s)
 		event_free(s->clock_event);
 		s->clock_event = NULL;
 	}
+	rei_confirm_finish(s);
 	rei_prompt_finish(s);
 	rei_startmenu_finish(s);
 	rei_popup_finish(s);

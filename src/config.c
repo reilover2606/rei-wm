@@ -251,6 +251,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_tray = REI_TRAY_ICONS_NAMES;
 	cfg->toolbar_battery = true;
 	cfg->start_enabled = true;
+	cfg->focus_follows_mouse = true;
 	cfg->start_label = rei_xstrdup("Start");
 	cfg->start_shutdown_command = rei_xstrdup("loginctl poweroff || systemctl poweroff || poweroff");
 	cfg->start_reboot_command = rei_xstrdup("loginctl reboot || systemctl reboot || reboot");

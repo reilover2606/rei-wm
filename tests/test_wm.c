@@ -93,7 +93,15 @@ static void test_focus_and_move(struct window *w1, struct window *w2)
 	settle_all();
 	CHECK(w2->activated && active_count() == 1);
 	park_pointer();
-	CHECK(w2->activated);  /* Moving off every window changes nothing. */
+	CHECK(active_count() == 0);  /* Moving off every window leaves nothing focused... */
+	mod(KEY_H);              /* ...but keyboard actions still work, from the last window. */
+	settle_all();
+	CHECK(w1->activated && active_count() == 1);
+	inject("motion_abs 600 300");
+	settle_all();
+	CHECK(w2->activated && active_count() == 1);
+	park_pointer();
+	CHECK(active_count() == 0);
 
 	/* Move W1 right, past W2: the columns swap. */
 	mod(KEY_H);
@@ -156,11 +164,12 @@ static void test_fullscreen(struct window *w3)
 	CHECK(w3->activated);
 	mod(KEY_F);
 	settle_all();
-	CHECK(w3->cfg_w == 800 && w3->cfg_h == 600 && w3->cfg_fullscreen && !w3->cfg_tiled);
+	CHECK(w3->cfg_w == 780 && w3->cfg_h == 580 && w3->cfg_fullscreen && !w3->cfg_tiled);
 	struct ppm img = screenshot();
-	expect_px(&img, 5, 5, 0, 0, 255, 0, "fullscreen covers the gaps, top-left");
+	expect_px(&img, 12, 12, 0, 0, 255, 0, "fullscreen fills to the outer gap, top-left");
+	CHECK(!near_px(&img, 5, 5, 0, 0, 255, 0));   /* but the outer gap is respected */
 	expect_px(&img, 400, 100, 0, 0, 255, 0, "fullscreen");
-	expect_px(&img, 5, 595, 0, 0, 255, 0, "fullscreen covers the gaps, bottom-left");
+	expect_px(&img, 12, 588, 0, 0, 255, 0, "fullscreen fills to the outer gap, bottom-left");
 	free(img.rgb);
 
 	mod(KEY_F);
@@ -270,8 +279,6 @@ static void test_close_and_dialog(struct client *c, struct window *w1, struct wi
 	expect_px(&img, 709, 300, 255, 255, 0, 0, "dialog's right edge, past the old size");
 	expect_px(&img, 711, 300, 0, 255, 0, 0, "tiled window beyond the dialog's right edge");
 	free(img.rgb);
-	park_pointer();
-
 	close_win(&dlg);
 	CHECK(w2->activated);  /* focus returns to the window underneath */
 }

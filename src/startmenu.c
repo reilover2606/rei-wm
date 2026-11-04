@@ -5,6 +5,9 @@
 #include <string.h>
 
 #include "input/actions.h"
+#include <stdint.h>
+
+#include "confirm.h"
 #include "popup.h"
 #include "runprompt.h"
 #include "server.h"
@@ -17,19 +20,11 @@ struct rei_startmenu {
 	enum row_kind kind[REI_MENU_MAX_ROWS];
 	int shortcut[REI_MENU_MAX_ROWS];   /* For shortcut rows: index into the config. */
 	int n;
-	int confirm_row;                   /* The power row waiting for its second click, or -1. */
-	char plain_label[REI_MENU_MAX_ROWS][96];
 };
 
 static const char *power_label(enum row_kind k)
 {
 	return k == ROW_LOGOUT ? "Logout" : k == ROW_SHUTDOWN ? "Shutdown" : "Reboot";
-}
-
-static const char *power_confirm_label(enum row_kind k)
-{
-	return k == ROW_LOGOUT ? "Click again to log out" : k == ROW_SHUTDOWN ? "Click again to shut down"
-									       : "Click again to reboot";
 }
 
 static void run_power(struct rei_server *s, enum row_kind k)
@@ -48,6 +43,11 @@ static void run_power(struct rei_server *s, enum row_kind k)
 	const char *cmd = k == ROW_SHUTDOWN ? cfg->start_shutdown_command : cfg->start_reboot_command;
 	rei_info("start menu: %s: %s", k == ROW_SHUTDOWN ? "shutdown" : "reboot", cmd);
 	rei_spawn(s, cmd);
+}
+
+static void confirmed(struct rei_server *s, void *data)
+{
+	run_power(s, (enum row_kind)(uintptr_t)data);
 }
 
 static bool pick(struct rei_server *s, int row, void *data)
@@ -69,24 +69,22 @@ static bool pick(struct rei_server *s, int row, void *data)
 		return false;
 	}
 
-	/* Logout, Shutdown, Reboot. */
-	if (s->config->start_confirm_power && m->confirm_row != row) {
-		struct rei_menu_state *st = rei_popup_state(s);
-		if (!st)
-			return true;
-		if (m->confirm_row >= 0) {  /* Another row was waiting: put its label back. */
-			snprintf(st->rows[m->confirm_row].label, sizeof st->rows[m->confirm_row].label, "%s",
-				 power_label(m->kind[m->confirm_row]));
-			st->rows[m->confirm_row].emphasis = false;
-		}
-		m->confirm_row = row;
-		snprintf(st->rows[row].label, sizeof st->rows[row].label, "%s", power_confirm_label(k));
-		st->rows[row].emphasis = true;
-		rei_popup_redraw(s);
-		return false;     /* Stay open for the second click. */
-	}
+	/* Logout, Shutdown, Reboot: a dialog asks first (unless confirm_power is off). */
 	rei_popup_close(s);
-	run_power(s, k);
+	if (!s->config->start_confirm_power) {
+		run_power(s, k);
+		return false;
+	}
+	static const char *const title[] = { [ROW_LOGOUT] = "Log out?", [ROW_SHUTDOWN] = "Shut down?",
+					     [ROW_REBOOT] = "Restart?" };
+	static const char *const msg[] = {
+		[ROW_LOGOUT] = "This ends your session. Programs still running will be closed.",
+		[ROW_SHUTDOWN] = "The computer will power off. Unsaved work will be lost.",
+		[ROW_REBOOT] = "The computer will restart. Unsaved work will be lost.",
+	};
+	static const char *const yes[] = { [ROW_LOGOUT] = "Log out", [ROW_SHUTDOWN] = "Shut down",
+					   [ROW_REBOOT] = "Restart" };
+	rei_confirm_open(s, title[k], msg[k], yes[k], confirmed, (void *)(uintptr_t)k);
 	return false;
 }
 
@@ -98,7 +96,6 @@ void rei_startmenu_open(struct rei_server *s, struct rei_output *o, struct rei_r
 		s->startmenu = rei_xcalloc(1, sizeof *s->startmenu);
 	struct rei_startmenu *m = s->startmenu;
 	memset(m, 0, sizeof *m);
-	m->confirm_row = -1;
 
 	struct rei_menu_state st;
 	memset(&st, 0, sizeof st);

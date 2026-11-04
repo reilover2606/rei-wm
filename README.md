@@ -65,7 +65,7 @@ the same neighbour) or, if floating, to the same position.
 
 **Start menu.** A *Start* button sits at the start of the toolbar. It opens a list: your shortcuts
 at the top (defined as `[[shortcut]]` entries with a `name` and a `command`), then **Run**, then
-**Logout**, **Shutdown** and **Reboot**. The power rows ask for a second click (`confirm_power = false`
+**Logout**, **Shutdown** and **Reboot**. The power rows ask first in a confirmation dialog (Enter presses the highlighted button, which starts on Cancel; Tab/arrows move it; Escape cancels; `confirm_power = false`
 turns that off), and their commands are configurable under `[start_menu]`. **Run** (or `Mod+r`)
 opens a large, see-through command prompt in the middle of the screen: type a command, press Enter
 to run it, Escape (or a click) to dismiss. Long commands wrap onto new lines and the box grows,
@@ -212,3 +212,14 @@ first run:
 Configuration lives in `~/.config/rei-wm/config.toml` (or
 `$XDG_CONFIG_HOME/rei-wm/`). A commented default is written on first run. Use
 `rei-wm --check-config` to validate a file, and `--help` for all options.
+
+## Focus, the new-window switch and fullscreen
+
+- **Focus follows the pointer** (`[general] focus_follows_mouse`, on by default): hovering a window focuses
+  it; moving onto the desktop, the toolbar or a menu leaves nothing focused (keyboard shortcuts such as
+  `Mod+q` and `Mod+f` still act on the last window). Set it to `false` for click-to-focus.
+- **Tiled/floating switch:** the small square after the Start button decides how *new* windows open (a grid
+  of panes: tiled; two overlapping windows, lit: floating). It starts from `[layout] new_windows`, and a
+  config reload resets it to that.
+- **Fullscreen** fills everything beside the toolbar, but keeps the outer gap (`gap_outer`), so the toolbar
+  stays visible and usable. Style the confirmation dialog with `[theme.dialog]`.

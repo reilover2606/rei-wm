@@ -357,7 +357,7 @@ static void tray_bounds(const struct rei_bar_state *st, double *start, double *e
 	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
 	cairo_t *cr = cairo_create(surface);
 	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
-	*start = st->start_w + st->n_buttons * (double)st->thickness + 12;
+	*start = st->start_w + st->mode_w + st->n_buttons * (double)st->thickness + 12;
 	*end = length;
 	double cw, ch, cl;
 	clock_extent(cr, font, st, &cw, &ch, &cl);
@@ -837,6 +837,79 @@ struct rei_pixbuf *rei_bar_prompt_render(const struct rei_prompt_state *st, int 
 	return pb;
 }
 
+/* ---- The confirmation dialog ---- */
+
+void rei_bar_confirm_buttons(struct rei_rect out[2])
+{
+	const int bw = 130, bh = 38, gap = 14, pad = 24;
+	out[1] = (struct rei_rect){ REI_DIALOG_W - pad - bw, REI_DIALOG_H - pad - bh, bw, bh };
+	out[0] = (struct rei_rect){ out[1].x - gap - bw, out[1].y, bw, bh };
+}
+
+struct rei_pixbuf *rei_bar_confirm_render(const struct rei_confirm_state *st, int *margin_out)
+{
+	int m = shadow_margin(&st->box);
+	*margin_out = m;
+	int scale = st->scale < 1 ? 1 : st->scale;
+	int pw = (REI_DIALOG_W + 2 * m) * scale, ph = (REI_DIALOG_H + 2 * m) * scale;
+	struct rei_pixbuf *pb = rei_pixbuf_create(pw, ph, false);
+	if (!pb)
+		return NULL;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw, ph);
+	cairo_t *cr = cairo_create(surface);
+	cairo_scale(cr, scale, scale);
+	draw_box(cr, &st->box, m, m, REI_DIALOG_W, REI_DIALOG_H, st->box.color, 1.0);
+
+	const char *fname = st->font[0] ? st->font : "Sans 11";
+	PangoFontDescription *font = pango_font_description_from_string(fname);
+	PangoFontDescription *big = pango_font_description_copy(font);
+	pango_font_description_set_size(big, pango_font_description_get_size(font) * 3 / 2);
+	pango_font_description_set_weight(big, PANGO_WEIGHT_BOLD);
+
+	set_color(cr, st->box.text_color);
+	PangoLayout *t = make_layout(cr, big, st->title);
+	cairo_move_to(cr, m + 24, m + 22);
+	pango_cairo_show_layout(cr, t);
+	g_object_unref(t);
+
+	PangoLayout *msg = make_layout(cr, font, st->message);
+	pango_layout_set_width(msg, (REI_DIALOG_W - 48) * PANGO_SCALE);
+	pango_layout_set_wrap(msg, PANGO_WRAP_WORD_CHAR);
+	set_color(cr, st->box.inactive_text_color ? st->box.inactive_text_color : st->box.text_color);
+	cairo_move_to(cr, m + 24, m + 62);
+	pango_cairo_show_layout(cr, msg);
+	g_object_unref(msg);
+
+	struct rei_rect b[2];
+	rei_bar_confirm_buttons(b);
+	const char *labels[2] = { "Cancel", st->confirm_label };
+	for (int i = 0; i < 2; i++) {
+		uint32_t fill = i == 1 ? st->button.active_color : st->button.color;
+		if (st->hover == i)
+			fill = rei_bar_mix(fill, st->button.text_color, 0.15);
+		draw_box(cr, &st->button, m + b[i].x, m + b[i].y, b[i].w, b[i].h, fill, 1.0);
+		if (st->selected == i) {   /* The button Enter will press gets a ring. */
+			set_color(cr, i == 1 ? st->button.active_text_color : st->button.text_color);
+			cairo_set_line_width(cr, 1.5);
+			cairo_rectangle(cr, m + b[i].x + 3.5, m + b[i].y + 3.5, b[i].w - 7, b[i].h - 7);
+			cairo_stroke(cr);
+		}
+		set_color(cr, i == 1 ? st->button.active_text_color : st->button.text_color);
+		draw_centered(cr, font, labels[i], m + b[i].x + b[i].w / 2.0, m + b[i].y + b[i].h / 2.0);
+	}
+	pango_font_description_free(big);
+	pango_font_description_free(font);
+	cairo_destroy(cr);
+	cairo_surface_flush(surface);
+	const uint8_t *src = cairo_image_surface_get_data(surface);
+	int stride = cairo_image_surface_get_stride(surface);
+	for (int y = 0; y < pb->height; y++)
+		memcpy(pb->data + (size_t)y * (size_t)pb->width * 4, src + (size_t)y * (size_t)stride,
+		       (size_t)pb->width * 4);
+	cairo_surface_destroy(surface);
+	return pb;
+}
+
 /* ---- The window list ---- */
 
 #define MENU_ROW_H 26
@@ -1038,6 +1111,37 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 			}
 		}
 	}
+
+	/* The tiled/floating switch: a small square. A grid of panes when new windows tile; two
+	 * overlapping windows, lit, when they float. */
+	int mw = st->mode_w;
+	if (mw > 0) {
+		struct rei_rect cell = vertical ? (struct rei_rect){ 0, sw, lw, mw } : (struct rei_rect){ sw, 0, mw, lh };
+		double side = fmin(cell.w, cell.h) - 12;
+		double bx = cell.x + (cell.w - side) / 2.0, by = cell.y + (cell.h - side) / 2.0;
+		uint32_t fill = st->mode_float ? sbs->active_color : sbs->color;
+		if (st->mode_hover)
+			fill = rei_bar_mix(fill, sbs->text_color, 0.15);
+		draw_box(cr, sbs, bx, by, side, side, fill, 1.0);
+		set_color(cr, st->mode_float ? sbs->active_text_color : sbs->text_color);
+		double in = side * 0.22, u = side - 2 * in;
+		if (!st->mode_float) {   /* tiled: a 2x2 grid */
+			double g = 1.5, c = (u - g) / 2.0;
+			for (int a = 0; a < 2; a++)
+				for (int b = 0; b < 2; b++) {
+					cairo_rectangle(cr, bx + in + a * (c + g), by + in + b * (c + g), c, c);
+					cairo_fill(cr);
+				}
+		} else {   /* floating: two overlapping windows */
+			double w = u * 0.65;
+			cairo_set_line_width(cr, 1.5);
+			cairo_rectangle(cr, bx + in + 0.75, by + in + 0.75, w, w);
+			cairo_stroke(cr);
+			cairo_rectangle(cr, bx + in + u - w, by + in + u - w, w, w);
+			cairo_fill(cr);
+		}
+	}
+	sw += mw;
 
 	/* Workspace buttons, after it. */
 	struct rei_rect barr = vertical ? (struct rei_rect){ 0, sw, lw, lh - sw } : (struct rei_rect){ sw, 0, lw - sw, lh };

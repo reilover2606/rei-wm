@@ -548,3 +548,5 @@ config (shortcuts, Run, then the power unit; power rows need a second click) and
 (`REI_PROMPT_BLINK_MS` for tests), re-renders via `rei_bar_prompt_render` (Pango, `PANGO_WRAP_CHAR`)
 and is emitted centred on the focused output; text is refused once the box would exceed 60% of the
 output height. Tested by `tests/test_start.c`; the popup logs row centres so tests can click rows.
+
+`confirm.c` is the modal confirmation dialog (title, message, Cancel + confirm; takes every key and press while open). Hover focus: `rei_wm_clear_focus` sets `server->focus_cleared`, which only affects activation and the keyboard surface; `rei_wm_active_view` (the target of keyboard actions and the tray) still returns the last-focused window. The toolbar's tiled/floating switch is `server->float_new_set/float_new`, consulted by `wants_float` in `desktop.c`. Fullscreen uses `inset(output_usable, gap_outer)`, so the toolbar is never covered.
