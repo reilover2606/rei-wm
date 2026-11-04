@@ -23,6 +23,9 @@ struct rei_xwayland;
 struct rei_audio;
 struct rei_battery;
 struct rei_tray_ui;
+struct rei_popup;
+struct rei_prompt;
+struct rei_startmenu;
 struct wl_protocol_logger;
 
 /*
@@ -86,6 +89,10 @@ struct rei_server {
 	struct rei_audio *audio;
 	struct rei_battery *battery;
 	struct rei_tray_ui *tray_ui;
+	struct rei_popup *popup;
+	struct rei_prompt *prompt;     /* The Run prompt. */
+	struct rei_startmenu *startmenu;
+	bool start_hover;              /* The pointer is on the Start button. */
 
 	/* Config hot reload (src/reload.c). Superseded configs are kept until exit, since
 	 * a few places may still hold a string from one for a moment. */

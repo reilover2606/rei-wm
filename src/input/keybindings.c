@@ -31,6 +31,7 @@ const struct rei_default_binding rei_default_bindings[] = {
 	{ "Mod+Shift+space", "toggle_floating" },
 	{ "Mod+f", "fullscreen" },
 	{ "Mod+m", "minimize" },
+	{ "Mod+r", "run" },
 	{ "Mod+1", "workspace 1" },
 	{ "Mod+2", "workspace 2" },
 	{ "Mod+3", "workspace 3" },
@@ -161,6 +162,7 @@ bool rei_action_parse(const char *text, struct rei_action *out, char *err, size_
 		{ "toggle_floating", REI_ACTION_TOGGLE_FLOATING, ARG_NONE },
 		{ "fullscreen", REI_ACTION_FULLSCREEN, ARG_NONE },
 		{ "minimize", REI_ACTION_MINIMIZE, ARG_NONE },
+		{ "run", REI_ACTION_RUN, ARG_NONE },
 		{ "workspace", REI_ACTION_WORKSPACE, ARG_WORKSPACE },
 		{ "move_to_workspace", REI_ACTION_MOVE_TO_WORKSPACE, ARG_WORKSPACE },
 		{ "volume_up", REI_ACTION_VOLUME_UP, ARG_OPT_PERCENT },
@@ -233,7 +235,7 @@ bool rei_action_parse(const char *text, struct rei_action *out, char *err, size_
 	}
 
 	snprintf(err, errlen, "unknown action '%.*s' (known: none, exec, close, quit, focus_next, "
-		 "focus_prev, focus, move, split, toggle_floating, fullscreen, minimize, workspace, "
+		 "focus_prev, focus, move, split, toggle_floating, fullscreen, minimize, run, workspace, "
 		 "move_to_workspace, volume_up, volume_down, volume_mute)", (int)name_len, text);
 	return false;
 }

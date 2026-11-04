@@ -20,6 +20,11 @@ struct rei_output_config {
 	int32_t x, y;
 };
 
+struct rei_shortcut_config {
+	char *name;     /* What the menu shows. */
+	char *command;  /* Run with /bin/sh -c. */
+};
+
 struct rei_binding_config {
 	char *combo;   /* "Mod+Shift+q" */
 	char *action;  /* "close", "exec foot", ... */
@@ -70,6 +75,17 @@ struct rei_config {
 	char *toolbar_font;          /* Pango font description. */
 	char *toolbar_clock_format;  /* strftime; empty means no clock. */
 	uint32_t toolbar_background, toolbar_foreground, toolbar_highlight;  /* 0xRRGGBB */
+
+	/* [start_menu] and [[shortcut]] */
+	bool start_enabled;
+	char *start_label;              /* The button's text. */
+	char *start_shutdown_command;   /* Run for "Shutdown". */
+	char *start_reboot_command;
+	char *start_logout_command;     /* Empty: "Logout" simply ends rei-wm. */
+	bool start_confirm_power;       /* Ask for a second click before logging out, shutting down or rebooting. */
+	char *start_run_font;           /* Pango font of the Run prompt. */
+	struct rei_shortcut_config *shortcuts;
+	size_t n_shortcuts;
 
 	/* [theme]: the look of the UI, from the base colours above plus the [theme.*] overrides. */
 	struct rei_theme theme;

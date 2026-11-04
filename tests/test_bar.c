@@ -288,7 +288,7 @@ int main(int argc, char **argv)
 
 	char config[600];
 	int n = snprintf(config, sizeof config,
-			 "[toolbar]\nposition = \"%s\"\nclock_format = \"%%S\"\n"
+			 "[start_menu]\nenabled = false\n[toolbar]\nposition = \"%s\"\nclock_format = \"%%S\"\n"
 			 "[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n",
 			 pos_names[g_pos], OUT_W, OUT_H);
 	if (g_multi) {

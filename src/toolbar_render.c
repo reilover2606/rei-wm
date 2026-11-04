@@ -37,6 +37,11 @@ struct rei_rect rei_bar_usable(struct rei_rect o, enum rei_bar_position pos, int
 	}
 }
 
+int rei_bar_start_extent(enum rei_bar_position pos, int thickness)
+{
+	return rei_bar_vertical(pos) ? thickness : 68;
+}
+
 struct rei_rect rei_bar_button_rect(struct rei_rect bar, enum rei_bar_position pos, int index)
 {
 	if (rei_bar_vertical(pos))
@@ -352,7 +357,7 @@ static void tray_bounds(const struct rei_bar_state *st, double *start, double *e
 	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
 	cairo_t *cr = cairo_create(surface);
 	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
-	*start = st->n_buttons * (double)st->thickness + 12;
+	*start = st->start_w + st->n_buttons * (double)st->thickness + 12;
 	*end = length;
 	double cw, ch, cl;
 	clock_extent(cr, font, st, &cw, &ch, &cl);
@@ -754,6 +759,84 @@ struct rei_pixbuf *rei_bar_tooltip_render(const char *text, const char *font_des
 	return pb;
 }
 
+/* ---- The Run prompt ---- */
+
+#define PROMPT_PAD_X 26
+#define PROMPT_PAD_Y 18
+
+static PangoLayout *prompt_layout(cairo_t *cr, PangoFontDescription *font, const struct rei_prompt_state *st,
+				  const char *text)
+{
+	PangoLayout *l = make_layout(cr, font, text);
+	pango_layout_set_width(l, (st->box_w - 2 * PROMPT_PAD_X) * PANGO_SCALE);
+	pango_layout_set_wrap(l, PANGO_WRAP_CHAR);   /* A long command with no spaces still wraps. */
+	return l;
+}
+
+int rei_bar_prompt_height(const struct rei_prompt_state *st)
+{
+	cairo_surface_t *probe = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
+	cairo_t *cr = cairo_create(probe);
+	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 26");
+	/* The cursor sits after the text, so a trailing space counts toward the last line. */
+	PangoLayout *l = prompt_layout(cr, font, st, st->text[0] ? st->text : "M");
+	int tw, th;
+	pango_layout_get_pixel_size(l, &tw, &th);
+	g_object_unref(l);
+	pango_font_description_free(font);
+	cairo_destroy(cr);
+	cairo_surface_destroy(probe);
+	return th + 2 * PROMPT_PAD_Y;
+}
+
+struct rei_pixbuf *rei_bar_prompt_render(const struct rei_prompt_state *st, int *box_h, int *margin)
+{
+	int bh = rei_bar_prompt_height(st);
+	int m = shadow_margin(&st->style);
+	*box_h = bh;
+	*margin = m;
+	int scale = st->scale < 1 ? 1 : st->scale;
+	int pw = (st->box_w + 2 * m) * scale, ph = (bh + 2 * m) * scale;
+	struct rei_pixbuf *pb = rei_pixbuf_create(pw, ph, false);
+	if (!pb)
+		return NULL;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw, ph);
+	cairo_t *cr = cairo_create(surface);
+	cairo_scale(cr, scale, scale);
+
+	draw_box(cr, &st->style, m, m, st->box_w, bh, st->style.color, 1.0);
+
+	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 26");
+	bool empty = st->text[0] == '\0';
+	PangoLayout *l = prompt_layout(cr, font, st, empty ? "Run a command" : st->text);
+	set_color(cr, empty ? st->style.inactive_text_color : st->style.text_color);
+	cairo_move_to(cr, m + PROMPT_PAD_X, m + PROMPT_PAD_Y);
+	pango_cairo_show_layout(cr, l);
+
+	if (st->cursor_on) {
+		/* The cursor is at the end of the text (the start of the placeholder). */
+		PangoRectangle strong;
+		pango_layout_get_cursor_pos(l, empty ? 0 : (int)strlen(st->text), &strong, NULL);
+		set_color(cr, st->style.text_color);
+		double cx = m + PROMPT_PAD_X + (double)strong.x / PANGO_SCALE;
+		double cy = m + PROMPT_PAD_Y + (double)strong.y / PANGO_SCALE;
+		cairo_rectangle(cr, cx + (empty ? 0 : 1), cy, 2.5, (double)strong.height / PANGO_SCALE);
+		cairo_fill(cr);
+	}
+	g_object_unref(l);
+	pango_font_description_free(font);
+	cairo_destroy(cr);
+	cairo_surface_flush(surface);
+
+	const uint8_t *src = cairo_image_surface_get_data(surface);
+	int stride = cairo_image_surface_get_stride(surface);
+	for (int y = 0; y < pb->height; y++)
+		memcpy(pb->data + (size_t)y * (size_t)pb->width * 4, src + (size_t)y * (size_t)stride,
+		       (size_t)pb->width * 4);
+	cairo_surface_destroy(surface);
+	return pb;
+}
+
 /* ---- The window list ---- */
 
 #define MENU_ROW_H 26
@@ -781,8 +864,24 @@ void rei_bar_menu_size(const struct rei_menu_state *st, int *w, int *h, int *row
 	int width = widest + 2 * MENU_PAD_X + 2 * bw;
 	*w = width < MENU_MIN_W ? MENU_MIN_W : width > MENU_MAX_W ? MENU_MAX_W : width;
 	*row_h = MENU_ROW_H;
-	*h = st->n_rows * MENU_ROW_H + 2 * bw;
+	int gaps = 0;
+	for (int i = 0; i < st->n_rows; i++)
+		gaps += st->rows[i].gap_before;
+	*h = st->n_rows * MENU_ROW_H + gaps + 2 * bw;
 	*margin = shadow_margin(&st->menu);
+}
+
+int rei_bar_menu_row_at(const struct rei_menu_state *st, double y)
+{
+	double top = ceil(st->menu.border_width);
+	double pos = top;
+	for (int i = 0; i < st->n_rows; i++) {
+		pos += st->rows[i].gap_before;
+		if (y >= pos && y < pos + MENU_ROW_H)
+			return i;
+		pos += MENU_ROW_H;
+	}
+	return -1;
 }
 
 struct rei_pixbuf *rei_bar_menu_render(const struct rei_menu_state *st)
@@ -803,9 +902,17 @@ struct rei_pixbuf *rei_bar_menu_render(const struct rei_menu_state *st)
 	double bw = ceil(ms->border_width);
 
 	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
+	double y = m + bw;
 	for (int i = 0; i < st->n_rows; i++) {
-		double y = m + bw + i * row_h;
-		if (i == st->hover) {
+		if (st->rows[i].gap_before > 0) {
+			/* A group starts here: a thin line in the middle of the gap. */
+			double ly = y + st->rows[i].gap_before / 2.0;
+			set_rgba(cr, ms->border_color, 0.7);
+			cairo_rectangle(cr, m + bw + 6, ly - 0.5, lw - 2 * bw - 12, 1);
+			cairo_fill(cr);
+			y += st->rows[i].gap_before;
+		}
+		if (i == st->hover || st->rows[i].emphasis) {
 			struct rei_style hover = *rs;
 			hover.shadow.opacity = 0;
 			draw_box(cr, &hover, m + bw, y, lw - 2 * bw, row_h, rs->active_color, 1.0);
@@ -815,12 +922,13 @@ struct rei_pixbuf *rei_bar_menu_render(const struct rei_menu_state *st)
 		pango_layout_set_ellipsize(l, PANGO_ELLIPSIZE_END);
 		int tw, th;
 		pango_layout_get_pixel_size(l, &tw, &th);
-		uint32_t text = i == st->hover ? rs->active_text_color
+		uint32_t text = (i == st->hover || st->rows[i].emphasis) ? rs->active_text_color
 					       : st->rows[i].minimized ? rs->inactive_text_color : rs->text_color;
 		set_color(cr, text);
 		cairo_move_to(cr, m + bw + MENU_PAD_X, y + (row_h - th) / 2.0);
 		pango_cairo_show_layout(cr, l);
 		g_object_unref(l);
+		y += row_h;
 	}
 	pango_font_description_free(font);
 	cairo_destroy(cr);
@@ -909,8 +1017,30 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 
 	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
 
-	/* Workspace buttons, from the start of the bar. */
-	struct rei_rect barr = { 0, 0, lw, lh };
+	/* The Start button, at the very start of the bar. */
+	const struct rei_style *sbs = &theme.e[REI_ELEM_START_BUTTON];
+	int sw = st->start_w;
+	if (sw > 0) {
+		struct rei_rect cell = vertical ? (struct rei_rect){ 0, 0, lw, sw } : (struct rei_rect){ 0, 0, sw, lh };
+		uint32_t fill = st->start_open ? sbs->active_color : sbs->color;
+		if (st->start_hover && !st->start_open)
+			fill = rei_bar_mix(fill, sbs->text_color, 0.15);
+		draw_box(cr, sbs, cell.x + 2, cell.y + 2, cell.w - 4, cell.h - 4, fill, 1.0);
+		set_color(cr, st->start_open ? sbs->active_text_color : sbs->text_color);
+		if (!vertical) {
+			draw_centered(cr, font, st->start_label, cell.x + cell.w / 2.0, cell.y + cell.h / 2.0);
+		} else {
+			/* No room for the word on a narrow bar: the three-bar "menu" mark. */
+			double cx = cell.x + cell.w / 2.0, cy = cell.y + cell.h / 2.0;
+			for (int k = -1; k <= 1; k++) {
+				cairo_rectangle(cr, cx - 6, cy + k * 5 - 1, 12, 2);
+				cairo_fill(cr);
+			}
+		}
+	}
+
+	/* Workspace buttons, after it. */
+	struct rei_rect barr = vertical ? (struct rei_rect){ 0, sw, lw, lh - sw } : (struct rei_rect){ sw, 0, lw - sw, lh };
 	for (int i = 0; i < st->n_buttons; i++) {
 		const struct rei_bar_button *b = &st->buttons[i];
 		struct rei_rect cell = rei_bar_button_rect(barr, st->position, i);

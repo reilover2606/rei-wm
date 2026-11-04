@@ -46,6 +46,9 @@ struct rei_rect rei_bar_rect(struct rei_rect output, enum rei_bar_position pos, 
 /* What is left of `output` for windows once the bar has taken its edge. */
 struct rei_rect rei_bar_usable(struct rei_rect output, enum rei_bar_position pos, int thickness);
 
+/* How much of the bar's start the Start button takes (along the bar). */
+int rei_bar_start_extent(enum rei_bar_position pos, int thickness);
+
 /* Button cells are squares of side `thickness`, laid end to end from the start of
  * the bar. This is the rectangle of button `index`. */
 struct rei_rect rei_bar_button_rect(struct rei_rect bar, enum rei_bar_position pos, int index);
@@ -112,6 +115,9 @@ struct rei_bar_state {
 	int drag_pos;            /* Where the pointer is along the bar (bar-local), while dragging. */
 	bool styled;             /* `theme` is set; otherwise the legacy colours below give the default look. */
 	struct rei_theme theme;
+	int start_w;             /* The Start button's extent along the bar (0: none). */
+	bool start_open, start_hover;
+	char start_label[24];
 	bool battery_present;   /* The machine has a battery (the widget shows). */
 	int battery_percent;    /* 0..100 */
 	bool battery_charging;
@@ -147,7 +153,9 @@ void rei_bar_tray_layout(const struct rei_bar_state *state, struct rei_tray_layo
 
 struct rei_menu_row {
 	char label[96];
-	bool minimized;
+	bool minimized;   /* Drawn dimmed. */
+	bool emphasis;    /* Drawn highlighted regardless of the pointer (a row waiting for confirmation). */
+	int gap_before;   /* Extra space above this row, with a separator line in it (starts a new group). */
 };
 
 struct rei_menu_state {
@@ -162,7 +170,27 @@ struct rei_menu_state {
 /* Logical size of the menu box and of one row, and the extra room its shadow needs around it:
  * the rendered picture is (w + 2*margin) x (h + 2*margin), with the box in the middle. */
 void rei_bar_menu_size(const struct rei_menu_state *state, int *w, int *h, int *row_h, int *margin);
+/* The row at `y` pixels below the top of the menu box, or -1 (in the gaps and borders). */
+int rei_bar_menu_row_at(const struct rei_menu_state *state, double y);
 struct rei_pixbuf *rei_bar_menu_render(const struct rei_menu_state *state);
+
+/* ---- The Run prompt's picture ---- */
+
+#define REI_PROMPT_MAX_TEXT 2048
+
+struct rei_prompt_state {
+	char text[REI_PROMPT_MAX_TEXT + 8];
+	bool cursor_on;      /* The blinking cursor's current phase. */
+	int box_w;           /* Logical width of the box; the height follows the text. */
+	int scale;
+	char font[96];
+	struct rei_style style;
+};
+
+/* The box's logical height for the text it holds (it grows a line at a time as the text wraps). */
+int rei_bar_prompt_height(const struct rei_prompt_state *state);
+/* The picture, which includes the shadow's margin around the box. */
+struct rei_pixbuf *rei_bar_prompt_render(const struct rei_prompt_state *state, int *box_h, int *margin);
 
 /* A tooltip: `text` in a box styled by `style`. Returns the picture, which includes the box's
  * shadow; the box itself is box_w x box_h with `margin` pixels of picture around it. */
@@ -226,6 +254,13 @@ int rei_toolbar_tray_drop_index(struct rei_server *server, struct rei_output *ou
 /* Windows under the overflow tile if `workspace` were the one showing on `output`. */
 int rei_toolbar_overflow_windows(struct rei_server *server, struct rei_output *output,
 				 const struct rei_workspace *workspace);
+
+/* Whether (x, y) is on the Start button of an output's toolbar. */
+bool rei_toolbar_start_at(struct rei_server *server, double x, double y);
+/* The Start button was clicked: opens or closes its menu. */
+void rei_toolbar_start_click(struct rei_server *server, struct rei_output *output);
+/* The output whose toolbar holds (x, y), if any. */
+struct rei_output *rei_toolbar_output_at(struct rei_server *server, double x, double y);
 
 /* The tray tile under (x, y): sets the output and the index into that output's tray groups. */
 bool rei_toolbar_tray_at(struct rei_server *server, double x, double y, struct rei_output **output,

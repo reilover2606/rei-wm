@@ -155,3 +155,9 @@ foreach mode : ['top', 'multi']
   test('bar-vsync-' + mode, bar_test, args: [rei_wm.full_path(), mode], depends: rei_wm,
     env: vsync_env, timeout: 120)
 endforeach
+
+start_test = executable('test_start', 'test_start.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('start', start_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 120)
