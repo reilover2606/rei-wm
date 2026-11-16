@@ -9,6 +9,7 @@
 #include <time.h>
 
 #include "audio.h"
+#include "volume.h"
 #include "battery.h"
 #include "sysinfo.h"
 #include "desktop.h"
@@ -97,8 +98,8 @@ static void build_state_for(struct rei_server *s, struct rei_output *o, const st
 	}
 	snprintf(st->clock, sizeof st->clock, "%s", s->clock_text);
 	snprintf(st->font, sizeof st->font, "%s", cfg->toolbar_font);
-	struct rei_audio_state audio = rei_audio_state(s);
-	rei_audio_label(&audio, st->volume, sizeof st->volume);
+	struct rei_audio_state audio = rei_volume_state(s);
+	rei_volume_label(s, st->volume, sizeof st->volume);
 	/* A narrow vertical bar has no room for the word. */
 	if (audio.muted && rei_bar_vertical(st->position))
 		snprintf(st->volume, sizeof st->volume, "mute");

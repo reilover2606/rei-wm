@@ -23,6 +23,8 @@ struct rei_mpd_info {
 	bool enabled;     /* [mpd] enabled */
 	bool connected;   /* MPD answered: its controls work */
 	enum rei_mpd_state state;
+	int volume;       /* 0..100, or -1 when MPD has no mixer to set it with */
+	bool muted;       /* "muted" by rei-wm: the volume was set to 0 and will be put back */
 	char title[256];  /* "Artist - Title" (or the title, or the file name); "" when nothing is loaded */
 };
 
@@ -37,6 +39,11 @@ void rei_mpd_play(struct rei_server *server);    /* resumes when paused, starts 
 void rei_mpd_pause(struct rei_server *server);
 void rei_mpd_toggle(struct rei_server *server);
 void rei_mpd_next(struct rei_server *server);
+/* MPD's own volume (setvol), 0..100. The new value is known at once, before MPD has answered, so keys pressed
+ * in quick succession add up. */
+void rei_mpd_set_volume(struct rei_server *server, int percent);
+/* There is no mute in MPD: sets the volume to 0 and remembers it, or puts it back. */
+void rei_mpd_toggle_mute(struct rei_server *server);
 /* Runs [mpd] start_command (default "mpd") and keeps looking for it for a few seconds. */
 void rei_mpd_launch(struct rei_server *server);
 

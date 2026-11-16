@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "audio.h"
+#include "volume.h"
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
@@ -29,10 +30,10 @@ bool rei_volpop_is_open(const struct rei_server *s)
 static void fill_state(struct rei_server *s, struct rei_volpop *p, struct rei_volpop_state *st)
 {
 	const struct rei_config *cfg = s->config;
-	struct rei_audio_state a = rei_audio_state(s);
+	struct rei_audio_state a = rei_volume_state(s);
 	memset(st, 0, sizeof *st);
 	st->percent = a.percent;
-	st->max = cfg->max_volume > 0 ? cfg->max_volume : 100;
+	st->max = rei_volume_is_mpd(s) ? 100 : (cfg->max_volume > 0 ? cfg->max_volume : 100);   /* (MPD tops out at 100) */
 	st->muted = a.muted;
 	st->hover = p->hover;
 	st->scale = (int)ceil(p->output->scale);
@@ -114,7 +115,7 @@ static int percent_at(struct rei_server *s, double x)
 	struct rei_volpop *p = s->volpop;
 	struct rei_rect button, track;
 	rei_bar_volpop_layout(&button, &track);
-	int max = s->config->max_volume > 0 ? s->config->max_volume : 100;
+	int max = rei_volume_is_mpd(s) ? 100 : (s->config->max_volume > 0 ? s->config->max_volume : 100);
 	double f = (x - (p->box.x + track.x)) / (double)track.w;
 	f = f < 0 ? 0 : f > 1 ? 1 : f;
 	return (int)lround(f * max);
@@ -122,10 +123,10 @@ static int percent_at(struct rei_server *s, double x)
 
 static void set_percent(struct rei_server *s, int percent)
 {
-	struct rei_audio_state a = rei_audio_state(s);
+	struct rei_audio_state a = rei_volume_state(s);
 	if (!a.available)
 		return;
-	rei_audio_change_volume(s, percent - a.percent);
+	rei_volume_change(s, percent - a.percent);
 	rebuild(s);
 }
 
@@ -138,7 +139,7 @@ bool rei_volpop_press(struct rei_server *s, double x, double y)
 	rei_bar_volpop_layout(&button, &track);
 	double lx = x - p->box.x, ly = y - p->box.y;
 	if (lx >= button.x && lx < button.x + button.w && ly >= button.y && ly < button.y + button.h) {
-		rei_audio_toggle_mute(s);
+		rei_volume_toggle_mute(s);
 		rebuild(s);
 	} else if (lx >= track.x - 8 && lx < track.x + track.w + 8) {
 		p->dragging = true;
@@ -185,7 +186,7 @@ void rei_volpop_emit(struct rei_server *s, struct rei_scene_snapshot *snap)
 	if (!p || !p->open)
 		return;
 	/* The volume may have moved (media keys, another program): redraw if what it shows differs. */
-	struct rei_audio_state a = rei_audio_state(s);
+	struct rei_audio_state a = rei_volume_state(s);
 	if (!a.available) {
 		rei_volpop_close(s);
 		return;

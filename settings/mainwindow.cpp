@@ -239,6 +239,9 @@ QWidget *MainWindow::buildGeneralTab()
 	addField(f, tr("Volume control (PipeWire)"), "audio", "enabled", Bool, true, {}, 0, 0, 1,
 		 tr("The toolbar's volume text and the media keys. Needs a restart to change."));
 	addField(f, tr("Volume step (percent)"), "audio", "volume_step", Int, 5, {}, 1, 100);
+	addField(f, tr("What the volume keys control"), "audio", "volume_target", Choice, "auto", { "auto", "sink", "mpd", "both" }, 0, 0, 1,
+		 tr("MPD has a volume of its own. auto: MPD's while it is playing (shown as ♪ 60%), the sound system's otherwise; "
+		    "sink: always the sound system's; mpd: MPD's whenever it runs; both: the sound system's, with MPD set to match."));
 	addField(f, tr("Maximum volume (percent)"), "audio", "max_volume", Int, 100, {}, 10, 150, 1,
 		 tr("Above 100 amplifies and may distort."));
 	return w;

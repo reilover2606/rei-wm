@@ -254,6 +254,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->start_enabled = true;
 	cfg->focus_follows_mouse = true;
 	cfg->cursor_theme = rei_xstrdup("");
+	cfg->volume_target = REI_VOLUME_AUTO;
 	cfg->mpd_enabled = true;
 	cfg->mpd_host = rei_xstrdup("");
 	cfg->mpd_port = 6600;
@@ -486,6 +487,12 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 			cfg->audio_autostart = au->u.b;
 		read_int(&r, audio, "audio.", "volume_step", &cfg->volume_step, 1, 100);
 		read_int(&r, audio, "audio.", "max_volume", &cfg->max_volume, 10, 150);
+		static const char *const targets[] = { "auto", "sink", "mpd", "both", NULL };
+		char *tgt = rei_xstrdup("auto");
+		read_choice(&r, audio, "audio.", "volume_target", &tgt, targets);
+		cfg->volume_target = !strcmp(tgt, "sink") ? REI_VOLUME_SINK : !strcmp(tgt, "mpd") ? REI_VOLUME_MPD
+				   : !strcmp(tgt, "both") ? REI_VOLUME_BOTH : REI_VOLUME_AUTO;
+		free(tgt);
 	}
 
 	const struct toml_table *tb = get_table(&r, root, "toolbar");

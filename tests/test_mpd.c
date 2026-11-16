@@ -20,8 +20,9 @@
 
 /* ---- the fake MPD ---- */
 
-static volatile sig_atomic_t g_advance;
+static volatile sig_atomic_t g_advance, g_quieter;
 static void on_usr1(int sig) { (void)sig; g_advance = 1; }
+static void on_usr2(int sig) { (void)sig; g_quieter = 1; }   /* "mpc volume -10", from outside */
 
 struct fclient {
 	int fd;
@@ -47,6 +48,7 @@ static void say(int fd, const char *fmt, ...)
 static int fake_mpd(const char *path, const char *logpath)
 {
 	signal(SIGUSR1, on_usr1);
+	signal(SIGUSR2, on_usr2);
 	char pidpath[450];
 	snprintf(pidpath, sizeof pidpath, "%s.pid", path);
 	FILE *pf = fopen(pidpath, "w");
@@ -61,7 +63,7 @@ static int fake_mpd(const char *path, const char *logpath)
 	memset(cl, 0, sizeof cl);
 	for (int i = 0; i < 4; i++)
 		cl[i].fd = -1;
-	int state = 0 /* 0 stop 1 play 2 pause */, song = 0, id = 100;
+	int state = 0 /* 0 stop 1 play 2 pause */, song = 0, id = 100, volume = 80;
 	for (;;) {
 		struct pollfd p[5];
 		int n = 0;
@@ -76,6 +78,11 @@ static int fake_mpd(const char *path, const char *logpath)
 			song = (song + 1) % 3;
 			id++;
 			state = 1;
+			change = true;
+		}
+		if (g_quieter) {
+			g_quieter = 0;
+			volume -= 10;
 			change = true;
 		}
 		if (p[0].revents & POLLIN) {
@@ -113,7 +120,7 @@ static int fake_mpd(const char *path, const char *logpath)
 					fclose(lf);
 				}
 				if (!strcmp(line, "status")) {
-					say(c->fd, "volume: 80\nstate: %s\n", state == 1 ? "play" : state == 2 ? "pause" : "stop");
+					say(c->fd, "volume: %d\nstate: %s\n", volume, state == 1 ? "play" : state == 2 ? "pause" : "stop");
 					if (state)
 						say(c->fd, "songid: %d\n", id);
 					say(c->fd, "OK\n");
@@ -138,6 +145,8 @@ static int fake_mpd(const char *path, const char *logpath)
 						state = 2, change = true;
 					else if (!strcmp(line, "pause 0") && state == 2)
 						state = 1, change = true;
+					else if (!strncmp(line, "setvol ", 7))
+						volume = atoi(line + 7), change = true;
 					else if (!strcmp(line, "play"))
 						state = 1, change = true;
 					else if (!strcmp(line, "next") && state) {
@@ -397,6 +406,81 @@ int main(int argc, char **argv)
 	wait_cmd("pause 0", 2);
 	ev_clear(&c);
 	CHECK(ev_count(&c, EV_KB_KEY) == 0);
+
+	/* ---- The volume keys follow MPD while it plays (it has a volume of its own). ---- */
+	sleep_ms(250);
+	CHECK(count_cmd("setvol 85") == 0);
+	inject("key 115 1");   /* XF86AudioRaiseVolume */
+	inject("key 115 0");
+	settle_all();
+	wait_cmd("setvol 85", 1);
+	inject("key 115 1");   /* twice in a row, before MPD has answered the first: they add up */
+	inject("key 115 0");
+	inject("key 115 1");
+	inject("key 115 0");
+	settle_all();
+	wait_cmd("setvol 95", 1);
+	inject("key 114 1");   /* lower */
+	inject("key 114 0");
+	settle_all();
+	wait_cmd("setvol 90", 1);
+	sleep_ms(250);
+	inject("key 113 1");   /* mute: MPD has none, so 0 ... */
+	inject("key 113 0");
+	settle_all();
+	wait_cmd("setvol 0", 1);
+	sleep_ms(250);
+	inject("key 113 1");   /* ... and back to what it was */
+	inject("key 113 0");
+	settle_all();
+	wait_cmd("setvol 90", 2);
+	sleep_ms(250);
+	CHECK(kill(fake, SIGUSR2) == 0);   /* someone runs "mpc volume -10": 80 */
+	sleep_ms(400);
+	inject("key 115 1");
+	inject("key 115 0");
+	settle_all();
+	wait_cmd("setvol 85", 2);          /* 80 + 5: the keys know what mpc did */
+	/* Stopped or paused, the keys are the sound system's again: MPD is left alone. */
+	int sv = count_cmd("setvol 85");
+	inject("key 57 1");                /* Space: pause */
+	inject("key 57 0");
+	settle_all();
+	wait_cmd("pause 1", 3);
+	sleep_ms(300);
+	inject("key 115 1");
+	inject("key 115 0");
+	settle_all();
+	sleep_ms(300);
+	CHECK(count_cmd("setvol 85") == sv && count_cmd("setvol 90") == 2);
+	inject("key 57 1");                /* and play again */
+	inject("key 57 0");
+	settle_all();
+	wait_cmd("pause 0", 3);
+	sleep_ms(300);
+
+	/* volume_target = "sink": MPD is never touched. */
+	{
+		char text[3000], cfgpath[500], tmp[520];
+		snprintf(text, sizeof text, "%s[audio]\nvolume_target = \"sink\"\n", g_config);
+		snprintf(cfgpath, sizeof cfgpath, "%s/config.toml", g_dir);
+		snprintf(tmp, sizeof tmp, "%s.new", cfgpath);
+		write_text(tmp, text);
+		int reloaded = log_count("config reloaded");
+		CHECK(rename(tmp, cfgpath) == 0);
+		CHECK(kill(g_pid, SIGHUP) == 0);
+		for (int t = 0; log_count("config reloaded") <= reloaded; t += 20) {
+			CHECK(t < 5000);
+			sleep_ms(20);
+		}
+		settle_all();
+		int total = count_cmd("setvol 85") + count_cmd("setvol 90") + count_cmd("setvol 95") + count_cmd("setvol 0");
+		inject("key 115 1");
+		inject("key 115 0");
+		settle_all();
+		sleep_ms(300);
+		CHECK(count_cmd("setvol 85") + count_cmd("setvol 90") + count_cmd("setvol 95") + count_cmd("setvol 0") == total);
+	}
 
 	/* ---- Escape puts the view away: sharp again, and the window has its pointer back. ---- */
 	inject("key 1 1");

@@ -386,6 +386,14 @@ start_command = "mpd"
 announce = true     # "Now playing: ..." messages
 ```
 
+**The volume.** MPD has a volume of its own, which the sound system's does not affect when MPD plays straight to
+the card or uses its software mixer, so the media keys could appear to do nothing while it played. They now
+follow MPD while it is playing: the keys, the wheel, the toolbar text (shown as `♪ 60%` so it is clear whose
+volume it is) and the slider all change it, and a change made from outside (`mpc volume -10`) shows up at
+once. MPD has no mute, so the mute key sets it to 0 and the next press puts it back. `[audio] volume_target`:
+`"auto"` (default: MPD's while it plays, the sound system's otherwise), `"sink"` (always the sound system's),
+`"mpd"` (MPD's whenever it runs) or `"both"` (the sound system's, with MPD set to the same percentage).
+
 rei-wm speaks MPD's protocol itself (no libmpdclient); it keeps one connection waiting for player changes and
 looks for MPD every two seconds while it is away. Names other than IP addresses and `localhost` are not looked
 up (a lookup would stall the compositor).

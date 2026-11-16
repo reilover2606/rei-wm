@@ -1,4 +1,5 @@
 #include "audio.h"
+#include "volume.h"
 #include "tray.h"
 #include "input/input.h"
 #include "pointer_cursor.h"
@@ -795,7 +796,7 @@ void rei_input_pointer_axis(struct rei_server *s, uint32_t time_ms, bool horizon
 
 	/* The wheel over the volume popup changes the volume. */
 	if (!horizontal && value != 0 && rei_volpop_contains(s, s->cursor_x, s->cursor_y)) {
-		rei_audio_change_volume(s, value > 0 ? -s->config->volume_step : s->config->volume_step);
+		rei_volume_change(s, value > 0 ? -s->config->volume_step : s->config->volume_step);
 		rei_server_schedule_damage(s);
 		return;
 	}
@@ -806,7 +807,7 @@ void rei_input_pointer_axis(struct rei_server *s, uint32_t time_ms, bool horizon
 	if (!in->pointer_focus && !in->grab_surface && !horizontal && value != 0 &&
 	    rei_toolbar_hit(s, s->cursor_x, s->cursor_y, &bar_output, &bar_ws)) {
 		if (rei_toolbar_volume_at(s, s->cursor_x, s->cursor_y))
-			rei_audio_change_volume(s, value > 0 ? -s->config->volume_step : s->config->volume_step);
+			rei_volume_change(s, value > 0 ? -s->config->volume_step : s->config->volume_step);
 		else
 			rei_toolbar_scroll(s, bar_output, value > 0 ? 1 : -1);
 		return;
