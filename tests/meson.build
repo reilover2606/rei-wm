@@ -220,3 +220,21 @@ mpd_test = executable('test_mpd', 'test_mpd.c',
   dependencies: [wayland_client, m_dep, rei_core_dep],
 )
 test('mpd', mpd_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 120)
+
+hoverfocus_test = executable('test_hoverfocus', 'test_hoverfocus.c',
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep, rei_core_dep],
+)
+test('hoverfocus', hoverfocus_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+
+brightness_test = executable('test_brightness', 'test_brightness.c',
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep, rei_core_dep],
+)
+test('brightness', brightness_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+
+wifi_test = executable('test_wifi', 'test_wifi.c',
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep, rei_core_dep],
+)
+test('wifi', wifi_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)

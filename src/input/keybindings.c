@@ -56,6 +56,8 @@ const struct rei_default_binding rei_default_bindings[] = {
 	{ "XF86AudioRaiseVolume", "volume_up" },
 	{ "XF86AudioLowerVolume", "volume_down" },
 	{ "XF86AudioMute", "volume_mute" },
+	{ "XF86MonBrightnessUp", "brightness_up" },
+	{ "XF86MonBrightnessDown", "brightness_down" },
 	{ NULL, NULL },
 };
 
@@ -170,6 +172,8 @@ bool rei_action_parse(const char *text, struct rei_action *out, char *err, size_
 		{ "volume_up", REI_ACTION_VOLUME_UP, ARG_OPT_PERCENT },
 		{ "volume_down", REI_ACTION_VOLUME_DOWN, ARG_OPT_PERCENT },
 		{ "volume_mute", REI_ACTION_VOLUME_MUTE, ARG_NONE },
+		{ "brightness_up", REI_ACTION_BRIGHTNESS_UP, ARG_OPT_PERCENT },
+		{ "brightness_down", REI_ACTION_BRIGHTNESS_DOWN, ARG_OPT_PERCENT },
 	};
 
 	for (size_t i = 0; i < REI_ARRAY_LEN(actions); i++) {
@@ -238,7 +242,7 @@ bool rei_action_parse(const char *text, struct rei_action *out, char *err, size_
 
 	snprintf(err, errlen, "unknown action '%.*s' (known: none, exec, close, quit, focus_next, "
 		 "focus_prev, focus, move, split, toggle_floating, fullscreen, minimize, run, messages, workspace, "
-		 "move_to_workspace, volume_up, volume_down, volume_mute)", (int)name_len, text);
+		 "move_to_workspace, volume_up, volume_down, volume_mute, brightness_up, brightness_down)", (int)name_len, text);
 	return false;
 }
 

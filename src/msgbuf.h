@@ -16,6 +16,9 @@ struct rei_server;
  * newest at the bottom, with a translucent backdrop; the mouse wheel scrolls it and Escape closes it.
  */
 void rei_msg_push(struct rei_server *server, const char *text);
+/* Like rei_msg_push, but if the newest message was pushed with the same `key` and is still on screen it is replaced
+ * (and its time starts again): a held key's "Brightness: 60%" is one note that changes, not a message per press. */
+void rei_msg_push_keyed(struct rei_server *server, const char *key, const char *text);
 
 /* Runs `command` like rei_spawn, but its output (stdout and stderr) becomes messages. No output, no
  * message. Used by the Run prompt. */

@@ -11,6 +11,7 @@
 #include "audio.h"
 #include "volume.h"
 #include "battery.h"
+#include "wifi.h"
 #include "sysinfo.h"
 #include "desktop.h"
 #include "icons.h"
@@ -126,6 +127,10 @@ static void build_state_for(struct rei_server *s, struct rei_output *o, const st
 	st->mode_w = st->thickness;
 	st->mode_float = s->float_new_set ? s->float_new : cfg->float_new_windows;
 	st->mode_hover = s->mode_hover;
+	struct rei_wifi_info wifi = rei_wifi_state(s);
+	st->wifi_present = wifi.present;
+	st->wifi_connected = wifi.connected;
+	st->wifi_level = wifi.level;
 	struct rei_battery_info bat = rei_battery_state(s);
 	st->battery_present = bat.present;
 	st->battery_percent = bat.percent;
@@ -278,6 +283,26 @@ bool rei_toolbar_volume_at(struct rei_server *s, double x, double y)
 		build_state(s, o, &st);
 		struct rei_rect v;
 		if (!rei_bar_volume_rect(&st, &v))
+			return false;
+		double lx = x - r.x, ly = y - r.y;
+		return lx >= v.x && ly >= v.y && lx < v.x + v.w && ly < v.y + v.h;
+	}
+	return false;
+}
+
+bool rei_toolbar_wifi_at(struct rei_server *s, double x, double y)
+{
+	if (!bar_enabled(s))
+		return false;
+	struct rei_output *o;
+	wl_list_for_each(o, &s->outputs, link) {
+		struct rei_rect r = bar_rect(s, o);
+		if (x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h)
+			continue;
+		struct rei_bar_state st;
+		build_state(s, o, &st);
+		struct rei_rect v;
+		if (!rei_bar_wifi_rect(&st, &v))
 			return false;
 		double lx = x - r.x, ly = y - r.y;
 		return lx >= v.x && ly >= v.y && lx < v.x + v.w && ly < v.y + v.h;

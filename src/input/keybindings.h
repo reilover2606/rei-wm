@@ -44,6 +44,8 @@ enum rei_action_type {
 	REI_ACTION_VOLUME_UP,        /* volume_up [percent] */
 	REI_ACTION_VOLUME_DOWN,      /* volume_down [percent] */
 	REI_ACTION_VOLUME_MUTE,      /* volume_mute: toggles */
+	REI_ACTION_BRIGHTNESS_UP,    /* brightness_up [percent] */
+	REI_ACTION_BRIGHTNESS_DOWN,  /* brightness_down [percent] */
 };
 
 struct rei_action {

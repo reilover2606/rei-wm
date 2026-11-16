@@ -24,6 +24,7 @@
 #include "battery.h"
 #include "pointer_cursor.h"
 #include "mpd.h"
+#include "wifi.h"
 #include "winfx.h"
 #include "proto/cursor_shape.h"
 #include "proto/fractional_scale.h"
@@ -640,6 +641,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	}
 	rei_winfx_configure(s);
 	rei_mpd_configure(s);
+	rei_wifi_configure(s);
 
 	s->wl_event = event_new(s->base, wl_event_loop_get_fd(s->wl_loop),
 				EV_READ | EV_PERSIST, on_wayland_readable, s);
@@ -785,6 +787,7 @@ void rei_server_destroy(struct rei_server *s)
 
 	if (s->display)
 		wl_display_destroy(s->display);
+	rei_wifi_stop(s);
 	rei_mpd_stop(s);
 	rei_pointer_cursor_finish(s);
 	rei_winfx_finish(s);

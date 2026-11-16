@@ -16,6 +16,7 @@
 #include "util/util.h"
 #include "audio.h"
 #include "volume.h"
+#include "brightness.h"
 #include "msgbuf.h"
 #include "runprompt.h"
 #include "sessionbus.h"
@@ -164,6 +165,12 @@ void rei_actions_run(struct rei_server *s, const struct rei_action *action)
 		break;
 	case REI_ACTION_VOLUME_DOWN:
 		rei_volume_change(s, -(action->value ? action->value : s->config->volume_step));
+		break;
+	case REI_ACTION_BRIGHTNESS_UP:
+		rei_brightness_change(s, action->value);
+		break;
+	case REI_ACTION_BRIGHTNESS_DOWN:
+		rei_brightness_change(s, -(action->value ? action->value : s->config->brightness_step));
 		break;
 	case REI_ACTION_VOLUME_MUTE:
 		rei_volume_toggle_mute(s);

@@ -457,6 +457,67 @@ static void battery_layout(cairo_t *cr, PangoFontDescription *font, const struct
 	}
 }
 
+/* ---- Wifi: a small signal icon, just before the battery (or the volume, or the clock) ---- */
+
+#define WIFI_W 18.0
+#define WIFI_H 14.0
+
+static void wifi_layout(cairo_t *cr, PangoFontDescription *font, const struct rei_bar_state *st,
+			double *x, double *y, double *w, double *h)
+{
+	bool vertical = rei_bar_vertical(st->position);
+	int lw = vertical ? st->thickness : st->length;
+	int lh = vertical ? st->length : st->thickness;
+	double edge;   /* the near edge of what is already at the end of the bar */
+	bool anything;
+	if (st->battery_present) {
+		double bx, by, bw, bh, btw, bth;
+		battery_layout(cr, font, st, &bx, &by, &bw, &bh, &btw, &bth);
+		edge = vertical ? by : bx;
+		anything = true;
+	} else {
+		double cw, ch, cl;
+		clock_extent(cr, font, st, &cw, &ch, &cl);
+		if (st->volume[0]) {
+			double vx, vy, vw, vh;
+			volume_layout(cr, font, st, &vx, &vy, &vw, &vh);
+			edge = vertical ? vy : vx;
+		} else {
+			edge = vertical ? lh - BAR_PAD - ch : lw - BAR_PAD - cw;
+		}
+		anything = st->volume[0] || st->clock[0];
+	}
+	*w = WIFI_W;
+	*h = WIFI_H;
+	if (!vertical) {
+		*x = edge - (anything ? VOLUME_GAP : 0) - *w;
+		*y = (lh - *h) / 2.0;
+	} else {
+		*x = (lw - *w) / 2.0;
+		*y = edge - (anything ? VOLUME_GAP : 0) - *h;
+	}
+}
+
+bool rei_bar_wifi_rect(const struct rei_bar_state *st, struct rei_rect *out)
+{
+	if (!st->wifi_present)
+		return false;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
+	cairo_t *cr = cairo_create(surface);
+	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
+	double x, y, w, h;
+	wifi_layout(cr, font, st, &x, &y, &w, &h);
+	pango_font_description_free(font);
+	cairo_destroy(cr);
+	cairo_surface_destroy(surface);
+	/* A generous target: the whole height (or width) of the bar. */
+	if (!rei_bar_vertical(st->position))
+		*out = (struct rei_rect){ (int)floor(x) - 5, 0, (int)ceil(w) + 10, st->thickness };
+	else
+		*out = (struct rei_rect){ 0, (int)floor(y) - 4, st->thickness, (int)ceil(h) + 8 };
+	return true;
+}
+
 /* ---- Styles: one drawing path for every themed element ---- */
 
 static void set_rgba(cairo_t *cr, uint32_t rgb, double a)
@@ -609,6 +670,11 @@ static void tray_bounds(const struct rei_bar_state *st, double *start, double *e
 		double bx, by, bw, bh, btw, bth;
 		battery_layout(cr, font, st, &bx, &by, &bw, &bh, &btw, &bth);
 		*end = vertical ? by : bx;
+	}
+	if (st->wifi_present) {
+		double wx, wy, ww, wh;
+		wifi_layout(cr, font, st, &wx, &wy, &ww, &wh);
+		*end = vertical ? wy : wx;
 	}
 	*end -= 12;
 	pango_font_description_free(font);
@@ -865,6 +931,47 @@ static void draw_tray(cairo_t *cr, PangoFontDescription *font, const struct rei_
 			      st->tray_hover == REI_TRAY_HOVER_OVERFLOW);
 	if (st->drag_index >= 0 && (size_t)st->drag_index < lay.n_visible)
 		draw_tile(cr, font, st, theme, &st->tray[st->drag_index], lay.tile[st->drag_index], true, 2.0);
+}
+
+/* The wifi icon: a dot and three arcs; the arcs the signal reaches are lit. Not connected: all of it in the
+ * "inactive" colour (red) with a strike through. */
+static void draw_wifi(cairo_t *cr, PangoFontDescription *font, const struct rei_bar_state *st,
+		      const struct rei_theme *theme)
+{
+	const struct rei_style *ws = &theme->e[REI_ELEM_WIFI];
+	const struct rei_style *bar = &theme->e[REI_ELEM_TOOLBAR];
+	double x, y, w, h;
+	wifi_layout(cr, font, st, &x, &y, &w, &h);
+	double cx = x + w / 2.0, base = y + h - 1.5;   /* the dot, at the bottom centre */
+	uint32_t color = st->wifi_connected ? ws->color : ws->inactive_color;
+	int lit = st->wifi_connected ? st->wifi_level : 3;
+
+	cairo_save(cr);
+	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+	for (int i = 0; i < 3; i++) {
+		double r = 4.6 + 4.3 * i;
+		cairo_new_path(cr);
+		cairo_arc(cr, cx, base, r, -M_PI * 0.75, -M_PI * 0.25);
+		cairo_set_line_width(cr, 1.8);
+		set_rgba(cr, color, i < lit ? 1.0 : 0.28);
+		cairo_stroke(cr);
+	}
+	set_rgba(cr, color, 1.0);
+	cairo_new_path(cr);
+	cairo_arc(cr, cx, base, 1.7, 0, 2 * M_PI);
+	cairo_fill(cr);
+	if (!st->wifi_connected) {
+		/* The strike: a halo of the bar's colour first, so it reads over the arcs. */
+		cairo_move_to(cr, x + 1.5, y + 1.5);
+		cairo_line_to(cr, x + w - 1.5, y + h - 0.5);
+		cairo_set_line_width(cr, 4.6);
+		set_rgba(cr, bar->color, 1.0);
+		cairo_stroke_preserve(cr);
+		cairo_set_line_width(cr, 1.9);
+		set_rgba(cr, color, 1.0);
+		cairo_stroke(cr);
+	}
+	cairo_restore(cr);
 }
 
 /* The battery: a horizontal cell that fills in proportion to the charge, then the percentage. */
@@ -1818,6 +1925,8 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 	draw_tray(cr, font, st, &theme);
 	if (st->battery_present)
 		draw_battery(cr, font, st, &theme);
+	if (st->wifi_present)
+		draw_wifi(cr, font, st, &theme);
 
 	/* CPU and RAM, in one box left of the clock. */
 	if (st->sysinfo_on) {

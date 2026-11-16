@@ -213,11 +213,32 @@ Configuration lives in `~/.config/rei-wm/config.toml` (or
 `$XDG_CONFIG_HOME/rei-wm/`). A commented default is written on first run. Use
 `rei-wm --check-config` to validate a file, and `--help` for all options.
 
+## Wifi and brightness
+
+**Wifi.** If the machine has a wireless interface, a small signal icon sits before the battery (or the volume,
+or the clock): the arcs the signal reaches are lit, so it shows how strong the connection is; when there is no
+connection it is **red with a strike through**. Clicking it runs `[toolbar] wifi_command` (default `wpa_gui`;
+if that is not installed its error appears as a message). It is read from `/sys/class/net` (an interface with
+a `wireless` directory is connected when its `operstate` is `up`) and `/proc/net/wireless`, every three
+seconds. `[toolbar] wifi = false` hides it; the look is the `[theme.wifi]` element (`color`, `inactive_color`).
+
+**Brightness.** `brightness_up` and `brightness_down` are bound to `XF86MonBrightnessUp` and
+`XF86MonBrightnessDown`, the keys laptops send for their brightness buttons (the codes are the same everywhere;
+which F-keys those are, F5/F6 on yours, is up to the keyboard, and a key that sends something else can be
+bound by hand: `"F6" = "brightness_up"`). Each press changes the backlight by `[brightness] step` percent of its
+range (default 5; finer at the dim end, never below 1%), quick presses add up, and the result shows as a single
+message ("Brightness: 60%") that updates in place. The backlight is the finest directory under
+`/sys/class/backlight` (`device` picks another). Writing it needs permission, so if that is refused rei-wm asks
+**logind** to do it for your session (`dbus-send`, which comes with dbus), which needs nothing set up; or give
+`[brightness] command` (`"brightnessctl set {percent}%"`, with `{value}`, `{percent}` and `{device}` filled in).
+
 ## Focus, the new-window switch and fullscreen
 
 - **Focus follows the pointer** (`[general] focus_follows_mouse`, on by default): hovering a window focuses
   it; moving onto the desktop, the toolbar or a menu leaves nothing focused (keyboard shortcuts such as
-  `Mod+q` and `Mod+f` still act on the last window). Set it to `false` for click-to-focus.
+  `Mod+q` and `Mod+f` still act on the last window). Set it to `false` for click-to-focus. Hovering **does not
+  raise** a floating window: a small dialog (the settings app's colour picker, say) stays in front of its parent
+  when the pointer passes over the parent. **Clicking** a window raises it (and so does focusing it from the keyboard).
 - **Tiled/floating switch:** the small square after the Start button decides how *new* windows open (a grid
   of panes: tiled; two overlapping windows, lit: floating). It starts from `[layout] new_windows`, and a
   config reload resets it to that.

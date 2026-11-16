@@ -126,6 +126,9 @@ struct rei_bar_state {
 	int mode_w;             /* Width of the tiled/floating switch after the Start button (0: none). */
 	bool mode_float;        /* New windows float. */
 	bool mode_hover;
+	bool wifi_present;      /* The machine has a wireless interface (the icon shows). */
+	bool wifi_connected;
+	int wifi_level;         /* 0..3 arcs lit */
 	bool battery_present;   /* The machine has a battery (the widget shows). */
 	int battery_percent;    /* 0..100 */
 	bool battery_charging;
@@ -291,6 +294,8 @@ struct rei_pixbuf *rei_bar_tooltip_render(const char *text, const char *font, co
 struct rei_pixbuf *rei_bar_letter_icon(const char *name);
 
 /* An opaque pixbuf of the bar at its physical resolution; NULL on failure. */
+/* The wifi icon's rectangle in the bar (bar-local), if it shows. */
+bool rei_bar_wifi_rect(const struct rei_bar_state *state, struct rei_rect *out);
 struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *state);
 
 /* Releases the font caches Pango, Cairo and fontconfig keep for the life of the
@@ -325,6 +330,8 @@ bool rei_toolbar_hit(struct rei_server *server, double x, double y,
 /* Highlights the button for `workspace` on `output` (0 / NULL for none). */
 /* Whether (x, y) is on the volume text of an output's toolbar. */
 bool rei_toolbar_volume_at(struct rei_server *server, double x, double y);
+/* The wifi icon is under (x, y). */
+bool rei_toolbar_wifi_at(struct rei_server *server, double x, double y);
 
 enum { REI_TRAY_TARGET_TILE = 1, REI_TRAY_TARGET_OVERFLOW = 2 };
 

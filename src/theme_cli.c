@@ -247,6 +247,9 @@ int rei_theme_preview(const struct rei_config *cfg, const char *png_path)
 	st.sysinfo_mem_used_kb = 5452595;
 	st.sysinfo_mem_total_kb = 16777216;
 	st.mode_w = st.thickness;
+	st.wifi_present = true;
+	st.wifi_connected = true;
+	st.wifi_level = 2;
 	st.battery_present = true;
 	st.battery_percent = 63;
 	snprintf(st.volume, sizeof st.volume, "73%%");

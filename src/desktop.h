@@ -110,6 +110,10 @@ bool rei_wm_surface_hidden(struct rei_surface *root);
 /* ---- Focus ---- */
 struct rei_view *rei_wm_active_view(struct rei_server *server);
 void rei_wm_focus_view(struct rei_view *view);
+/* Focus because the pointer came over the window (focus follows the mouse): like rei_wm_focus_view, but a floating
+ * window is not raised, so a small dialog stays in front of its parent when the pointer merely passes over the
+ * parent. Clicking a window (rei_wm_focus_view) raises it. */
+void rei_wm_focus_view_hover(struct rei_view *view);
 /* Nothing has the focus until the next rei_wm_focus_view (the pointer is over no window). */
 void rei_wm_clear_focus(struct rei_server *server);
 /* Makes the output under (x, y) the focused one. */

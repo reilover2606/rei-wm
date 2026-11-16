@@ -280,7 +280,7 @@ void rei_wm_clear_focus(struct rei_server *s)
 	update_activation(s);
 }
 
-void rei_wm_focus_view(struct rei_view *v)
+static void focus_view(struct rei_view *v, bool raise)
 {
 	struct rei_server *s = v->server;
 	if (!rei_view_visible(v) || !SHOWN(v))
@@ -290,11 +290,21 @@ void rei_wm_focus_view(struct rei_view *v)
 	s->focused_output = v->ws->output;
 	wl_list_remove(&v->focus_link);
 	wl_list_insert(&v->ws->focus, &v->focus_link);
-	if (v->floating) {  /* Focusing a floating window raises it. */
+	if (raise && v->floating) {   /* Focusing a floating window raises it, unless only the pointer came over it. */
 		wl_list_remove(&v->float_link);
 		wl_list_insert(v->ws->floating.prev, &v->float_link);
 	}
 	update_activation(s);
+}
+
+void rei_wm_focus_view(struct rei_view *v)
+{
+	focus_view(v, true);
+}
+
+void rei_wm_focus_view_hover(struct rei_view *v)
+{
+	focus_view(v, false);
 }
 
 void rei_wm_focus_output_at(struct rei_server *s, double x, double y)
