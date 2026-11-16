@@ -180,3 +180,8 @@ void rei_confirm_finish(struct rei_server *s)
 	free(s->confirm);
 	s->confirm = NULL;
 }
+
+int rei_confirm_hover(const struct rei_server *s)
+{
+	return rei_confirm_is_open(s) ? s->confirm->st.hover : -1;
+}

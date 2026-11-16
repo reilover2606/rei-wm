@@ -647,3 +647,8 @@ void rei_tray_finish(struct rei_server *s)
 	}
 	rei_icons_cleanup();
 }
+
+bool rei_tray_hovering(const struct rei_server *s)
+{
+	return s->tray_ui && s->tray_ui->hover_valid;
+}

@@ -65,6 +65,9 @@ private:
 	QWidget *buildAudioTab();
 	QWidget *buildMessagesTab();
 	QWidget *buildThemeTab();
+	QWidget *buildCursorTab();
+	void updateCursorPreview();
+	QStringList installedCursorThemes() const;
 	TomlDoc buildDoc() const;   /* The document as it would be saved now. */
 
 	void loadKeys();
@@ -80,7 +83,7 @@ private:
 	TomlDoc doc_;
 	QVector<Field> fields_;
 	QTableWidget *keys_ = nullptr, *outputs_ = nullptr, *shortcuts_ = nullptr;
-	QLabel *status_ = nullptr;
+	QLabel *status_ = nullptr, *cursorPreview_ = nullptr;
 	ThemeEditor *theme_ = nullptr;
 	QMap<QString, QString> loadedKeys_;
 	QList<QVariantMap> loadedOutputs_, loadedShortcuts_;

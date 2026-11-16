@@ -206,3 +206,8 @@ void rei_volpop_finish(struct rei_server *s)
 	free(s->volpop);
 	s->volpop = NULL;
 }
+
+int rei_volpop_hover(const struct rei_server *s)
+{
+	return rei_volpop_is_open(s) ? s->volpop->hover : 0;
+}

@@ -85,10 +85,12 @@ void rei_snapshot_add_dmabuf(struct rei_scene_snapshot *s, struct rei_dmabuf *bu
 	};
 }
 
-void rei_snapshot_set_cursor(struct rei_scene_snapshot *s, struct rei_pixbuf *pix, float x, float y)
+void rei_snapshot_set_cursor(struct rei_scene_snapshot *s, struct rei_pixbuf *pix, float x, float y, float w, float h)
 {
 	rei_pixbuf_unref(s->cursor.pix);
 	s->cursor.pix = pix ? rei_pixbuf_ref(pix) : NULL;
 	s->cursor.x = x;
 	s->cursor.y = y;
+	s->cursor.w = w;
+	s->cursor.h = h;
 }

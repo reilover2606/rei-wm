@@ -19,6 +19,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QPixmap>
 #include <QProcess>
 #include <QPushButton>
 #include <QSaveFile>
@@ -47,6 +48,7 @@ MainWindow::MainWindow(const QString &configPath, const QString &compositorBinar
 	tabs->addTab(buildInputTab(), tr("Input"));
 	tabs->addTab(buildToolbarTab(), tr("Toolbar"));
 	tabs->addTab(buildLookTab(), tr("Look"));
+	tabs->addTab(buildCursorTab(), tr("Cursor"));
 	tabs->addTab(buildStartMenuTab(), tr("Start menu"));
 	tabs->addTab(buildKeysTab(), tr("Keybindings"));
 	tabs->addTab(buildOutputsTab(), tr("Monitors"));
@@ -195,7 +197,12 @@ void MainWindow::setFieldValue(Field &f, const QVariant &v)
 	case Choice: {
 		auto *c = static_cast<QComboBox *>(f.widget);
 		int i = c->findText(v.toString());
-		c->setCurrentIndex(i >= 0 ? i : 0);
+		if (i >= 0)
+			c->setCurrentIndex(i);
+		else if (c->isEditable())
+			c->setEditText(v.toString());   /* a theme that is installed somewhere the list does not look */
+		else
+			c->setCurrentIndex(0);
 		break;
 	}
 	case Color: static_cast<ColorButton *>(f.widget)->setColor(v.toString()); break;
@@ -314,6 +321,97 @@ static QTableWidget *makeTable(const QStringList &headers)
 	t->horizontalHeader()->setStretchLastSection(true);
 	t->setSelectionBehavior(QAbstractItemView::SelectRows);
 	return t;
+}
+
+/* The cursor themes installed here: asked of rei-wm, which knows where it looks (the icon directories and
+ * /usr/share/cursors); without it, the same directories are scanned here. */
+QStringList MainWindow::installedCursorThemes() const
+{
+	QStringList out;
+	QString bin = findCompositor();
+	if (!bin.isEmpty()) {
+		QProcess p;
+		p.start(bin, { "--list-cursor-themes" });
+		if (p.waitForFinished(5000) && p.exitCode() == 0)
+			for (const QString &l : QString::fromUtf8(p.readAllStandardOutput()).split('\n', Qt::SkipEmptyParts))
+				out << l.trimmed();
+		if (!out.isEmpty())
+			return out;
+	}
+	QStringList dirs = qEnvironmentVariable("XCURSOR_PATH").split(':', Qt::SkipEmptyParts);
+	if (dirs.isEmpty())
+		dirs = { QDir::homePath() + "/.local/share/icons", QDir::homePath() + "/.icons", "/usr/share/icons",
+			 "/usr/share/pixmaps", "/usr/share/cursors", "/usr/share/cursors/xorg-x11" };
+	for (const QString &d : dirs)
+		for (const QString &name : QDir(d).entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+			if (QDir(d + "/" + name + "/cursors").exists() && !out.contains(name))
+				out << name;
+	out.sort();
+	return out;
+}
+
+void MainWindow::updateCursorPreview()
+{
+	if (!cursorPreview_)
+		return;
+	QString theme, bin = findCompositor();
+	int size = 24;
+	for (const Field &f : std::as_const(fields_)) {
+		if (f.section == "cursor" && f.key == "theme")
+			theme = fieldValue(f).toString();
+		if (f.section == "cursor" && f.key == "size")
+			size = fieldValue(f).toInt();
+	}
+	if (bin.isEmpty()) {
+		cursorPreview_->setText(tr("rei-wm was not found, so there is no preview."));
+		return;
+	}
+	QTemporaryFile png(QDir::tempPath() + "/rei-cursor-XXXXXX.png");
+	if (!png.open())
+		return;
+	png.close();
+	QProcess p;
+	p.start(bin, { "--cursor-preview", png.fileName(), "--cursor-theme", theme, "--cursor-size", QString::number(size) });
+	if (!p.waitForFinished(8000) || p.exitCode() != 0) {
+		cursorPreview_->setText(tr("The preview could not be drawn."));
+		return;
+	}
+	cursorPreview_->setPixmap(QPixmap(png.fileName()));
+}
+
+QWidget *MainWindow::buildCursorTab()
+{
+	auto *w = new QWidget;
+	auto *v = new QVBoxLayout(w);
+	auto *hint = new QLabel(tr("The pointer's look: the theme (an XCursor theme, from the icon directories or /usr/share/cursors) "
+				   "and its size. rei-wm uses it at once for everything it draws and for programs that ask for a "
+				   "named shape, and tells the programs and X11 apps it starts about it; programs that are already "
+				   "running may keep their old pointer until they are restarted."));
+	hint->setWordWrap(true);
+	v->addWidget(hint);
+	auto *f = new QFormLayout;
+	auto *theme = static_cast<QComboBox *>(addField(f, tr("Theme"), "cursor", "theme", Choice, "", { "" }, 0, 0, 1,
+							tr("Empty: the system's default theme ($XCURSOR_THEME, then “default”).")));
+	theme->addItems(installedCursorThemes());
+	theme->setEditable(true);
+	theme->lineEdit()->setPlaceholderText(tr("system default"));
+	addField(f, tr("Size (px)"), "cursor", "size", Int, 24, {}, 8, 256, 1,
+		 tr("Logical pixels; on a scaled screen the picture is chosen to stay sharp."));
+	v->addLayout(f);
+	cursorPreview_ = new QLabel;
+	cursorPreview_->setObjectName("cursor.preview");
+	cursorPreview_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+	v->addWidget(cursorPreview_);
+	v->addStretch(1);
+	for (const Field &fl : std::as_const(fields_)) {
+		if (fl.section != "cursor")
+			continue;
+		if (fl.key == "theme")
+			connect(static_cast<QComboBox *>(fl.widget), &QComboBox::currentTextChanged, this, [this] { updateCursorPreview(); });
+		else
+			connect(static_cast<QSpinBox *>(fl.widget), &QSpinBox::valueChanged, this, [this] { updateCursorPreview(); });
+	}
+	return w;
 }
 
 QWidget *MainWindow::buildAudioTab()

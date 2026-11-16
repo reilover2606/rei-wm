@@ -110,3 +110,7 @@ and *no* watchdog report appears, the whole machine (usually the GPU or kernel) 
 `journalctl -k -b -1 | grep -iE "i915|drm|gpu hang"` after the next boot is the useful evidence.
 Bisecting knobs: `REI_DRM_NO_SCANOUT=1` (no direct scanout of client buffers), `REI_DRM_NO_HW_CURSOR=1`,
 `REI_DRM_LINEAR=1` (plain linear scanout buffers instead of tiled/compressed ones).
+
+A VT switch (Ctrl+Alt+Fn) is a synchronous call to logind that returns only once the other session has taken over,
+which can take more than ten seconds when that session is slow. The watchdog does not count that wait (the
+switch suspends it), so rei-wm is no longer exited in the middle of a switch.

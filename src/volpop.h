@@ -20,6 +20,8 @@ void rei_volpop_open(struct rei_server *server, struct rei_output *output, struc
 		     enum rei_bar_position position, struct rei_rect anchor);
 void rei_volpop_close(struct rei_server *server);
 bool rei_volpop_is_open(const struct rei_server *server);
+/* 0: nothing under the pointer, 1: the speaker button, 2: the slider. */
+int rei_volpop_hover(const struct rei_server *server);
 bool rei_volpop_contains(const struct rei_server *server, double x, double y);
 
 /* A press at (x, y): true if it landed in the popup (and was acted on). */

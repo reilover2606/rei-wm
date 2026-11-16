@@ -253,6 +253,8 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_sysinfo = true;
 	cfg->start_enabled = true;
 	cfg->focus_follows_mouse = true;
+	cfg->cursor_theme = rei_xstrdup("");
+	cfg->cursor_size = 24;
 	cfg->start_label = rei_xstrdup("Start");
 	cfg->start_shutdown_command = rei_xstrdup("loginctl poweroff || systemctl poweroff || poweroff");
 	cfg->start_reboot_command = rei_xstrdup("loginctl reboot || systemctl reboot || reboot");
@@ -325,6 +327,12 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		const struct toml_value *ffm = get(&r, general, "general.", "focus_follows_mouse", TOML_BOOL);
 		if (ffm)
 			cfg->focus_follows_mouse = ffm->u.b;
+	}
+
+	const struct toml_table *cursor = get_table(&r, root, "cursor");
+	if (cursor) {
+		read_string(&r, cursor, "cursor.", "theme", &cfg->cursor_theme);
+		read_int(&r, cursor, "cursor.", "size", &cfg->cursor_size, 8, 256);
 	}
 
 	const struct toml_table *layout = get_table(&r, root, "layout");
@@ -683,6 +691,7 @@ void rei_config_free(struct rei_config *cfg)
 	free(cfg->start_reboot_command);
 	free(cfg->start_logout_command);
 	free(cfg->xresources);
+	free(cfg->cursor_theme);
 	free(cfg->start_run_font);
 	free(cfg->messages_font);
 	for (size_t i = 0; i < cfg->n_shortcuts; i++) {

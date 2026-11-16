@@ -251,6 +251,16 @@ backend ─ button ─► popup dismissal ─► click-to-focus/raise ─► cli
   every scene change so a window appearing under a stationary pointer gets its
   `enter`. While a button is held the pointer stays with the surface it was
   pressed on (implicit grab). Clicking a window raises and activates it.
+- **Pointer image** (`pointer_cursor.c`, `cursor.c`). Who decides, in order: the compositor over its own
+  widgets (hover state of the bar, menus, dialogs, notches, a window being moved or resized), then the client
+  the pointer is in (`wp_cursor_shape_v1` shape, or the surface from `wl_pointer.set_cursor`, or hidden; only
+  honoured from the client that has the pointer, and dropped when the pointer enters another surface), then
+  the theme's arrow. The result is one `rei_cursor_image` (a pixbuf with logical size and hotspot) that the
+  scene snapshot carries for software drawing and that the DRM backend uploads into the hardware cursor
+  buffer when it changes (software drawing when the picture does not fit or the output is scaled).
+  Themes are XCursor files read by our own parser (`rei_xcursor_parse`), found via
+  `index.theme` `Inherits=` and the older cursor names as aliases (`hand2` for `pointer`...). The decision
+  is re-run after every batch of events, so a hover change needs no special hook.
 - **Popups** that asked for a grab take the keyboard and are told to close
   (`popup_done`) by a click outside them; clicking inside one closes only the
   popups opened after it.

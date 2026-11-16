@@ -347,3 +347,14 @@ void rei_prompt_finish(struct rei_server *s)
 	free(p);
 	s->prompt = NULL;
 }
+
+bool rei_prompt_contains(const struct rei_server *s, double x, double y)
+{
+	const struct rei_prompt *p = s->prompt;
+	if (!p || !p->open || !p->output)
+		return false;
+	int32_t ow, oh;
+	rei_output_logical_size(p->output, &ow, &oh);
+	double bx = p->output->x + (double)(ow - p->box_w) / 2.0, by = p->output->y + (double)(oh - p->box_h) / 2.0;
+	return x >= bx && y >= by && x < bx + p->box_w && y < by + p->box_h;
+}

@@ -38,6 +38,7 @@ struct rei_scene_snapshot {
 	struct {
 		struct rei_pixbuf *pix;  /* NULL: no cursor. Holds a reference. */
 		float x, y;              /* Top-left, global coordinates (hotspot applied). */
+		float w, h;              /* Logical size it is drawn at. */
 	} cursor;
 
 	struct rei_drawable *items;
@@ -57,7 +58,7 @@ void rei_snapshot_clip_from(struct rei_scene_snapshot *s, size_t first,
 void rei_snapshot_add_dmabuf(struct rei_scene_snapshot *s, struct rei_dmabuf *buf,
 			     float x, float y, float w, float h, bool opaque);
 
-void rei_snapshot_set_cursor(struct rei_scene_snapshot *s, struct rei_pixbuf *pix, float x, float y);
+void rei_snapshot_set_cursor(struct rei_scene_snapshot *s, struct rei_pixbuf *pix, float x, float y, float w, float h);
 
 /* Makes everything added since index `first` translucent (multiplied onto what each already has). */
 void rei_snapshot_set_alpha_from(struct rei_scene_snapshot *s, size_t first, float alpha);

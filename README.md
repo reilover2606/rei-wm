@@ -273,6 +273,34 @@ already running (for example from another desktop session of yours) is left alon
 `[audio] autostart = false` to manage them yourself; the environment variable `REI_AUDIO_AUTOSTART=0|1`
 overrides the file. Programs not installed are skipped with a warning in the log.
 
+## Cursors and cursor themes
+
+The pointer changes with what is under it: a text beam over text, a hand over links and buttons, resize arrows
+at window edges, a closed hand while a window is dragged, and so on. Programs choose their own shape (through
+`wp_cursor_shape_v1`, which Qt, GTK 4 and most modern toolkits use, or by giving rei-wm a picture, as
+Xwayland and older toolkits do), and rei-wm picks the shapes for its own widgets: the Start button, the
+toolbar's buttons and tray tiles, menu rows, dialog buttons, the notches (hand over the drag handle, a closed
+hand while dragging), and a text beam in the Run prompt. A program's choice lasts until the pointer enters
+another window.
+
+The theme is any XCursor theme: a folder with a `cursors/` directory, searched for in `~/.local/share/icons`,
+`~/.icons`, `/usr/share/icons`, `/usr/share/pixmaps`, `/usr/share/cursors` and `/usr/share/cursors/xorg-x11`
+(the latter two are where Gentoo's `x11-themes/*cursors` ebuilds install them), or in `$XCURSOR_PATH` if you set
+it. Themes that `Inherits=` another one in their `index.theme` work; shapes a theme lacks fall back to its
+arrow, and with no theme at all rei-wm draws a built-in arrow.
+
+```toml
+[cursor]
+theme = "Adwaita"   # "" = the system default ($XCURSOR_THEME, then "default")
+size = 24           # logical pixels; on a scaled screen the picture is chosen to stay sharp
+```
+
+Choose it in the settings app's **Cursor** tab (with a preview), or edit the file; the change applies at once.
+rei-wm exports `XCURSOR_THEME`, `XCURSOR_SIZE` and `XCURSOR_PATH` to what it starts (and to Xwayland), so X11
+programs and toolkits that load the theme themselves match; programs that were already running keep their old
+one until restarted. `rei-wm --list-cursor-themes` lists the installed themes and
+`rei-wm --cursor-preview out.png --cursor-theme NAME` draws one.
+
 ## Output scale
 
 `[[output]] scale = 2` makes everything on that output twice as large: the toolbar and menus, and

@@ -22,6 +22,8 @@
 #include "proto/xdg_shell.h"
 #include "audio.h"
 #include "battery.h"
+#include "pointer_cursor.h"
+#include "proto/cursor_shape.h"
 #include "proto/fractional_scale.h"
 #include "proto/viewporter.h"
 #include "sessionbus.h"
@@ -61,6 +63,7 @@ static void on_flush(evutil_socket_t fd, short what, void *arg)
 	(void)fd;
 	(void)what;
 	dispatch_wayland(arg);
+	rei_pointer_cursor_refresh(arg);   /* whatever just changed under the pointer may want another shape */
 }
 
 void rei_server_schedule_flush(struct rei_server *s)
@@ -308,6 +311,7 @@ static void sync_output_geometry(struct rei_server *s)
 		rei_render_set_geometry(o->render, o->width, o->height, o->x, o->y, o->scale);
 		rei_wl_output_update(o);
 	}
+	rei_pointer_cursor_reconfigure(s);   /* the pointer is made for the largest output scale */
 	rei_input_clamp_cursor(s);
 	rei_wm_arrange_all(s);  /* Window positions derive from output positions. */
 	rei_server_schedule_flush(s);
@@ -552,7 +556,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 
 	if (wl_display_init_shm(s->display) != 0 || !rei_surface_init(s) ||
 	    !rei_xdg_shell_init(s) || !rei_seat_init(s) || !rei_viewporter_init(s) ||
-	    !rei_fractional_scale_init(s)) {
+	    !rei_fractional_scale_init(s) || !rei_cursor_shape_init(s)) {
 		rei_error("cannot register Wayland globals");
 		goto fail;
 	}
@@ -561,6 +565,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 		rei_error("input: %s", input_err);
 		goto fail;
 	}
+	rei_pointer_cursor_init(s);
 
 	s->wl_event = event_new(s->base, wl_event_loop_get_fd(s->wl_loop),
 				EV_READ | EV_PERSIST, on_wayland_readable, s);
@@ -702,6 +707,7 @@ void rei_server_destroy(struct rei_server *s)
 
 	if (s->display)
 		wl_display_destroy(s->display);
+	rei_pointer_cursor_finish(s);
 	rei_input_finish(s);
 	rei_toolbar_finish(s);
 	rei_wm_finish(s);

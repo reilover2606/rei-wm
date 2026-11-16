@@ -17,6 +17,8 @@ struct rei_server;
 void rei_prompt_open(struct rei_server *server);
 void rei_prompt_close(struct rei_server *server);
 bool rei_prompt_is_open(const struct rei_server *server);
+/* Whether the point is inside the open prompt's box (where the pointer is a text cursor). */
+bool rei_prompt_contains(const struct rei_server *server, double x, double y);
 
 /* A key event while it is open (evdev code). The prompt consumes every key. */
 void rei_prompt_key(struct rei_server *server, uint32_t evdev_code, bool pressed);
