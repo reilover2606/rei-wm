@@ -361,6 +361,35 @@ no output pushes no message; escape sequences are stripped and long output is cu
 - `width` and `font` set the column; the look is the `[theme.messages]` element (`text_color`, the text's
   halo through `shadow_*`, and `color`/`opacity` for the backdrop).
 
+### The top layer (Mod+n) and the music controls
+
+The Mod+n view is a **top layer**. Everything under it is blurred and darkened (`[messages] blur_radius`,
+default 12 pixels, 0 for none; `blur_dim`, default 0.3), and **nothing reaches the windows while it is open**:
+the pointer leaves the window it was over, clicks, motion and the wheel belong to the view, and every key press
+is swallowed (your keybindings and the Ctrl+Alt+F switch still work; a key released after being pressed
+before the view opened is still released in its window, so nothing stays held down). Escape, Mod+n, or a
+click on the blurred background closes it.
+
+At its bottom centre are the **music controls** for MPD: a "Now playing: ..." label and **play**, **pause** and
+**skip** buttons (Space also toggles play/pause). If MPD is not running there are no controls, only a
+**Start MPD** button, which runs `[mpd] start_command` (default `mpd`) and picks the server up as soon as it
+answers. When the song changes, `Now playing: Artist - Title` is added to the messages. The panel keeps clear of
+the message column on a narrow screen. The look is the `[theme.mpd]` element (buttons use `start_button`).
+
+```toml
+[mpd]
+enabled = true
+host = ""           # "" = $MPD_HOST, else $XDG_RUNTIME_DIR/mpd/socket, else localhost; an IP address,
+                    # localhost or a socket path ("password@host" for a password)
+port = 6600
+start_command = "mpd"
+announce = true     # "Now playing: ..." messages
+```
+
+rei-wm speaks MPD's protocol itself (no libmpdclient); it keeps one connection waiting for player changes and
+looks for MPD every two seconds while it is away. Names other than IP addresses and `localhost` are not looked
+up (a lookup would stall the compositor).
+
 ## X resources and urxvt transparency
 
 An X session normally runs `xrdb -merge ~/.Xresources` at startup; under rei-wm nothing does, so Xwayland starts

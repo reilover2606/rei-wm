@@ -248,6 +248,23 @@ int main(int argc, char **argv)
 		CHECK(t.contains("sysinfo = false\n") && t.contains("autostart = false\n"));
 	}
 
+	/* The music tab and the message view's blur. */
+	{
+		MainWindow wm2(path, wm);
+		CHECK(field<QCheckBox>(wm2, "mpd.enabled")->isChecked() && field<QCheckBox>(wm2, "mpd.announce")->isChecked());
+		CHECK(field<QSpinBox>(wm2, "mpd.port")->value() == 6600);
+		CHECK(field<QWidget>(wm2, "mpd.start_command")->findChild<QLineEdit *>("edit")->text() == "mpd");
+		CHECK(field<QSpinBox>(wm2, "messages.blur_radius")->value() == 12);
+		field<QCheckBox>(wm2, "mpd.announce")->setChecked(false);
+		field<QWidget>(wm2, "mpd.host")->findChild<QLineEdit *>("edit")->setText("localhost");
+		field<QSpinBox>(wm2, "messages.blur_radius")->setValue(20);
+		CHECK(wm2.save(&err));
+		QString mt = slurp(path);
+		CHECK(mt.contains("[mpd]\nannounce = false\nhost = \"localhost\"\n"));
+		CHECK(mt.contains("blur_radius = 20\n"));
+		CHECK(wm2.findChild<QWidget *>("theme.mpd.color") != nullptr);   /* and a page in the theme editor */
+	}
+
 	/* The cursor tab: the installed themes (here two made-up ones, found through XCURSOR_PATH), a preview drawn by
 	 * rei-wm, and the choice written as [cursor] theme / size. */
 	{

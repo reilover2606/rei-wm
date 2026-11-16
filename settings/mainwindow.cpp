@@ -54,6 +54,7 @@ MainWindow::MainWindow(const QString &configPath, const QString &compositorBinar
 	tabs->addTab(buildOutputsTab(), tr("Monitors"));
 	tabs->addTab(buildAudioTab(), tr("Audio"));
 	tabs->addTab(buildMessagesTab(), tr("Messages"));
+	tabs->addTab(buildMusicTab(), tr("Music"));
 	tabs->addTab(buildThemeTab(), tr("Theme"));
 	outer->addWidget(tabs);
 
@@ -448,6 +449,32 @@ QWidget *MainWindow::buildMessagesTab()
 	addField(f, tr("Column width (px)"), "messages", "width", Int, 480, {}, 120, 2000);
 	addField(f, tr("Messages kept for the history"), "messages", "history", Int, 200, {}, 1, 5000);
 	addField(f, tr("Font"), "messages", "font", Font, "Sans 12");
+	addField(f, tr("Blur behind the view (px, 0 = none)"), "messages", "blur_radius", Int, 12, {}, 0, 64, 1,
+		 tr("Mod+n is a top layer: the screen under it is blurred and darkened, and nothing reaches the windows."));
+	addField(f, tr("Darken behind the view (0 to 0.9)"), "messages", "blur_dim", Double, 0.3, {}, 0, 0.9, 0.05);
+	v->addLayout(f);
+	v->addStretch(1);
+	return w;
+}
+
+QWidget *MainWindow::buildMusicTab()
+{
+	auto *w = new QWidget;
+	auto *v = new QVBoxLayout(w);
+	auto *hint = new QLabel(tr("Controls for MPD, the music player daemon: play, pause and skip, and the song that is playing, "
+				   "at the bottom centre of the message view (Mod+n). With MPD not running there is a button that "
+				   "starts it. When the song changes, “Now playing: …” is added to the messages."));
+	hint->setWordWrap(true);
+	v->addWidget(hint);
+	auto *f = new QFormLayout;
+	addField(f, tr("Music controls"), "mpd", "enabled", Bool, true);
+	addField(f, tr("Announce a new song in the messages"), "mpd", "announce", Bool, true);
+	addField(f, tr("MPD host"), "mpd", "host", String, "", {}, 0, 0, 1,
+		 tr("Empty: $MPD_HOST, else the socket in $XDG_RUNTIME_DIR/mpd, else localhost. An IP address, localhost "
+		    "or the path of a socket; “password@host” gives a password."));
+	addField(f, tr("MPD port"), "mpd", "port", Int, 6600, {}, 1, 65535);
+	addField(f, tr("Command that starts MPD"), "mpd", "start_command", String, "mpd", {}, 0, 0, 1,
+		 tr("Run by the “Start MPD” button, e.g. “mpd” or “mpd ~/.config/mpd/mpd.conf”."));
 	v->addLayout(f);
 	v->addStretch(1);
 	return w;

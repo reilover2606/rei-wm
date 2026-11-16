@@ -115,6 +115,7 @@ the file are picked up when the config is next reloaded.
 | `sysinfo` | the CPU/RAM box left of the clock | `color`, `text_color`, shape, border |
 | `dialog` | confirmation dialogs | `color`, `text_color`, shape, border, `opacity`, shadow, glow |
 | `menu` | the pop-up window list | `color`, border, shape, `opacity`, shadow |
+| `mpd` | the music controls in the Mod+n view (box; their buttons use `start_button`) | `color`, `text_color`, shape, border, `opacity`, shadow, glow |
 | `battery` | the battery icon: `color` is the level fill, `active_color` the fill while charging (with a bolt), `inactive_color` the fill and text at 15% or less; `border_color`/`border_width` the outline, `shape`/`radius` the cell's corners | `color`, `active_color`, `inactive_color`, `text_color`, border, `shape`, `radius` |
 | `window_text` | not rei-wm's own: the windows of the listed programs (terminals), through a window shader | `apps`, `shader`, `text_glow_*`, `glow_threshold`, `text_blink` (see below) |
 | `menu_row` | one row of a list | `active_color` (hovered row), `text_color`, `active_text_color`, `inactive_text_color` (minimized windows) |

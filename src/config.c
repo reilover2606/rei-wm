@@ -254,6 +254,11 @@ struct rei_config *rei_config_defaults(void)
 	cfg->start_enabled = true;
 	cfg->focus_follows_mouse = true;
 	cfg->cursor_theme = rei_xstrdup("");
+	cfg->mpd_enabled = true;
+	cfg->mpd_host = rei_xstrdup("");
+	cfg->mpd_port = 6600;
+	cfg->mpd_start_command = rei_xstrdup("mpd");
+	cfg->mpd_announce = true;
 	cfg->cursor_size = 24;
 	cfg->start_label = rei_xstrdup("Start");
 	cfg->start_shutdown_command = rei_xstrdup("loginctl poweroff || systemctl poweroff || poweroff");
@@ -268,6 +273,8 @@ struct rei_config *rei_config_defaults(void)
 	cfg->messages_width = 480;
 	cfg->messages_history = 200;
 	cfg->messages_font = rei_xstrdup("Sans 12");
+	cfg->messages_blur_radius = 12;
+	cfg->messages_blur_dim = 0.3;
 	cfg->toolbar_tray_scope = REI_TRAY_SCOPE_WORKSPACE;
 	cfg->toolbar_tray_min_width = 50;
 	cfg->toolbar_font = rei_xstrdup("Sans 11");
@@ -327,6 +334,19 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		const struct toml_value *ffm = get(&r, general, "general.", "focus_follows_mouse", TOML_BOOL);
 		if (ffm)
 			cfg->focus_follows_mouse = ffm->u.b;
+	}
+
+	const struct toml_table *mpd = get_table(&r, root, "mpd");
+	if (mpd) {
+		const struct toml_value *en = get(&r, mpd, "mpd.", "enabled", TOML_BOOL);
+		if (en)
+			cfg->mpd_enabled = en->u.b;
+		const struct toml_value *an = get(&r, mpd, "mpd.", "announce", TOML_BOOL);
+		if (an)
+			cfg->mpd_announce = an->u.b;
+		read_string(&r, mpd, "mpd.", "host", &cfg->mpd_host);
+		read_int(&r, mpd, "mpd.", "port", &cfg->mpd_port, 1, 65535);
+		read_string(&r, mpd, "mpd.", "start_command", &cfg->mpd_start_command);
 	}
 
 	const struct toml_table *cursor = get_table(&r, root, "cursor");
@@ -428,6 +448,8 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		read_int(&r, ms, "messages.", "width", &cfg->messages_width, 120, 2000);
 		read_int(&r, ms, "messages.", "history", &cfg->messages_history, 1, 5000);
 		read_string(&r, ms, "messages.", "font", &cfg->messages_font);
+		read_int(&r, ms, "messages.", "blur_radius", &cfg->messages_blur_radius, 0, 64);
+		read_double(&r, ms, "messages.", "blur_dim", &cfg->messages_blur_dim, 0.0, 0.9);
 	}
 	const struct toml_value *shorts = get(&r, root, "", "shortcut", TOML_ARRAY);
 	if (shorts) {
@@ -692,6 +714,8 @@ void rei_config_free(struct rei_config *cfg)
 	free(cfg->start_logout_command);
 	free(cfg->xresources);
 	free(cfg->cursor_theme);
+	free(cfg->mpd_host);
+	free(cfg->mpd_start_command);
 	free(cfg->start_run_font);
 	free(cfg->messages_font);
 	for (size_t i = 0; i < cfg->n_shortcuts; i++) {

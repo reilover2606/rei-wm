@@ -193,7 +193,7 @@ static void label(cairo_t *cr, const char *text, double x, double y, uint32_t fg
 
 int rei_theme_preview(const struct rei_config *cfg, const char *png_path)
 {
-	const int W = 1000, H = 650;
+	const int W = 1000, H = 685;
 	g_n_items = 0;
 	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, W, H);
 	cairo_t *cr = cairo_create(surface);
@@ -360,6 +360,25 @@ int rei_theme_preview(const struct rei_config *cfg, const char *png_path)
 		blit(cr, pb, 35, y, alphas[i]);
 		rei_pixbuf_unref(pb);
 		y += h2 + 10;
+	}
+
+	/* The music controls (MPD) of the message stack view. */
+	{
+		label(cr, "mpd (music controls)", 450, 558, hint);
+		struct rei_mpd_panel_state ms;
+		memset(&ms, 0, sizeof ms);
+		snprintf(ms.label, sizeof ms.label, "Now playing: Ada - One");
+		ms.running = true;
+		ms.mode = 1;
+		ms.hover = 2;
+		ms.scale = 1;
+		snprintf(ms.font, sizeof ms.font, "%s", cfg->messages_font);
+		ms.box = cfg->theme.e[REI_ELEM_MPD];
+		ms.button = cfg->theme.e[REI_ELEM_START_BUTTON];
+		int mm;
+		struct rei_pixbuf *mp = rei_bar_mpd_render(&ms, &mm);
+		blit(cr, mp, 450 - mm, 566 - mm, 1.0);
+		rei_pixbuf_unref(mp);
 	}
 
 	/* A terminal's window, through the window shader of [theme.window_text] (as if it were one of its apps). */

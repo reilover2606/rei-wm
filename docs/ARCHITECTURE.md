@@ -261,6 +261,12 @@ backend ─ button ─► popup dismissal ─► click-to-focus/raise ─► cli
   Themes are XCursor files read by our own parser (`rei_xcursor_parse`), found via
   `index.theme` `Inherits=` and the older cursor names as aliases (`hand2` for `pointer`...). The decision
   is re-run after every batch of events, so a hover change needs no special hook.
+- **The top layer.** The message stack view (Mod+n) is the topmost thing: the snapshot carries `blur_from` (the index
+  of its first drawable), and the renderer, on reaching it, copies what it has drawn, blurs that (mipmapped down
+  to a quarter, four separable Gaussian passes) and draws it back darkened before the layer goes on top. While it
+  is open `update_pointer`, the button handler, the wheel and the key handler give it everything: no pointer focus,
+  no hover, no key presses to clients. It also holds the music controls (`mpd.c` is the client: a non-blocking
+  connection that sits in `idle player`, sends `noidle` to run a command, reconnects every two seconds).
 - **Popups** that asked for a grab take the keyboard and are told to close
   (`popup_done`) by a click outside them; clicking inside one closes only the
   popups opened after it.

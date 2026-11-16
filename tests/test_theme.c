@@ -69,6 +69,23 @@ int main(void)
 	rei_config_free(c);
 	parse_fails("[theme.dialog]\nglow_size = 100\n", "theme.dialog.glow_size");
 
+	/* The music controls are an element of their own: a dialog-like box, a little see-through. */
+	c = parse_ok("");
+	CHECK_STR(rei_element_name(REI_ELEM_MPD), "mpd");
+	CHECK(c->theme.e[REI_ELEM_MPD].opacity < c->theme.e[REI_ELEM_DIALOG].opacity);
+	CHECK(c->theme.e[REI_ELEM_MPD].shape == REI_SHAPE_ROUNDED && c->theme.e[REI_ELEM_MPD].glow.size > 0);
+	CHECK(c->mpd_enabled && c->mpd_announce && c->mpd_port == 6600 && !strcmp(c->mpd_start_command, "mpd"));
+	CHECK(c->messages_blur_radius == 12 && c->messages_blur_dim > 0.29 && c->messages_blur_dim < 0.31);
+	rei_config_free(c);
+	c = parse_ok("[theme.mpd]\ncolor = \"#123456\"\nradius = 3\n[mpd]\nenabled = false\nhost = \"/run/mpd.sock\"\n"
+		     "port = 6601\nstart_command = \"mpd --no-daemon\"\nannounce = false\n[messages]\nblur_radius = 0\nblur_dim = 0.5\n");
+	CHECK(c->theme.e[REI_ELEM_MPD].color == 0x123456 && c->theme.e[REI_ELEM_MPD].radius == 3);
+	CHECK(!c->mpd_enabled && !c->mpd_announce && c->mpd_port == 6601 && !strcmp(c->mpd_host, "/run/mpd.sock"));
+	CHECK(!strcmp(c->mpd_start_command, "mpd --no-daemon") && c->messages_blur_radius == 0 && c->messages_blur_dim == 0.5);
+	rei_config_free(c);
+	parse_fails("[mpd]\nport = 0\n", "mpd.port");
+	parse_fails("[messages]\nblur_radius = 100\n", "messages.blur_radius");
+
 	/* Text effects: all off by default, except that terminal windows glow a little. */
 	c = parse_ok("");
 	const struct rei_text_fx *fx = &c->theme.e[REI_ELEM_TOOLBAR].text_fx;

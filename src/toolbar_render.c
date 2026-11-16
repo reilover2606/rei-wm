@@ -1274,6 +1274,104 @@ struct rei_pixbuf *rei_bar_volpop_render(const struct rei_volpop_state *st, int 
 	return pb;
 }
 
+/* ---- The music controls ---- */
+
+int rei_bar_mpd_buttons(bool running, struct rei_rect out[3])
+{
+	const int bh = 36, y = REI_MPDP_H - 16 - bh;
+	if (!running) {
+		out[0] = (struct rei_rect){ (REI_MPDP_W - 150) / 2, y, 150, bh };
+		return 1;
+	}
+	const int bw = 86, gap = 12, total = 3 * bw + 2 * gap;
+	for (int i = 0; i < 3; i++)
+		out[i] = (struct rei_rect){ (REI_MPDP_W - total) / 2 + i * (bw + gap), y, bw, bh };
+	return 3;
+}
+
+/* The icons are drawn, not typeset: a triangle, two bars, a triangle against a bar. */
+static void mpd_icon(cairo_t *cr, int which, double cx, double cy)
+{
+	const double h = 9, w = 8;
+	switch (which) {
+	case 0:   /* play */
+		cairo_move_to(cr, cx - w * 0.6, cy - h);
+		cairo_line_to(cr, cx - w * 0.6, cy + h);
+		cairo_line_to(cr, cx + w, cy);
+		cairo_close_path(cr);
+		break;
+	case 1:   /* pause */
+		cairo_rectangle(cr, cx - 6.5, cy - h, 4.5, 2 * h);
+		cairo_rectangle(cr, cx + 2, cy - h, 4.5, 2 * h);
+		break;
+	default:  /* skip */
+		cairo_move_to(cr, cx - 8, cy - h);
+		cairo_line_to(cr, cx - 8, cy + h);
+		cairo_line_to(cr, cx + 3, cy);
+		cairo_close_path(cr);
+		cairo_rectangle(cr, cx + 5, cy - h, 3.5, 2 * h);
+		break;
+	}
+	cairo_fill(cr);
+}
+
+struct rei_pixbuf *rei_bar_mpd_render(const struct rei_mpd_panel_state *st, int *margin_out)
+{
+	int m = shadow_margin(&st->box);
+	*margin_out = m;
+	int scale = st->scale < 1 ? 1 : st->scale;
+	int pw = (REI_MPDP_W + 2 * m) * scale, ph = (REI_MPDP_H + 2 * m) * scale;
+	struct rei_pixbuf *pb = rei_pixbuf_create(pw, ph, false);
+	if (!pb)
+		return NULL;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw, ph);
+	cairo_t *cr = cairo_create(surface);
+	cairo_scale(cr, scale, scale);
+	draw_glow(cr, &st->box, m, m, REI_MPDP_W, REI_MPDP_H, 1.0);
+	draw_box(cr, &st->box, m, m, REI_MPDP_W, REI_MPDP_H, st->box.color, 1.0);
+
+	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
+	set_color(cr, st->box.text_color);
+	PangoLayout *l = make_layout(cr, font, st->label);
+	pango_layout_set_width(l, (REI_MPDP_W - 32) * PANGO_SCALE);
+	pango_layout_set_ellipsize(l, PANGO_ELLIPSIZE_END);
+	pango_layout_set_alignment(l, PANGO_ALIGN_CENTER);
+	pango_layout_set_single_paragraph_mode(l, TRUE);
+	int tw, th;
+	pango_layout_get_pixel_size(l, &tw, &th);
+	cairo_move_to(cr, m + 16, m + 14);
+	show_text(cr, l, &st->box);
+	g_object_unref(l);
+
+	struct rei_rect b[3];
+	int n = rei_bar_mpd_buttons(st->running, b);
+	for (int i = 0; i < n; i++) {
+		/* The play button lights while playing, the pause button while paused. */
+		bool lit = st->running && ((i == 0 && st->mode == 1) || (i == 1 && st->mode == 2));
+		uint32_t fill = lit ? st->button.active_color : st->button.color;
+		if (st->hover == i)
+			fill = rei_bar_mix(fill, st->button.text_color, 0.15);
+		draw_box(cr, &st->button, m + b[i].x, m + b[i].y, b[i].w, b[i].h, fill, 1.0);
+		set_color(cr, lit ? st->button.active_text_color : st->button.text_color);
+		if (st->running)
+			mpd_icon(cr, i, m + b[i].x + b[i].w / 2.0, m + b[i].y + b[i].h / 2.0);
+		else
+			draw_centered(cr, font, "Start MPD", m + b[i].x + b[i].w / 2.0, m + b[i].y + b[i].h / 2.0, &st->button);
+	}
+	pango_font_description_free(font);
+
+	cairo_destroy(cr);
+	cairo_surface_flush(surface);
+	text_layers_finish(pb, surface);
+	const uint8_t *src = cairo_image_surface_get_data(surface);
+	int stride = cairo_image_surface_get_stride(surface);
+	for (int y = 0; y < pb->height; y++)
+		memcpy(pb->data + (size_t)y * (size_t)pb->width * 4, src + (size_t)y * (size_t)stride,
+		       (size_t)pb->width * 4);
+	cairo_surface_destroy(surface);
+	return pb;
+}
+
 /* ---- The confirmation dialog ---- */
 
 void rei_bar_confirm_buttons(struct rei_rect out[2])

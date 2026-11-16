@@ -20,6 +20,7 @@ core_sources = files(
   'confirm.c',
   'theme_cli.c',
   'msgbuf.c',
+  'mpd.c',
   'proto/viewporter.c',
   'proto/fractional_scale.c',
   'volpop.c',

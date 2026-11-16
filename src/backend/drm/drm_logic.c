@@ -244,6 +244,8 @@ const struct rei_drawable *rei_drm_scanout_candidate(const struct rei_scene_snap
 {
 	/* The topmost drawable that touches this output decides: anything above
 	 * the candidate would have to be composed over it. */
+	if (snap->blur_radius > 0)
+		return NULL;   /* a blurred background is the renderer's work */
 	for (size_t i = snap->n_items; i-- > 0;) {
 		const struct rei_drawable *d = &snap->items[i];
 		if (!rects_intersect(d->x, d->y, d->w, d->h, out->x, out->y, out->w, out->h))

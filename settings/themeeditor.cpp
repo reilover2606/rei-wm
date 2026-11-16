@@ -48,6 +48,7 @@ const ElementInfo kElements[] = {
 	{ "sysinfo", "CPU/RAM readout", "The box left of the clock." },
 	{ "dialog", "Dialogs", "Confirmation dialogs (the box; their buttons use the Start button's look)." },
 	{ "battery", "Battery", "The battery icon: colour = level, active = charging, inactive = low." },
+	{ "mpd", "Music controls (MPD)", "The now-playing box with play, pause and skip, at the bottom of the message stack view (Mod+n). Its buttons use the Start button's look." },
 	{ "window_text", "Window text (terminals)", "Not rei-wm's own text: the windows of the listed programs are drawn through a "
 	  "fragment shader that makes their bright pixels (a terminal's text) glow. Size 0 turns it off." },
 };

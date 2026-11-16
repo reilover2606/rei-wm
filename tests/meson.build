@@ -214,3 +214,9 @@ textfx_test = executable('test_textfx', 'test_textfx.c', xdg_shell_client_h, xdg
   dependencies: [wayland_client, m_dep],
 )
 test('textfx', textfx_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 120)
+
+mpd_test = executable('test_mpd', 'test_mpd.c',
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep, rei_core_dep],
+)
+test('mpd', mpd_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 120)

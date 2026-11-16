@@ -26,6 +26,11 @@ bool rei_msg_stack_open(const struct rei_server *server);
 void rei_msg_stack_close(struct rei_server *server);
 /* Whether (x, y) is on the open stack view. */
 bool rei_msg_stack_at(const struct rei_server *server, double x, double y);
+/* The pointer over the open stack view: which music button it is on (hover highlight), and a press (a button,
+ * or a click on the blurred background, which closes it). */
+void rei_msg_stack_motion(struct rei_server *server, double x, double y);
+int rei_msg_stack_hover(const struct rei_server *server);   /* the button index, or -1 */
+void rei_msg_stack_press(struct rei_server *server, double x, double y);
 /* The wheel over the stack view: positive scrolls toward newer messages, negative toward older ones. */
 void rei_msg_stack_scroll(struct rei_server *server, double value);
 

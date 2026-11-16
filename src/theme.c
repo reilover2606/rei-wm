@@ -10,7 +10,7 @@
 #include "util/util.h"
 
 static const char *const element_names[REI_ELEM_COUNT] = {
-	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "start_button", "run_prompt", "messages", "sysinfo", "dialog", "battery", "window_text",
+	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "start_button", "run_prompt", "messages", "sysinfo", "dialog", "battery", "mpd", "window_text",
 };
 bool rei_element_iconable(enum rei_element e)
 {
@@ -149,6 +149,12 @@ void rei_theme_defaults(struct rei_theme *t, uint32_t bg, uint32_t fg, uint32_t 
 	dlg->shadow = (struct rei_shadow){ 0x000000, 0.5f, 0, 6, 24 };
 	dlg->glow = (struct rei_glow){ 0xffffff, 0.5f, 12 };
 
+	/* The music controls: a dialog-like box, a little more see-through (the blurred screen shows through). */
+	struct rei_style *mpd = &t->e[REI_ELEM_MPD];
+	*mpd = t->e[REI_ELEM_DIALOG];
+	mpd->opacity = 0.92f;
+	mpd->radius = 14;
+
 	/* The battery icon: its level fill, a green one while charging, a red one when low. The outline
 	 * is the border. */
 	struct rei_style *bat = &t->e[REI_ELEM_BATTERY];
@@ -214,7 +220,7 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				idx = e;
 		if (idx < 0) {
 			snprintf(err, errlen, "theme.%s: unknown element (known: toolbar, workspace_button, "
-				 "tray_tile, tray_overflow, tooltip, menu, menu_row, start_button, run_prompt, messages, sysinfo, dialog, battery, window_text)", el->key);
+				 "tray_tile, tray_overflow, tooltip, menu, menu_row, start_button, run_prompt, messages, sysinfo, dialog, battery, mpd, window_text)", el->key);
 			return false;
 		}
 		if (el->val->type != TOML_TABLE) {
