@@ -270,22 +270,59 @@ static bool find_pw_socket(char *out, size_t n, bool log_tried)
 {
 	const char *remote = getenv("PIPEWIRE_REMOTE");
 	const char *name = remote && remote[0] ? remote : "pipewire-0";
-	if (name[0] == '/') {
-		snprintf(out, n, "%s", name);
-		return access(out, F_OK) == 0;
-	}
 	char fallback[64];
 	snprintf(fallback, sizeof fallback, "/run/user/%u", (unsigned)getuid());
 	const char *dirs[] = { getenv("PIPEWIRE_RUNTIME_DIR"), getenv("XDG_RUNTIME_DIR"), fallback };
-	char tried[1300] = "";
-	for (size_t i = 0; i < sizeof dirs / sizeof dirs[0]; i++) {
-		if (!dirs[i] || !dirs[i][0])
+
+	char candidates[4][600];
+	size_t nc = 0;
+	if (name[0] == '/') {
+		snprintf(candidates[nc++], sizeof candidates[0], "%s", name);
+	} else {
+		for (size_t i = 0; i < sizeof dirs / sizeof dirs[0]; i++)
+			if (dirs[i] && dirs[i][0])
+				snprintf(candidates[nc++], sizeof candidates[0], "%s/%s", dirs[i], name);
+	}
+
+	/* The best socket is one we own and may use. A socket owned by root is suspect (PipeWire was
+	 * started as root, or the runtime directory was made by a root process), and one we cannot
+	 * read and write is useless: prefer another candidate, and say so if that is all there is. */
+	int usable = -1, odd = -1;
+	char tried[2500] = "";
+	for (size_t i = 0; i < nc; i++) {
+		struct stat st;
+		if (stat(candidates[i], &st) != 0) {
+			size_t used = strlen(tried);
+			snprintf(tried + used, sizeof tried - used, "%s%s", used ? ", " : "", candidates[i]);
 			continue;
-		snprintf(out, n, "%s/%s", dirs[i], name);
-		if (access(out, F_OK) == 0)
-			return true;
-		size_t used = strlen(tried);
-		snprintf(tried + used, sizeof tried - used, "%s%s", used ? ", " : "", out);
+		}
+		bool mine = st.st_uid == getuid();
+		bool usable_by_us = access(candidates[i], R_OK | W_OK) == 0;
+		if (mine && usable_by_us) {
+			usable = (int)i;
+			break;
+		}
+		if (odd < 0 || usable_by_us)
+			odd = (int)i;
+		if (log_tried)
+			rei_warn("audio: %s is owned by %s (uid %u, mode %o) and rei-wm runs as uid %u%s",
+				 candidates[i], st.st_uid == 0 ? "root" : "another user", (unsigned)st.st_uid,
+				 (unsigned)(st.st_mode & 07777), (unsigned)getuid(),
+				 usable_by_us ? "; trying it anyway" : ", and cannot use it");
+	}
+	int pick = usable >= 0 ? usable : odd;
+	if (pick >= 0) {
+		snprintf(out, n, "%s", candidates[pick]);
+		struct stat st;
+		/* A root-owned socket we cannot read and write cannot work: do not even try. */
+		if (usable < 0 && stat(out, &st) == 0 && access(out, R_OK | W_OK) != 0) {
+			if (log_tried)
+				rei_warn("audio: the volume widget is off. Restart PipeWire as your own user "
+					 "(it should not run as root); rei-wm checks again every few seconds");
+			out[0] = '\0';
+			return false;
+		}
+		return true;
 	}
 	if (log_tried)
 		rei_info("audio: no PipeWire socket found (looked for %s)", tried[0] ? tried : name);
