@@ -11,6 +11,7 @@
 #include <spa/pod/parser.h>
 #include <spa/utils/json.h>
 #include <stdio.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
@@ -303,12 +304,21 @@ static bool connect_pw(struct rei_audio *a)
 	a->context = pw_context_new(a->loop, NULL, 0);
 	if (!a->context)
 		return false;
+	{   /* Who owns the socket, and can we use it? (A root-owned one would explain a refused connection.) */
+		struct stat st;
+		if (stat(sock, &st) == 0)
+			rei_info("audio: %s is owned by uid %u gid %u, mode %o (rei-wm runs as uid %u)%s", sock,
+				 (unsigned)st.st_uid, (unsigned)st.st_gid, (unsigned)(st.st_mode & 07777),
+				 (unsigned)getuid(),
+				 access(sock, R_OK | W_OK) != 0 ? ": NOT readable and writable by rei-wm" : "");
+	}
 	/* Name the socket explicitly: it may not be where libpipewire would look. */
 	struct pw_properties *props = pw_properties_new(PW_KEY_REMOTE_NAME, sock, NULL);
 	a->core = pw_context_connect(a->context, props, 0);   /* takes the properties */
 	if (a->core)
 		rei_info("audio: PipeWire socket %s", sock);
 	if (!a->core) {
+		rei_info("audio: connecting to %s failed: %s", sock, strerror(errno));
 		pw_context_destroy(a->context);
 		a->context = NULL;
 		return false;
