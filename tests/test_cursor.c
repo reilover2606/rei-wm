@@ -347,6 +347,16 @@ int main(int argc, char **argv)
 	expect_cursor("not remembered", 403, 303, 255, 0, 0);
 
 	CHECK(stop_compositor() == 0);
+	/* The animation and the pointer's moves redraw by copying the last scene, not by rebuilding it. */
+	{
+		char *log = slurp(g_log);
+		const char *p = log ? strstr(log, "summary scene_builds=") : NULL;
+		unsigned long long builds = 0, redraws = 0;
+		CHECK(p && sscanf(p, "summary scene_builds=%llu cursor_redraws=%llu", &builds, &redraws) == 2);
+		fprintf(stderr, "scene builds %llu, pointer-only redraws %llu\n", builds, redraws);
+		CHECK(redraws >= 8 && redraws > builds);
+		free(log);
+	}
 	printf("test_cursor: ok\n");
 	return 0;
 }

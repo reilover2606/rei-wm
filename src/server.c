@@ -200,17 +200,42 @@ void rei_server_cursor_moved(struct rei_server *s)
 {
 	if (s->backend && s->backend->impl->cursor_moved && s->backend->impl->cursor_moved(s->backend))
 		return;
-	rei_server_schedule_damage(s);
+	if (s->shutting_down)
+		return;
+	/* Only the pointer changed: the last snapshot with a new pointer is enough, no need to walk every window
+	 * again. (If something else is waiting to be drawn, the full rebuild that is coming covers this too.) */
+	s->cursor_redraw_pending = true;
+	event_active(s->damage_event, 0, 0);
 }
 
 void rei_server_flush_damage(struct rei_server *s)
 {
-	if (!s->damage_pending)
-		return;
+	if (!s->damage_pending) {
+		if (!s->cursor_redraw_pending)
+			return;
+		s->cursor_redraw_pending = false;
+		if (!s->last_snapshot) {
+			s->damage_pending = true;   /* nothing to copy yet */
+		} else {
+			struct rei_scene_snapshot *snap = rei_snapshot_clone(s->last_snapshot, ++s->scene_serial);
+			rei_scene_apply_cursor(s, snap);
+			struct rei_output *o;
+			wl_list_for_each(o, &s->outputs, link)
+				rei_render_submit(o->render, snap);
+			rei_snapshot_unref(s->last_snapshot);
+			s->last_snapshot = snap;
+			s->cursor_redraws++;
+			return;
+		}
+	}
 	s->damage_pending = false;
+	s->cursor_redraw_pending = false;
 
 	uint64_t serial = ++s->scene_serial;
 	struct rei_scene_snapshot *snap = rei_scene_build(s, serial);
+	s->scene_builds++;
+	rei_snapshot_unref(s->last_snapshot);
+	s->last_snapshot = rei_snapshot_ref(snap);
 
 	if (wl_list_empty(&s->outputs)) {
 		/* Nothing will ever present this; don't leave clients waiting. */
@@ -658,6 +683,10 @@ void rei_server_destroy(struct rei_server *s)
 	if (!s)
 		return;
 	s->shutting_down = true;
+	rei_info("summary scene_builds=%llu cursor_redraws=%llu", (unsigned long long)s->scene_builds,
+		 (unsigned long long)s->cursor_redraws);
+	rei_snapshot_unref(s->last_snapshot);
+	s->last_snapshot = NULL;
 
 	struct rei_output *o;
 	wl_list_for_each(o, &s->outputs, link) {

@@ -46,6 +46,9 @@ struct rei_scene_snapshot {
 };
 
 struct rei_scene_snapshot *rei_snapshot_create(uint64_t serial);
+/* A copy of `from` (sharing its pictures) with a new serial: for a change that only moves or changes the
+ * pointer, so the whole scene need not be rebuilt. */
+struct rei_scene_snapshot *rei_snapshot_clone(const struct rei_scene_snapshot *from, uint64_t serial);
 struct rei_scene_snapshot *rei_snapshot_ref(struct rei_scene_snapshot *s);
 void rei_snapshot_unref(struct rei_scene_snapshot *s);
 

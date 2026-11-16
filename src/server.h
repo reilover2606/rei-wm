@@ -53,6 +53,9 @@ struct rei_server {
 	struct event *sigusr2_event;
 	struct event *damage_event;  /* Coalesced "scene changed". */
 	bool damage_pending;
+	uint64_t scene_builds, cursor_redraws;   /* for the summary at exit: full rebuilds vs. pointer-only copies */
+	bool cursor_redraw_pending;   /* only the pointer changed since the last snapshot */
+	struct rei_scene_snapshot *last_snapshot;   /* what was last submitted (a reference) */
 	bool shutting_down;
 
 	struct rei_msgq inbox;  /* render threads -> event thread */
