@@ -4,7 +4,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <stdlib.h>
+
 #include "config.h"
+#include "render/gles.h"
+#include "shader.h"
+#include "snapshot.h"
 #include "toolbar.h"
 #include "util/util.h"
 
@@ -32,6 +37,18 @@ static void print_theme(const struct rei_theme *theme)
 		printf("%s.glow_color=#%06x\n", n, s->glow.color);
 		printf("%s.glow_size=%g\n", n, s->glow.size);
 		printf("%s.glow_opacity=%g\n", n, s->glow.opacity);
+		printf("%s.text_glow_size=%g\n", n, s->text_fx.glow_size);
+		printf("%s.text_glow_strength=%g\n", n, s->text_fx.glow_strength);
+		printf("%s.text_glow_color=#%06x\n", n, s->text_fx.glow_color);
+		printf("%s.text_glow_tint=%g\n", n, s->text_fx.glow_tint);
+		printf("%s.text_blink=%g\n", n, s->text_fx.blink);
+		printf("%s.text_shine=%g\n", n, s->text_fx.shine);
+		printf("%s.text_shine_color=#%06x\n", n, s->text_fx.shine_color);
+		if (e == REI_ELEM_WINDOW_TEXT) {
+			printf("%s.apps=%s\n", n, theme->window_apps);
+			printf("%s.shader=%s\n", n, theme->window_shader);
+			printf("%s.glow_threshold=%g\n", n, theme->window_threshold);
+		}
 		if (rei_element_iconable((enum rei_element)e)) {
 			printf("%s.icon=%s\n", n, s->icon ? "true" : "false");
 			printf("%s.icon_size=%g\n", n, s->icon_size);
@@ -53,15 +70,115 @@ void rei_theme_print_defaults(const struct rei_config *cfg)
 
 /* ------------------------------------------------------------------------ */
 
+/* The pictures of the preview, in the order they go on top of each other. They are composed at the end by the
+ * real renderer, so that what a shader does to text (glow, shine) shows as it will on screen. */
+struct item {
+	struct rei_pixbuf *pb;
+	double x, y, alpha;
+	struct rei_fx fx;   /* for a sample window */
+};
+static struct item g_items[64];
+static int g_n_items;
+
 static void blit(cairo_t *cr, const struct rei_pixbuf *pb, double x, double y, double alpha)
 {
-	if (!pb)
+	(void)cr;
+	if (!pb || g_n_items == (int)REI_ARRAY_LEN(g_items))
 		return;
+	g_items[g_n_items++] = (struct item){ rei_pixbuf_ref((struct rei_pixbuf *)pb), x, y, alpha, { 0 } };
+}
+
+/* Without OpenGL: the pictures painted one over the other, text layers as plain text. */
+static void paint_item(cairo_t *cr, const struct rei_pixbuf *pb, double x, double y, double alpha, bool upper_half)
+{
+	int h = upper_half ? pb->height / 2 : pb->height;
 	cairo_surface_t *s = cairo_image_surface_create_for_data((unsigned char *)pb->data, CAIRO_FORMAT_ARGB32,
-								 pb->width, pb->height, pb->width * 4);
+								 pb->width, h, pb->width * 4);
 	cairo_set_source_surface(cr, s, x, y);
 	cairo_paint_with_alpha(cr, alpha);
 	cairo_surface_destroy(s);
+}
+
+/* Composes the base picture and the items into `surface`. */
+static void compose(cairo_surface_t *surface, int W, int H)
+{
+	cairo_surface_flush(surface);
+	struct rei_gles *g = rei_gles_create(NULL);
+	struct rei_pixbuf *base = g ? rei_pixbuf_create_uninit(W, H, true) : NULL;
+	if (base) {
+		const uint8_t *src = cairo_image_surface_get_data(surface);
+		int stride = cairo_image_surface_get_stride(surface);
+		for (int y = 0; y < H; y++)
+			memcpy(base->data + (size_t)y * (size_t)W * 4, src + (size_t)y * (size_t)stride, (size_t)W * 4);
+		struct rei_scene_snapshot *snap = rei_snapshot_create(1);
+		rei_snapshot_add(snap, base, 0, 0, (float)W, (float)H, true);
+		for (int i = 0; i < g_n_items; i++) {
+			const struct item *it = &g_items[i];
+			size_t first = snap->n_items;
+			rei_snapshot_add(snap, it->pb, (float)it->x, (float)it->y, (float)it->pb->width,
+					 (float)it->pb->height, false);
+			rei_snapshot_set_alpha_from(snap, first, (float)it->alpha);
+			rei_snapshot_set_fx_from(snap, first, &it->fx);
+		}
+		struct rei_gles_target target = { .width = W, .height = H, .scale = 1.0 };
+		uint8_t *rgba = rei_xcalloc((size_t)W * (size_t)H, 4);
+		bool ok = rei_gles_draw(g, snap, &target) && rei_gles_read_pixels(g, rgba);
+		rei_snapshot_unref(snap);
+		rei_pixbuf_unref(base);
+		if (ok) {
+			uint8_t *dst = cairo_image_surface_get_data(surface);
+			int stride2 = cairo_image_surface_get_stride(surface);
+			for (int y = 0; y < H; y++)
+				for (int x = 0; x < W; x++) {
+					const uint8_t *p = rgba + ((size_t)y * (size_t)W + (size_t)x) * 4;
+					uint8_t *q = dst + (size_t)y * (size_t)stride2 + (size_t)x * 4;
+					q[0] = p[2]; q[1] = p[1]; q[2] = p[0]; q[3] = 255;
+				}
+			cairo_surface_mark_dirty(surface);
+		}
+		free(rgba);
+		rei_gles_destroy(g);
+		if (ok)
+			return;
+	} else if (g) {
+		rei_gles_destroy(g);
+	}
+	cairo_t *cr = cairo_create(surface);
+	for (int i = 0; i < g_n_items; i++) {
+		const struct item *it = &g_items[i];
+		paint_item(cr, it->pb, it->x, it->y, it->alpha, false);
+		for (int k = 0; k < it->pb->n_layers; k++)
+			paint_item(cr, it->pb->layers[k].pix, it->x, it->y, it->alpha, true);
+	}
+	cairo_destroy(cr);
+}
+
+/* A stand-in for a terminal window, for [theme.window_text]: a few lines of bright text on black. */
+static struct rei_pixbuf *sample_terminal(int w, int h)
+{
+	struct rei_pixbuf *pb = rei_pixbuf_create(w, h, true);
+	if (!pb)
+		return NULL;
+	cairo_surface_t *s = cairo_image_surface_create_for_data(pb->data, CAIRO_FORMAT_RGB24, w, h, w * 4);
+	cairo_t *cr = cairo_create(s);
+	cairo_set_source_rgb(cr, 0.03, 0.03, 0.05);
+	cairo_paint(cr);
+	cairo_select_font_face(cr, "monospace", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+	cairo_set_font_size(cr, 13);
+	static const struct { const char *text; double r, g, b; } lines[] = {
+		{ "scribe@thinkpad ~ $ ls --color", 0.35, 1.0, 0.45 },
+		{ "Documents  Music  rei-wm  notes.txt", 0.45, 0.75, 1.0 },
+		{ "scribe@thinkpad ~ $ echo glow", 0.35, 1.0, 0.45 },
+		{ "glow", 0.95, 0.95, 0.95 },
+	};
+	for (size_t i = 0; i < REI_ARRAY_LEN(lines); i++) {
+		cairo_set_source_rgb(cr, lines[i].r, lines[i].g, lines[i].b);
+		cairo_move_to(cr, 10, 20 + 18.0 * (double)i);
+		cairo_show_text(cr, lines[i].text);
+	}
+	cairo_destroy(cr);
+	cairo_surface_destroy(s);
+	return pb;
 }
 
 static void label(cairo_t *cr, const char *text, double x, double y, uint32_t fg)
@@ -75,7 +192,8 @@ static void label(cairo_t *cr, const char *text, double x, double y, uint32_t fg
 
 int rei_theme_preview(const struct rei_config *cfg, const char *png_path)
 {
-	const int W = 1000, H = 540;
+	const int W = 1000, H = 650;
+	g_n_items = 0;
 	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, W, H);
 	cairo_t *cr = cairo_create(surface);
 	uint32_t bg = cfg->background_rgb;
@@ -243,7 +361,25 @@ int rei_theme_preview(const struct rei_config *cfg, const char *png_path)
 		y += h2 + 10;
 	}
 
+	/* A terminal's window, through the window shader of [theme.window_text] (as if it were one of its apps). */
+	label(cr, "window_text: a window of one of its apps (urxvt)", 10, 558, hint);
+	struct rei_pixbuf *term = sample_terminal(420, 84);
+	if (term) {
+		blit(cr, term, 10, 562, 1.0);
+		char serr[300];
+		const struct rei_shader *sh = rei_shader_named(cfg->theme.window_shader, serr, sizeof serr);
+		const struct rei_text_fx *wfx = &cfg->theme.e[REI_ELEM_WINDOW_TEXT].text_fx;
+		bool custom = strcmp(cfg->theme.window_shader, "glow") != 0;
+		if (sh && (custom || (wfx->glow_size > 0 && wfx->glow_strength > 0) || wfx->blink > 0))
+			rei_fx_for_window(wfx, cfg->theme.window_threshold, sh, &g_items[g_n_items - 1].fx);
+		rei_pixbuf_unref(term);
+	}
+
 	cairo_destroy(cr);
+	compose(surface, W, H);
+	for (int i = 0; i < g_n_items; i++)
+		rei_pixbuf_unref(g_items[i].pb);
+	g_n_items = 0;
 	cairo_status_t rc = cairo_surface_write_to_png(surface, png_path);
 	cairo_surface_destroy(surface);
 	rei_bar_render_cleanup();

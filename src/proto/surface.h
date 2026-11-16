@@ -79,6 +79,7 @@ struct rei_surface {
 	struct rei_pixbuf *content;
 	struct rei_dmabuf *dmabuf;
 	struct rei_buffer_lease *lease;
+	uint64_t content_serial;   /* A new number each time the content changes (a client reuses its GPU buffers). */
 	int32_t scale, transform;
 	int32_t dst_w, dst_h;   /* wp_viewport destination; -1 when none */
 	int32_t src_w, src_h;   /* wp_viewport source size; -1 when none */

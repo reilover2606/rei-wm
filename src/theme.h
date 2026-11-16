@@ -46,6 +46,17 @@ struct rei_glow {
 	float size;       /* how far it reaches, pixels; 0 = no glow */
 };
 
+/* Effects on an element's text, drawn by a fragment shader. Each is off at 0. */
+struct rei_text_fx {
+	float glow_size;      /* how far the light around the letters reaches, pixels; 0 = none */
+	float glow_strength;  /* 0..4 */
+	uint32_t glow_color;  /* 0xRRGGBB ... */
+	float glow_tint;      /* ...and how much of it: 0 = the glow has the text's own colour, 1 = entirely this one */
+	float blink;          /* seconds per on/off cycle; 0 = steady */
+	float shine;          /* 0..1: a metallic highlight over the upper half of the letters */
+	uint32_t shine_color;
+};
+
 struct rei_style {
 	uint32_t color, active_color, inactive_color;                  /* 0xRRGGBB */
 	uint32_t text_color, active_text_color, inactive_text_color;
@@ -58,6 +69,7 @@ struct rei_style {
 	bool icon;            /* Iconable elements only: show an icon at the front (default on) */
 	float icon_size;      /* ...this many pixels square, at most 64; 0 = fit the element */
 	struct rei_glow glow;  /* a soft halo outside the element (hovered rows, dialogs, the Run prompt) */
+	struct rei_text_fx text_fx;
 };
 
 enum rei_element {
@@ -74,6 +86,8 @@ enum rei_element {
 	REI_ELEM_SYSINFO,           /* the CPU/RAM box: color, text_color, shape, border */
 	REI_ELEM_DIALOG,            /* confirmation dialogs: the box (buttons use start_button) */
 	REI_ELEM_BATTERY,           /* the battery icon: color (level), active_color (charging), inactive_color (low) */
+	REI_ELEM_WINDOW_TEXT,       /* not rei-wm's own: the windows of the programs in `apps` (terminals), shaded by a
+	                             * window shader. Only the text effects (glow, blink), apps, shader and glow threshold apply */
 	REI_ELEM_COUNT,
 };
 
@@ -82,7 +96,14 @@ bool rei_element_iconable(enum rei_element e);
 
 struct rei_theme {
 	struct rei_style e[REI_ELEM_COUNT];
+	/* [theme.window_text]: which windows, and through which shader. */
+	char window_apps[256];     /* app ids / X11 classes, comma separated, case-insensitive; "*" = every window */
+	char window_shader[256];   /* "glow" (built in) or the path of a GLSL file */
+	float window_threshold;    /* 0..1: how bright a pixel must be to glow (keeps a dark background dark) */
 };
+
+/* Whether a window of this application is shaded per [theme.window_text] (and the effect is not all off). */
+bool rei_theme_window_matches(const struct rei_theme *t, const char *app_id);
 
 const char *rei_element_name(enum rei_element e);   /* "tray_tile", ... */
 const char *rei_shape_name(enum rei_shape s);

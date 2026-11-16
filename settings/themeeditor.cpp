@@ -10,6 +10,7 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QPixmap>
 #include <QProcess>
@@ -47,6 +48,8 @@ const ElementInfo kElements[] = {
 	{ "sysinfo", "CPU/RAM readout", "The box left of the clock." },
 	{ "dialog", "Dialogs", "Confirmation dialogs (the box; their buttons use the Start button's look)." },
 	{ "battery", "Battery", "The battery icon: colour = level, active = charging, inactive = low." },
+	{ "window_text", "Window text (terminals)", "Not rei-wm's own text: the windows of the listed programs are drawn through a "
+	  "fragment shader that makes their bright pixels (a terminal's text) glow. Size 0 turns it off." },
 };
 
 struct PropInfo {
@@ -85,6 +88,28 @@ const PropInfo kGlow[] = {
 	{ "glow_color", "Glow colour", "color", 0, 0, 0, 0 },
 	{ "glow_size", "Glow size (px, 0 = none)", "number", 0, 60, 1, 1 },
 	{ "glow_opacity", "Glow opacity", "number", 0, 1, 0.05, 2 },
+};
+
+/* Effects on an element's text, drawn by a fragment shader. Each is off at 0. */
+const PropInfo kTextFx[] = {
+	{ "text_glow_size", "Glow size (px, 0 = none)", "number", 0, 40, 1, 1 },
+	{ "text_glow_strength", "Glow strength", "number", 0, 4, 0.1, 2 },
+	{ "text_glow_tint", "Glow tint (0 = the text's own colour)", "number", 0, 1, 0.05, 2 },
+	{ "text_glow_color", "Glow tint colour", "color", 0, 0, 0, 0 },
+	{ "text_blink", "Blink (seconds per cycle, 0 = steady)", "number", 0, 30, 0.1, 2 },
+	{ "text_shine", "Metallic shine (0 = none)", "number", 0, 1, 0.05, 2 },
+	{ "text_shine_color", "Shine colour", "color", 0, 0, 0, 0 },
+};
+/* [theme.window_text]: the window shader for terminals. */
+const PropInfo kWindowText[] = {
+	{ "apps", "Programs (app ids / X11 classes, comma separated; * = all)", "string", 0, 0, 0, 0 },
+	{ "shader", "Shader (\"glow\", or the path of a GLSL file)", "string", 0, 0, 0, 0 },
+	{ "text_glow_size", "Glow size (px, 0 = none)", "number", 0, 40, 1, 1 },
+	{ "text_glow_strength", "Glow strength", "number", 0, 4, 0.1, 2 },
+	{ "glow_threshold", "Only pixels brighter than (0..1)", "number", 0, 1, 0.05, 2 },
+	{ "text_glow_tint", "Glow tint (0 = the text's own colour)", "number", 0, 1, 0.05, 2 },
+	{ "text_glow_color", "Glow tint colour", "color", 0, 0, 0, 0 },
+	{ "text_blink", "Blink (seconds per cycle, 0 = steady)", "number", 0, 30, 0.1, 2 },
 };
 
 QString normalized(const QString &kind, const QString &v)
@@ -235,6 +260,11 @@ void ThemeEditor::buildPage(const QString &element, bool iconable)
 				const QString nm = pi.name;
 				connect(c, &QComboBox::currentTextChanged, this, [this, element, nm] { touch(element, nm); });
 				w = c;
+			} else if (p.kind == "string") {
+				auto *e = new QLineEdit;
+				const QString nm = pi.name;
+				connect(e, &QLineEdit::textChanged, this, [this, element, nm] { touch(element, nm); });
+				w = e;
 			} else {
 				auto *s = new QDoubleSpinBox;
 				s->setRange(pi.lo, pi.hi);
@@ -267,11 +297,16 @@ void ThemeEditor::buildPage(const QString &element, bool iconable)
 		}
 		v->addWidget(box);
 	};
-	group(tr("Colours"), kColors, sizeof kColors / sizeof *kColors);
-	group(tr("Text colours"), kText, sizeof kText / sizeof *kText);
-	group(tr("Shape, fill and border"), kShape, sizeof kShape / sizeof *kShape);
-	group(tr("Shadow"), kShadow, sizeof kShadow / sizeof *kShadow);
-	group(tr("Glow"), kGlow, sizeof kGlow / sizeof *kGlow);
+	if (element == "window_text") {
+		group(tr("Window shader"), kWindowText, sizeof kWindowText / sizeof *kWindowText);
+	} else {
+		group(tr("Colours"), kColors, sizeof kColors / sizeof *kColors);
+		group(tr("Text colours"), kText, sizeof kText / sizeof *kText);
+		group(tr("Text effects (glow, blink, shine)"), kTextFx, sizeof kTextFx / sizeof *kTextFx);
+		group(tr("Shape, fill and border"), kShape, sizeof kShape / sizeof *kShape);
+		group(tr("Shadow"), kShadow, sizeof kShadow / sizeof *kShadow);
+		group(tr("Glow"), kGlow, sizeof kGlow / sizeof *kGlow);
+	}
 	if (iconable) {
 		auto *box = new QGroupBox(tr("Icon"));
 		auto *form = new QFormLayout(box);
@@ -343,6 +378,8 @@ QString ThemeEditor::valueOf(const Prop &p) const
 		raw = static_cast<QComboBox *>(p.widget)->currentText();
 	else if (p.kind == "bool")
 		raw = static_cast<QCheckBox *>(p.widget)->isChecked() ? "true" : "false";
+	else if (p.kind == "string")
+		raw = static_cast<QLineEdit *>(p.widget)->text();
 	else
 		raw = QString::number(static_cast<QDoubleSpinBox *>(p.widget)->value(), 'g', 6);
 	return normalized(p.kind, raw);
@@ -356,6 +393,8 @@ void ThemeEditor::setValue(Prop &p, const QString &text)
 		static_cast<QComboBox *>(p.widget)->setCurrentText(text);
 	else if (p.kind == "bool")
 		static_cast<QCheckBox *>(p.widget)->setChecked(text == "true");
+	else if (p.kind == "string")
+		static_cast<QLineEdit *>(p.widget)->setText(text);
 	else
 		static_cast<QDoubleSpinBox *>(p.widget)->setValue(text.toDouble());
 }

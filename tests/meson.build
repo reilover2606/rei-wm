@@ -208,3 +208,9 @@ cursor_test = executable('test_cursor', 'test_cursor.c', cursor_shape_client_h, 
   dependencies: [wayland_client, m_dep, rei_core_dep],
 )
 test('cursor', cursor_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+
+textfx_test = executable('test_textfx', 'test_textfx.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('textfx', textfx_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 120)

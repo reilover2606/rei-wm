@@ -248,6 +248,8 @@ static void apply_state(struct rei_surface *s, struct rei_surface_state *st)
 		s->content = st->content;
 		s->dmabuf = st->dmabuf;
 		s->lease = st->lease;
+		static uint64_t next_serial;
+		s->content_serial = ++next_serial;
 		st->content = NULL;
 		st->dmabuf = NULL;
 		st->lease = NULL;
@@ -915,6 +917,7 @@ void rei_surface_emit(const struct rei_surface *s, float ox, float oy,
 					      rei_rects_cover(&s->opaque, s->width, s->height);
 				rei_snapshot_add_dmabuf(snap, s->dmabuf, ox, oy,
 							(float)s->width, (float)s->height, opaque);
+				snap->items[snap->n_items - 1].content = s->content_serial;
 			}
 		} else if (entry->surface) {
 			rei_surface_emit(entry->surface, ox + (float)entry->x,

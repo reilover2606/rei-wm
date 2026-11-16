@@ -32,6 +32,8 @@ static void usage(FILE *out)
 "      --print-theme    print the effective theme (element.property=value) and exit\n"
 "      --print-theme-defaults  print the built-in theme for the config's toolbar colours and exit\n"
 "      --theme-preview PNG   draw one of each themed element to PNG and exit\n"
+"      --window-shader-fg SHADER       draw every window through a fragment shader: \"glow\" or a GLSL file\n"
+"      --window-shader-fg-rule SHADER:APP   the same for one application's windows (e.g. glow:URxvt)\n"
 "      --list-cursor-themes  list the installed cursor themes and exit\n"
 "      --cursor-preview PNG  draw a cursor theme's pointers to PNG and exit (see --cursor-theme, --cursor-size)\n"
 "      --drm-info       list the displays, modes and planes the DRM backend would see\n"
@@ -92,6 +94,8 @@ int main(int argc, char **argv)
 		{ "cursor-preview", required_argument, NULL, 1007 },
 		{ "cursor-theme", required_argument, NULL, 1008 },
 		{ "cursor-size", required_argument, NULL, 1009 },
+		{ "window-shader-fg", required_argument, NULL, 1010 },
+		{ "window-shader-fg-rule", required_argument, NULL, 1011 },
 		{ "help", no_argument, NULL, 'h' },
 		{ "version", no_argument, NULL, 'V' },
 		{ 0 },
@@ -139,6 +143,19 @@ int main(int argc, char **argv)
 		case 1007: cursor_preview = optarg; break;
 		case 1008: cursor_theme = optarg; break;
 		case 1009: cursor_size = atoi(optarg) > 0 ? atoi(optarg) : 24; break;
+		case 1010:
+		case 1011:
+			if (opts.n_window_shaders >= 16) {
+				fprintf(stderr, "rei-wm: too many window shaders (at most 16)\n");
+				return 2;
+			}
+			if (c == 1011 && !strchr(optarg, ':')) {
+				fprintf(stderr, "rei-wm: --window-shader-fg-rule takes SHADER:APP (e.g. glow:URxvt)\n");
+				return 2;
+			}
+			opts.window_shader_is_rule[opts.n_window_shaders] = c == 1011;
+			opts.window_shaders[opts.n_window_shaders++] = optarg;
+			break;
 		case 1001:
 #ifdef REI_HAVE_DRM
 			return rei_drm_print_info();

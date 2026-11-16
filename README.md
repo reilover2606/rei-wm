@@ -303,6 +303,31 @@ programs and toolkits that load the theme themselves match; programs that were a
 one until restarted. `rei-wm --list-cursor-themes` lists the installed themes and
 `rei-wm --cursor-preview out.png --cursor-theme NAME` draws one.
 
+## Text effects and window shaders
+
+Text can glow, blink and shine like metal, drawn by GLSL fragment shaders. Each themed element has the
+settings (`text_glow_size`, `text_glow_strength`, `text_glow_tint`, `text_glow_color`, `text_blink`,
+`text_shine`, `text_shine_color`), all off by default, in the Theme tab of the settings app under "Text
+effects"; the preview there is drawn by the real renderer, so it shows them.
+
+Windows can be drawn through a shader too, as with picom's `--window-shader-fg`. The built-in one, `glow`,
+makes a terminal's text bloom, and it is on for urxvt by default (`[theme.window_text]`: the programs it
+applies to, the glow's size and strength, or the path of your own GLSL file; "Window text (terminals)" in the
+theme editor). `--window-shader-fg SHADER` and `--window-shader-fg-rule SHADER:APP` do the same from the
+command line. See [docs/THEME.md](docs/THEME.md) for the details and how to write a shader.
+
+```toml
+[theme.toolbar]
+text_glow_size = 5
+
+[theme.run_prompt]
+text_shine = 1.0
+
+[theme.window_text]
+apps = "URxvt, foot"
+text_glow_size = 6
+```
+
 ## Output scale
 
 `[[output]] scale = 2` makes everything on that output twice as large: the toolbar and menus, and

@@ -2,13 +2,15 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "util/toml.h"
 #include "util/util.h"
 
 static const char *const element_names[REI_ELEM_COUNT] = {
-	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "start_button", "run_prompt", "messages", "sysinfo", "dialog", "battery",
+	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "start_button", "run_prompt", "messages", "sysinfo", "dialog", "battery", "window_text",
 };
 bool rei_element_iconable(enum rei_element e)
 {
@@ -59,7 +61,17 @@ void rei_theme_defaults(struct rei_theme *t, uint32_t bg, uint32_t fg, uint32_t 
 		s->border_color = rei_color_mix(bg, fg, 0.30);
 		s->shape = REI_SHAPE_SQUARE;
 		s->opacity = 1.0f;
+		/* Text effects: all off; these only say what they would look like once turned on. */
+		s->text_fx.glow_strength = 1.0f;
+		s->text_fx.glow_color = 0xffffff;
+		s->text_fx.shine_color = 0xffffff;
 	}
+
+	/* Terminal windows: their text glows a little (see shader.h). */
+	t->e[REI_ELEM_WINDOW_TEXT].text_fx.glow_size = 5;
+	snprintf(t->window_apps, sizeof t->window_apps, "URxvt");
+	snprintf(t->window_shader, sizeof t->window_shader, "glow");
+	t->window_threshold = 0.35f;
 
 	/* The workspace buttons: no fill unless something is going on; "inactive" is a workspace shown
 	 * on a monitor that is not the focused one. */
@@ -201,7 +213,7 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				idx = e;
 		if (idx < 0) {
 			snprintf(err, errlen, "theme.%s: unknown element (known: toolbar, workspace_button, "
-				 "tray_tile, tray_overflow, tooltip, menu, menu_row, start_button, run_prompt, messages, sysinfo, dialog, battery)", el->key);
+				 "tray_tile, tray_overflow, tooltip, menu, menu_row, start_button, run_prompt, messages, sysinfo, dialog, battery, window_text)", el->key);
 			return false;
 		}
 		if (el->val->type != TOML_TABLE) {
@@ -223,6 +235,7 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				{ "active_text_color", &st->active_text_color },
 				{ "inactive_text_color", &st->inactive_text_color },
 				{ "border_color", &st->border_color }, { "shadow_color", &st->shadow.color }, { "glow_color", &st->glow.color },
+				{ "text_glow_color", &st->text_fx.glow_color }, { "text_shine_color", &st->text_fx.shine_color },
 			};
 			bool done = false;
 			for (size_t c = 0; c < REI_ARRAY_LEN(colors) && !done; c++) {
@@ -243,6 +256,10 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				{ "shadow_offset_x", &st->shadow.dx, -50, 50 },
 				{ "shadow_offset_y", &st->shadow.dy, -50, 50 }, { "shadow_blur", &st->shadow.blur, 0, 50 },
 				{ "icon_size", &st->icon_size, 0, 64 }, { "glow_size", &st->glow.size, 0, 60 }, { "glow_opacity", &st->glow.opacity, 0, 1 },
+				{ "text_glow_size", &st->text_fx.glow_size, 0, 40 }, { "text_glow_strength", &st->text_fx.glow_strength, 0, 4 },
+				{ "text_glow_tint", &st->text_fx.glow_tint, 0, 1 }, { "text_blink", &st->text_fx.blink, 0, 30 },
+				{ "text_shine", &st->text_fx.shine, 0, 1 },
+				{ idx == REI_ELEM_WINDOW_TEXT ? "glow_threshold" : "", &t->window_threshold, 0, 1 },
 			};
 			for (size_t n = 0; n < REI_ARRAY_LEN(nums) && !done; n++) {
 				if (strcmp(key, nums[n].name) != 0)
@@ -263,6 +280,16 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 			if (done)
 				continue;
 
+			if (idx == REI_ELEM_WINDOW_TEXT && (strcmp(key, "apps") == 0 || strcmp(key, "shader") == 0)) {
+				char *dst = key[0] == 'a' ? t->window_apps : t->window_shader;
+				if (v->type != TOML_STRING || strlen(v->u.s) >= sizeof t->window_apps) {
+					snprintf(err, errlen, "%s: expected a string (at most %zu characters)", where,
+						 sizeof t->window_apps - 1);
+					return false;
+				}
+				snprintf(dst, sizeof t->window_apps, "%s", v->u.s);
+				continue;
+			}
 			if (strcmp(key, "icon") == 0) {
 				if (!rei_element_iconable((enum rei_element)idx)) {
 					snprintf(err, errlen, "%s: this element cannot show icons (iconable: tray_tile, "
@@ -289,5 +316,47 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 			return false;
 		}
 	}
+	/* A shader file that is not there is a typo to report now, not a window silently left plain. */
+	if (t->window_shader[0] && strcmp(t->window_shader, "glow") != 0) {
+		char path[600];
+		const char *home = getenv("HOME");
+		if (t->window_shader[0] == '~' && t->window_shader[1] == '/' && home)
+			snprintf(path, sizeof path, "%s%s", home, t->window_shader + 1);
+		else
+			snprintf(path, sizeof path, "%s", t->window_shader);
+		FILE *f = fopen(path, "r");
+		if (!f) {
+			snprintf(err, errlen, "theme.window_text.shader: cannot read '%s' (use \"glow\" or the path of a "
+				 "GLSL file)", t->window_shader);
+			return false;
+		}
+		fclose(f);
+	}
 	return true;
+}
+
+bool rei_theme_window_matches(const struct rei_theme *t, const char *app_id)
+{
+	const struct rei_text_fx *fx = &t->e[REI_ELEM_WINDOW_TEXT].text_fx;
+	bool custom = t->window_shader[0] && strcmp(t->window_shader, "glow") != 0;
+	if (!custom && !(fx->glow_size > 0 && fx->glow_strength > 0) && fx->blink <= 0)
+		return false;   /* nothing to do */
+	if (!app_id)
+		app_id = "";
+	for (const char *p = t->window_apps; *p;) {
+		while (*p == ' ' || *p == ',')
+			p++;
+		const char *end = p;
+		while (*end && *end != ',')
+			end++;
+		size_t len = (size_t)(end - p);
+		while (len > 0 && p[len - 1] == ' ')
+			len--;
+		if (len == 1 && p[0] == '*')
+			return true;
+		if (len > 0 && strlen(app_id) == len && strncasecmp(app_id, p, len) == 0)
+			return true;
+		p = end;
+	}
+	return false;
 }

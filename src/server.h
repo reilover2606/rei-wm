@@ -25,6 +25,7 @@ struct rei_battery;
 struct rei_sysinfo;
 struct rei_sessionbus;
 struct rei_tray_ui;
+struct rei_winfx;
 struct rei_pointer_cursor;
 struct rei_popup;
 struct rei_prompt;
@@ -97,6 +98,11 @@ struct rei_server {
 	struct rei_sysinfo *sysinfo;
 	struct rei_sessionbus *sessionbus;
 	struct rei_tray_ui *tray_ui;
+	struct rei_winfx *winfx;
+	const char *window_shaders[16];   /* from the command line (see rei_server_options) */
+	bool window_shader_is_rule[16];
+	int n_window_shaders;
+	struct event *anim_timer;   /* redraws for blinking text and animated shaders */
 	struct rei_pointer_cursor *pcursor;
 	struct rei_popup *popup;
 	struct rei_prompt *prompt;
@@ -128,6 +134,10 @@ struct rei_server {
 struct rei_server_options {
 	const char *socket_name;      /* NULL: pick wayland-N automatically. */
 	const char *backend_override; /* NULL: use the config's choice. */
+	/* --window-shader-fg SHADER and --window-shader-fg-rule SHADER:APP, in the order given (see winfx.h). */
+	const char *window_shaders[16];
+	bool window_shader_is_rule[16];
+	int n_window_shaders;
 };
 
 struct rei_server *rei_server_create(const struct rei_config *config,

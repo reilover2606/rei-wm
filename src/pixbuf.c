@@ -25,6 +25,8 @@ static struct rei_pixbuf *create(int32_t width, int32_t height, bool opaque, boo
 	p->width = width;
 	p->height = height;
 	p->opaque = opaque;
+	p->layers = NULL;
+	p->n_layers = 0;
 	if (clear)
 		memset(p->data, 0, bytes);
 	return p;
@@ -50,6 +52,16 @@ void rei_pixbuf_unref(struct rei_pixbuf *p)
 {
 	if (!p)
 		return;
-	if (atomic_fetch_sub_explicit(&p->refs, 1, memory_order_acq_rel) == 1)
-		free(p);
+	if (atomic_fetch_sub_explicit(&p->refs, 1, memory_order_acq_rel) != 1)
+		return;
+	for (int i = 0; i < p->n_layers; i++)
+		rei_pixbuf_unref(p->layers[i].pix);
+	free(p->layers);
+	free(p);
+}
+
+void rei_pixbuf_add_layer(struct rei_pixbuf *p, struct rei_pixbuf *layer, const struct rei_fx *fx)
+{
+	p->layers = rei_xrealloc(p->layers, (size_t)(p->n_layers + 1) * sizeof *p->layers);
+	p->layers[p->n_layers++] = (struct rei_pixbuf_layer){ layer, *fx };
 }

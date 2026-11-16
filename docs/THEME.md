@@ -34,7 +34,72 @@ opacity = 0.85
 | `shadow_color`, `shadow_opacity`, `shadow_offset_x`, `shadow_offset_y`, `shadow_blur` | a soft drop shadow; `shadow_opacity = 0` means none |
 | `glow_color` (white), `glow_size` (pixels, 0 = none), `glow_opacity` | a halo outside the element. On by default for `menu_row` (when hovered), `dialog` and `run_prompt` |
 
+| `text_glow_size` (pixels, 0 = none), `text_glow_strength` (0 to 4), `text_glow_tint` (0 to 1), `text_glow_color` | light around the letters. With `text_glow_tint = 0` it has each letter's own colour; towards 1 it takes `text_glow_color` |
+| `text_blink` | seconds per on/off cycle (0 = steady): the text shows for the first half of each cycle |
+| `text_shine` (0 to 1), `text_shine_color` (white) | a metallic shine: the upper half of the letters gleams (strongest at the top), with a hard horizon in the middle and a darker reflection under it |
+
 Colours are `"#rrggbb"`. Hovering a tile or button lightens its fill by a fixed amount toward its text colour.
+
+## Text effects and shaders
+
+The three `text_*` effects are drawn by GLSL fragment shaders, not painted into the pictures. An element whose
+text has an effect keeps its text in a separate layer, which the renderer draws over the element through the
+text shader; the effects combine (glowing, shining, blinking text is one pass). They are off by default and
+apply to every element that has text. Blinking costs two redraws per cycle and nothing in between; glow and
+shine are computed once per change of the text and kept, not once per frame.
+
+### Window text: `[theme.window_text]`
+
+This element is not rei-wm's own text. It names programs whose **windows** are drawn through a window shader,
+the equivalent of picom's `--window-shader-fg`. The built-in shader, `glow`, makes the bright pixels of the
+window (a terminal's text) bleed light into what is around them, each in its own colour, and leaves a dark
+background dark.
+
+```toml
+[theme.window_text]
+apps = "URxvt"            # app ids (Wayland) / classes (X11), comma separated, case-insensitive; "*" = every window
+shader = "glow"           # or the path of a GLSL file (see below)
+text_glow_size = 5        # pixels; 0 turns it off
+text_glow_strength = 1.0
+glow_threshold = 0.35     # only pixels brighter than this glow (0 = everything, for light-on-dark at any level)
+text_glow_tint = 0        # towards 1: the glow takes text_glow_color instead of the text's colour
+text_blink = 0            # seconds per cycle: the whole window blinks (0 = steady)
+```
+
+It is on by default for urxvt. Set `text_glow_size = 0` (or empty `apps`) to turn it off. The same from the
+command line, as with picom, taking precedence over the theme:
+
+```bash
+rei-wm --window-shader-fg-rule glow:URxvt --window-shader-fg-rule ~/shaders/crt.glsl:foot
+```
+```bash
+rei-wm --window-shader-fg ~/shaders/grayscale.glsl
+```
+
+The first form is for one application's windows, the second for every window.
+
+### Writing a shader
+
+A shader file is GLSL ES 3.00 and defines `vec4 window_shader()`, as picom's do; most picom shaders work
+unchanged (their `#version` line and their declarations of `tex`, `texcoord`, `opacity` and `time` are
+dropped, and `texture2D` is accepted):
+
+```glsl
+vec4 window_shader() {
+    vec4 c = texelFetch(tex, ivec2(texcoord), 0);   // premultiplied RGBA
+    float grey = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+    return default_post_processing(vec4(vec3(grey), c.a));
+}
+```
+
+Available: `sampler2D tex`, `vec2 texcoord` (this pixel, in pixels), `vec2 u_size` (the picture's size),
+`float u_px` (texture pixels per logical pixel), `float time` (milliseconds), `float opacity`,
+`vec4 u_p[4]` (the glow settings: `u_p[0]` = size, strength, tint, threshold; `u_p[1].rgb` = tint colour),
+`float u_blink`, and the helpers `rei_texel(vec2 px)`, `rei_glow(vec2 px, float radius, float threshold)` and
+`default_post_processing(vec4)`. A shader that mentions `time` is run on every frame, about thirty times a
+second; any other is run once each time the window's content changes. A file that does not compile is
+reported in the log and the window is drawn as it is; a file that does not exist is a config error. Edits to
+the file are picked up when the config is next reloaded.
 
 ## Elements
 
@@ -49,6 +114,7 @@ Colours are `"#rrggbb"`. Hovering a tile or button lightens its fill by a fixed 
 | `dialog` | confirmation dialogs | `color`, `text_color`, shape, border, `opacity`, shadow, glow |
 | `menu` | the pop-up window list | `color`, border, shape, `opacity`, shadow |
 | `battery` | the battery icon: `color` is the level fill, `active_color` the fill while charging (with a bolt), `inactive_color` the fill and text at 15% or less; `border_color`/`border_width` the outline, `shape`/`radius` the cell's corners | `color`, `active_color`, `inactive_color`, `text_color`, border, `shape`, `radius` |
+| `window_text` | not rei-wm's own: the windows of the listed programs (terminals), through a window shader | `apps`, `shader`, `text_glow_*`, `glow_threshold`, `text_blink` (see below) |
 | `menu_row` | one row of a list | `active_color` (hovered row), `text_color`, `active_text_color`, `inactive_text_color` (minimized windows) |
 
 Defaults at a glance: tiles, buttons and tooltips have `shape = "rounded"` with `radius = 4`; the

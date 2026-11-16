@@ -9,6 +9,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <math.h>
+#include <time.h>
+
+#include "shader.h"
 #include "util/log.h"
 #include "util/util.h"
 
@@ -17,6 +21,25 @@ struct tex_entry {
 	bool dma;      /* pixbuf ids and dmabuf ids are separate counters */
 	GLuint tex;
 	bool used;     /* Drawn during the current frame. */
+};
+
+/* The GL program of an effect shader (see shader.h), built the first time a drawable uses it. */
+struct fx_program {
+	uint64_t shader_id;
+	GLuint program;   /* 0: it did not compile (said once); its drawables are drawn plainly */
+	GLint u_rect, u_view, u_flip, u_vscale, u_opaque, u_alpha, u_tex;
+	GLint u_size, u_atlas, u_px, u_p, u_blink, u_time, u_opacity;
+};
+
+/* What an effect made of a picture, kept until the picture or the effect's settings change: the shader runs
+ * once per change of content, not once per frame (a glow reads forty pixels for each one it writes). */
+struct fx_cache {
+	uint64_t content, shader_id;
+	bool dma, atlas, opaque;
+	float p[16], px;
+	int32_t w, h;
+	GLuint tex, fbo;
+	bool used;
 };
 
 struct rei_gles_buffer {
@@ -37,7 +60,12 @@ struct rei_gles {
 	bool has_dmabuf_import, has_dmabuf_modifiers;
 
 	GLuint program;
-	GLint u_rect, u_view, u_opaque, u_tex, u_bgra, u_flip, u_alpha;
+	GLint u_rect, u_view, u_opaque, u_tex, u_flip, u_alpha, u_vscale;
+	struct fx_program *fx;
+	size_t n_fx, cap_fx;
+	struct fx_cache *fxc;
+	size_t n_fxc, cap_fxc;
+	GLuint cur_fbo;   /* the frame being drawn */
 	GLuint vao;
 
 	GLuint fbo, rbo;  /* The renderer's own target. */
@@ -57,10 +85,11 @@ static const char *vertex_src =
 	"uniform vec4 u_rect;\n"   /* x, y, w, h in framebuffer pixels, y down */
 	"uniform vec2 u_view;\n"
 	"uniform float u_flip;\n"  /* 1: the texture's rows are stored bottom to top */
+	"uniform float u_vscale;\n"  /* 0.5 to show only the upper half of the texture (a text layer drawn plainly) */
 	"out vec2 v_uv;\n"
 	"void main() {\n"
 	"  vec2 corner = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));\n"
-	"  v_uv = vec2(corner.x, mix(corner.y, 1.0 - corner.y, u_flip));\n"
+	"  v_uv = vec2(corner.x, mix(corner.y, 1.0 - corner.y, u_flip) * u_vscale);\n"
 	"  vec2 px = u_rect.xy + corner * u_rect.zw;\n"
 	/* y is deliberately not flipped: framebuffer row 0 holds the top of the
 	 * screen, so glReadPixels returns a top-down image directly, and a framebuffer
@@ -74,13 +103,11 @@ static const char *fragment_src =
 	"in vec2 v_uv;\n"
 	"uniform sampler2D u_tex;\n"
 	"uniform float u_opaque;\n"
-	"uniform float u_bgra;\n"  /* 1 for CPU pixels (stored B,G,R,A and uploaded as RGBA) */
 	"uniform float u_alpha;\n"  /* overall transparency, applied to the premultiplied colour */
 	"out vec4 o_color;\n"
 	"void main() {\n"
 	/* Premultiplied alpha throughout, so blending is ONE, 1-SRC_ALPHA. */
 	"  vec4 c = texture(u_tex, v_uv);\n"
-	"  c = mix(c, c.bgra, u_bgra);\n"
 	"  c.a = mix(c.a, 1.0, u_opaque);\n"
 	"  o_color = c * u_alpha;\n"
 	"}\n";
@@ -102,35 +129,83 @@ static GLuint compile(GLenum type, const char *src)
 	return sh;
 }
 
-static bool build_program(struct rei_gles *g)
+/* Links the common vertex shader with a fragment shader. 0 on failure (logged). */
+static GLuint link_program(const char *fragment)
 {
 	GLuint vs = compile(GL_VERTEX_SHADER, vertex_src);
-	GLuint fs = compile(GL_FRAGMENT_SHADER, fragment_src);
+	GLuint fs = compile(GL_FRAGMENT_SHADER, fragment);
 	if (!vs || !fs) {
 		if (vs) glDeleteShader(vs);
 		if (fs) glDeleteShader(fs);
-		return false;
+		return 0;
 	}
-	g->program = glCreateProgram();
-	glAttachShader(g->program, vs);
-	glAttachShader(g->program, fs);
-	glLinkProgram(g->program);
+	GLuint prog = glCreateProgram();
+	glAttachShader(prog, vs);
+	glAttachShader(prog, fs);
+	glLinkProgram(prog);
 	glDeleteShader(vs);
 	glDeleteShader(fs);
 
 	GLint ok = 0;
-	glGetProgramiv(g->program, GL_LINK_STATUS, &ok);
+	glGetProgramiv(prog, GL_LINK_STATUS, &ok);
 	if (!ok) {
 		char log[512];
-		glGetProgramInfoLog(g->program, sizeof log, NULL, log);
+		glGetProgramInfoLog(prog, sizeof log, NULL, log);
 		rei_error("gles: program link failed: %s", log);
-		return false;
+		glDeleteProgram(prog);
+		return 0;
 	}
+	return prog;
+}
+
+/* The program for an effect shader, compiled on first use. NULL if it does not compile. */
+static const struct fx_program *fx_program_for(struct rei_gles *g, const struct rei_shader *sh)
+{
+	uint64_t id = rei_shader_id(sh);
+	for (size_t i = 0; i < g->n_fx; i++)
+		if (g->fx[i].shader_id == id)
+			return g->fx[i].program ? &g->fx[i] : NULL;
+
+	if (g->n_fx == g->cap_fx) {
+		g->cap_fx = g->cap_fx ? g->cap_fx * 2 : 4;
+		g->fx = rei_xrealloc(g->fx, g->cap_fx * sizeof *g->fx);
+	}
+	struct fx_program *f = &g->fx[g->n_fx++];
+	*f = (struct fx_program){ .shader_id = id };
+	f->program = link_program(rei_shader_source(sh));
+	if (!f->program) {
+		rei_error("gles: the shader '%s' does not compile (see above); what it was for is drawn without it",
+			  rei_shader_name(sh));
+		return NULL;
+	}
+	f->u_rect = glGetUniformLocation(f->program, "u_rect");
+	f->u_view = glGetUniformLocation(f->program, "u_view");
+	f->u_flip = glGetUniformLocation(f->program, "u_flip");
+	f->u_vscale = glGetUniformLocation(f->program, "u_vscale");
+	f->u_opaque = glGetUniformLocation(f->program, "u_opaque");
+	f->u_alpha = glGetUniformLocation(f->program, "u_alpha");
+	f->u_tex = glGetUniformLocation(f->program, "tex");
+	f->u_size = glGetUniformLocation(f->program, "u_size");
+	f->u_atlas = glGetUniformLocation(f->program, "u_atlas");
+	f->u_px = glGetUniformLocation(f->program, "u_px");
+	f->u_p = glGetUniformLocation(f->program, "u_p");
+	f->u_blink = glGetUniformLocation(f->program, "u_blink");
+	f->u_time = glGetUniformLocation(f->program, "time");
+	f->u_opacity = glGetUniformLocation(f->program, "opacity");
+	rei_debug("gles: compiled the shader '%s'", rei_shader_name(sh));
+	return f;
+}
+
+static bool build_program(struct rei_gles *g)
+{
+	g->program = link_program(fragment_src);
+	if (!g->program)
+		return false;
 	g->u_rect = glGetUniformLocation(g->program, "u_rect");
 	g->u_view = glGetUniformLocation(g->program, "u_view");
 	g->u_opaque = glGetUniformLocation(g->program, "u_opaque");
 	g->u_tex = glGetUniformLocation(g->program, "u_tex");
-	g->u_bgra = glGetUniformLocation(g->program, "u_bgra");
+	g->u_vscale = glGetUniformLocation(g->program, "u_vscale");
 	g->u_flip = glGetUniformLocation(g->program, "u_flip");
 	g->u_alpha = glGetUniformLocation(g->program, "u_alpha");
 	return true;
@@ -276,6 +351,13 @@ void rei_gles_destroy(struct rei_gles *g)
 			glDeleteTextures(1, &g->textures[i].tex);
 		if (g->program)
 			glDeleteProgram(g->program);
+		for (size_t i = 0; i < g->n_fx; i++)
+			if (g->fx[i].program)
+				glDeleteProgram(g->fx[i].program);
+		for (size_t i = 0; i < g->n_fxc; i++) {
+			glDeleteTextures(1, &g->fxc[i].tex);
+			glDeleteFramebuffers(1, &g->fxc[i].fbo);
+		}
 		if (g->vao)
 			glDeleteVertexArrays(1, &g->vao);
 		if (g->fbo)
@@ -288,6 +370,8 @@ void rei_gles_destroy(struct rei_gles *g)
 	/* The EGL display is shared by every render thread and is intentionally
 	 * not terminated here. */
 	free(g->textures);
+	free(g->fx);
+	free(g->fxc);
 	free(g);
 }
 
@@ -498,6 +582,12 @@ static GLuint texture_for_pixbuf(struct rei_gles *g, const struct rei_pixbuf *pi
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, pix->width, pix->height, 0,
 		     GL_RGBA, GL_UNSIGNED_BYTE, pix->data);
+	/* CPU pixels are stored B,G,R,A: have the texture hand them out as R,G,B,A, so every shader (ours and
+	 * a user's) reads a client's GPU buffer and CPU pixels the same way. An XRGB picture's alpha reads 1. */
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_R, GL_BLUE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_B, GL_RED);
+	if (pix->opaque)
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	return e->tex;
@@ -545,6 +635,112 @@ static void evict_unused(struct rei_gles *g)
 		}
 	}
 	g->n_tex = kept;
+
+	kept = 0;
+	for (size_t i = 0; i < g->n_fxc; i++) {
+		if (g->fxc[i].used) {
+			g->fxc[i].used = false;
+			g->fxc[kept++] = g->fxc[i];
+		} else {
+			glDeleteTextures(1, &g->fxc[i].tex);
+			glDeleteFramebuffers(1, &g->fxc[i].fbo);
+		}
+	}
+	g->n_fxc = kept;
+}
+
+static double mono_now(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+}
+
+/* Blinking text shows for the first half of each cycle, by the same clock on every output and in the event
+ * thread, which has the scene drawn again at each change. */
+static bool blink_on(const struct rei_drawable *d)
+{
+	return !(d->fx.blink > 0 && fmod(mono_now(), (double)d->fx.blink) >= (double)d->fx.blink * 0.5);
+}
+
+/* Runs an effect shader over the bound texture into the rectangle (x, y, w, h) of a view_w x view_h target. */
+static void fx_run(const struct fx_program *fp, const struct rei_drawable *d, float x, float y, float w, float h,
+		   float view_w, float view_h, bool flip, float alpha, bool blink, int32_t buf_w, int32_t buf_h)
+{
+	glUseProgram(fp->program);
+	glUniform1i(fp->u_tex, 0);
+	glUniform2f(fp->u_view, view_w, view_h);
+	glUniform4f(fp->u_rect, x, y, w, h);
+	glUniform1f(fp->u_flip, flip ? 1.0f : 0.0f);
+	glUniform1f(fp->u_vscale, 1.0f);
+	glUniform1f(fp->u_opaque, d->opaque ? 1.0f : 0.0f);
+	glUniform1f(fp->u_alpha, alpha);
+	glUniform1f(fp->u_opacity, alpha);
+	glUniform2f(fp->u_size, (float)buf_w, (float)buf_h);
+	glUniform1f(fp->u_atlas, d->fx.atlas ? 1.0f : 0.0f);
+	glUniform1f(fp->u_px, d->w > 0 ? (float)buf_w / d->w : 1.0f);
+	glUniform4fv(fp->u_p, 4, d->fx.p);
+	glUniform1f(fp->u_blink, blink ? 1.0f : 0.0f);
+	glUniform1f(fp->u_time, (float)fmod(mono_now() * 1000.0, 3600000.0));
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
+
+/* The texture holding what the effect makes of this drawable's picture (same size and orientation as the
+ * picture), computing it if it is not there yet. 0 if that fails. Leaves the frame's target bound. */
+static GLuint fx_cached(struct rei_gles *g, const struct fx_program *fp, const struct rei_drawable *d, GLuint src,
+			int32_t buf_w, int32_t buf_h, const struct rei_gles_target *t)
+{
+	float px = d->w > 0 ? (float)buf_w / d->w : 1.0f;
+	for (size_t i = 0; i < g->n_fxc; i++) {
+		struct fx_cache *c = &g->fxc[i];
+		if (c->content == d->content && c->dma == (d->dmabuf != NULL) && c->shader_id == fp->shader_id &&
+		    c->atlas == d->fx.atlas && c->opaque == d->opaque && c->w == buf_w && c->h == buf_h &&
+		    c->px == px && memcmp(c->p, d->fx.p, sizeof c->p) == 0) {
+			c->used = true;
+			return c->tex;
+		}
+	}
+	if (g->n_fxc == g->cap_fxc) {
+		g->cap_fxc = g->cap_fxc ? g->cap_fxc * 2 : 8;
+		g->fxc = rei_xrealloc(g->fxc, g->cap_fxc * sizeof *g->fxc);
+	}
+	struct fx_cache c = { .content = d->content, .shader_id = fp->shader_id, .dma = d->dmabuf != NULL,
+			      .atlas = d->fx.atlas, .opaque = d->opaque, .px = px, .w = buf_w, .h = buf_h, .used = true };
+	memcpy(c.p, d->fx.p, sizeof c.p);
+	glGenTextures(1, &c.tex);
+	glBindTexture(GL_TEXTURE_2D, c.tex);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, buf_w, buf_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glGenFramebuffers(1, &c.fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, c.fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, c.tex, 0);
+	bool ok = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+	if (ok) {
+		glViewport(0, 0, buf_w, buf_h);
+		glDisable(GL_SCISSOR_TEST);
+		glDisable(GL_BLEND);
+		glClearColor(0, 0, 0, 0);
+		glClear(GL_COLOR_BUFFER_BIT);
+		glBindTexture(GL_TEXTURE_2D, src);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		/* Row for row as the picture is stored, so it is drawn afterwards exactly as the picture would be. */
+		fx_run(fp, d, 0, 0, (float)buf_w, (float)buf_h, (float)buf_w, (float)buf_h, false, 1.0f, true, buf_w, buf_h);
+		glUseProgram(g->program);
+	}
+	glBindFramebuffer(GL_FRAMEBUFFER, g->cur_fbo);
+	glViewport(0, 0, t->width, t->height);
+	if (!ok) {
+		glDeleteTextures(1, &c.tex);
+		glDeleteFramebuffers(1, &c.fbo);
+		return 0;
+	}
+	rei_debug("gles: ran the shader '%s' over a %dx%d picture", rei_shader_name(d->fx.shader), buf_w, buf_h);
+	g->fxc[g->n_fxc++] = c;
+	return c.tex;
 }
 
 static void draw_one(struct rei_gles *g, const struct rei_drawable *d, const struct rei_gles_target *t)
@@ -559,28 +755,41 @@ static void draw_one(struct rei_gles *g, const struct rei_drawable *d, const str
 
 	int32_t buf_w, buf_h;
 	GLuint tex;
-	bool flip = false, bgra;
+	bool flip = false;
 	if (d->dmabuf) {
 		tex = texture_for_dmabuf(g, d->dmabuf);
 		buf_w = d->dmabuf->width;
 		buf_h = d->dmabuf->height;
 		flip = d->dmabuf->y_invert;
-		bgra = false;
 	} else if (d->pix) {
 		tex = texture_for_pixbuf(g, d->pix);
 		buf_w = d->pix->width;
 		buf_h = d->pix->height;
-		bgra = true;
 	} else {
 		return;
 	}
 	if (!tex)
 		return;
 
+	if (d->fx.atlas)
+		buf_h /= 2;   /* only the upper half is the picture */
+	const struct fx_program *fp = d->fx.shader ? fx_program_for(g, d->fx.shader) : NULL;
+	bool cached = false;
+	if (fp && !rei_shader_uses_time(d->fx.shader)) {
+		if (!blink_on(d))
+			return;   /* the dark half of a blink: nothing to draw */
+		GLuint made = fx_cached(g, fp, d, tex, buf_w, buf_h, t);
+		if (made) {   /* from here on it is an ordinary picture */
+			tex = made;
+			fp = NULL;
+			cached = true;
+		}
+	}
+
 	glBindTexture(GL_TEXTURE_2D, tex);
-	/* Exact 1:1 mapping stays crisp; anything else is filtered. */
+	/* Exact 1:1 mapping stays crisp; anything else is filtered (and so is what an effect samples around). */
 	bool exact = (int)w == buf_w && (int)h == buf_h && x == (float)(int)x && y == (float)(int)y;
-	GLint filter = exact ? GL_NEAREST : GL_LINEAR;
+	GLint filter = exact && !fp ? GL_NEAREST : GL_LINEAR;
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
 
@@ -602,10 +811,20 @@ static void draw_one(struct rei_gles *g, const struct rei_drawable *d, const str
 		glDisable(GL_SCISSOR_TEST);
 	}
 
+	if (fp) {   /* a shader that reads the clock: run every frame */
+		if (d->opaque && d->alpha >= 1.0f)
+			glDisable(GL_BLEND);
+		else
+			glEnable(GL_BLEND);
+		fx_run(fp, d, x, y, w, h, (float)t->width, (float)t->height, flip, d->alpha, blink_on(d), buf_w, buf_h);
+		glUseProgram(g->program);
+		return;
+	}
+
 	glUniform4f(g->u_rect, x, y, w, h);
 	glUniform1f(g->u_opaque, d->opaque ? 1.0f : 0.0f);
-	glUniform1f(g->u_bgra, bgra ? 1.0f : 0.0f);
 	glUniform1f(g->u_flip, flip ? 1.0f : 0.0f);
+	glUniform1f(g->u_vscale, d->fx.atlas && !cached ? 0.5f : 1.0f);
 	glUniform1f(g->u_alpha, d->alpha);
 	if (d->opaque && d->alpha >= 1.0f)
 		glDisable(GL_BLEND);
@@ -626,10 +845,12 @@ bool rei_gles_draw_into(struct rei_gles *g, const struct rei_scene_snapshot *sna
 			return false;
 		}
 		glBindFramebuffer(GL_FRAMEBUFFER, buf->fbo);
+		g->cur_fbo = buf->fbo;
 	} else {
 		if (!ensure_target(g, t->width, t->height))
 			return false;
 		glBindFramebuffer(GL_FRAMEBUFFER, g->fbo);
+		g->cur_fbo = g->fbo;
 	}
 
 	glViewport(0, 0, t->width, t->height);

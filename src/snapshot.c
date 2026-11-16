@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "shader.h"
 #include "util/util.h"
 
 struct rei_scene_snapshot *rei_snapshot_create(uint64_t serial)
@@ -21,6 +22,9 @@ struct rei_scene_snapshot *rei_snapshot_clone(const struct rei_scene_snapshot *f
 	s->items = rei_xcalloc(from->n_items ? from->n_items : 1, sizeof *s->items);
 	s->n_items = s->cap_items = from->n_items;
 	memcpy(s->items, from->items, from->n_items * sizeof *s->items);
+	memcpy(s->blink, from->blink, sizeof s->blink);
+	s->n_blink = from->n_blink;
+	s->animated = from->animated;
 	for (size_t i = 0; i < s->n_items; i++) {
 		if (s->items[i].pix)
 			rei_pixbuf_ref(s->items[i].pix);
@@ -51,6 +55,22 @@ void rei_snapshot_unref(struct rei_scene_snapshot *s)
 	free(s);
 }
 
+/* Records what an effect needs from the event thread: a redraw at each blink, or all the time. */
+static void note_fx(struct rei_scene_snapshot *s, const struct rei_fx *fx)
+{
+	if (rei_shader_uses_time(fx->shader))
+		s->animated = true;
+	if (fx->blink <= 0)
+		return;
+	for (int i = 0; i < s->n_blink; i++)
+		if (s->blink[i] == fx->blink)
+			return;
+	if (s->n_blink < REI_SNAPSHOT_MAX_BLINK)
+		s->blink[s->n_blink++] = fx->blink;
+	else
+		s->animated = true;   /* too many different rhythms to track: just keep drawing */
+}
+
 void rei_snapshot_add(struct rei_scene_snapshot *s, struct rei_pixbuf *pix,
 		      float x, float y, float w, float h, bool opaque)
 {
@@ -63,7 +83,36 @@ void rei_snapshot_add(struct rei_scene_snapshot *s, struct rei_pixbuf *pix,
 		.x = x, .y = y, .w = w, .h = h,
 		.opaque = opaque || pix->opaque,
 		.alpha = 1.0f,
+		.content = pix->id,
 	};
+	/* Its text layers go right over it, through their shaders. */
+	for (int i = 0; i < pix->n_layers; i++) {
+		if (s->n_items == s->cap_items) {
+			s->cap_items *= 2;
+			s->items = rei_xrealloc(s->items, s->cap_items * sizeof *s->items);
+		}
+		s->items[s->n_items++] = (struct rei_drawable){
+			.pix = rei_pixbuf_ref(pix->layers[i].pix),
+			.x = x, .y = y, .w = w, .h = h,
+			.alpha = 1.0f,
+			.fx = pix->layers[i].fx,
+			.content = pix->layers[i].pix->id,
+		};
+		note_fx(s, &pix->layers[i].fx);
+	}
+}
+
+void rei_snapshot_set_fx_from(struct rei_scene_snapshot *s, size_t first, const struct rei_fx *fx)
+{
+	if (!fx->shader)
+		return;
+	for (size_t i = first; i < s->n_items; i++) {
+		if (s->items[i].fx.shader)
+			continue;   /* (a text layer keeps its own) */
+		s->items[i].fx = *fx;
+	}
+	if (first < s->n_items)
+		note_fx(s, fx);
 }
 
 void rei_snapshot_set_alpha_from(struct rei_scene_snapshot *s, size_t first, float alpha)
