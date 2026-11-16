@@ -285,7 +285,6 @@ void rei_server_reload_look(struct rei_server *s)
 	struct rei_output *o;
 	wl_list_for_each(o, &s->outputs, link)
 		refresh_wallpaper(s, o);
-	rei_xwayland_wallpaper_changed(s);   /* urxvt's pseudo-transparency reads it from the X root */
 	rei_server_schedule_damage(s);
 }
 
@@ -322,8 +321,7 @@ void rei_server_set_output_scale(struct rei_server *s, struct rei_output *o, dou
 	o->scale = scale;
 	rei_outputs_layout(&s->outputs);   /* the logical size changed, so neighbours may move */
 	sync_output_geometry(s);
-	rei_fractional_scale_update_all(s);   /* (the renderer, wl_output, windows and the toolbar follow) */
-	rei_xwayland_wallpaper_changed(s);
+	rei_fractional_scale_update_all(s);           /* the renderer, wl_output, windows and the toolbar follow */
 	rei_server_schedule_damage(s);
 }
 

@@ -99,34 +99,6 @@ int main(int argc, char **argv)
 	CHECK(x && !xcb_connection_has_error(x));
 	xcb_screen_t *scr = xcb_setup_roots_iterator(xcb_get_setup(x)).data;
 
-	/* The wallpaper is published as _XROOTPMAP_ID, for pseudo-transparency (urxvt.transparent). */
-	{
-		xcb_intern_atom_reply_t *ar = xcb_intern_atom_reply(x, xcb_intern_atom(x, 0, 13, "_XROOTPMAP_ID"), NULL);
-		CHECK(ar);
-		xcb_get_property_reply_t *pr = NULL;
-		for (int t = 0; t < 40; t++) {
-			pr = xcb_get_property_reply(x, xcb_get_property(x, 0, scr->root, ar->atom, XCB_ATOM_PIXMAP, 0, 1), NULL);
-			if (pr && xcb_get_property_value_length(pr) == 4)
-				break;
-			free(pr);
-			pr = NULL;
-			sleep_ms(100);
-		}
-		free(ar);
-		CHECK(pr);
-		xcb_pixmap_t pm = *(xcb_pixmap_t *)xcb_get_property_value(pr);
-		free(pr);
-		xcb_get_geometry_reply_t *g = xcb_get_geometry_reply(x, xcb_get_geometry(x, pm), NULL);
-		CHECK(g && g->width == 800 && g->height == 600);
-		free(g);
-		xcb_get_image_reply_t *im = xcb_get_image_reply(
-			x, xcb_get_image(x, XCB_IMAGE_FORMAT_Z_PIXMAP, pm, 100, 100, 1, 1, ~0u), NULL);
-		CHECK(im && xcb_get_image_data_length(im) >= 3);
-		const uint8_t *d = xcb_get_image_data(im);
-		CHECK(d[2] == 27 && d[1] == 39 && d[0] == 51);   /* the plain desktop colour (B,G,R order) */
-		free(im);
-	}
-
 	/* Find a 32-bit TrueColor visual. */
 	xcb_visualid_t vis = 0;
 	for (xcb_depth_iterator_t di = xcb_screen_allowed_depths_iterator(scr); di.rem && !vis; xcb_depth_next(&di)) {
