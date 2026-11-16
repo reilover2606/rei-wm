@@ -19,6 +19,22 @@ static QString quoteKey(const QString &k)
 	return "\"" + q + "\"";
 }
 
+/* A TOML basic string's body, decoded in one pass (a chain of replace() calls would read "\\\\n" as a newline). */
+static QString unescape(const QString &raw)
+{
+	QString out;
+	for (int i = 0; i < raw.size(); i++) {
+		QChar c = raw[i];
+		if (c == '\\' && i + 1 < raw.size()) {
+			QChar n = raw[++i];
+			out += n == 'n' ? QChar('\n') : n == 't' ? QChar('\t') : n;   /* \" and \\ stand for themselves */
+		} else {
+			out += c;
+		}
+	}
+	return out;
+}
+
 QString TomlDoc::format(const QVariant &v)
 {
 	switch (v.typeId()) {
@@ -95,8 +111,7 @@ void TomlDoc::scan()
 					end += l[end] == '\\' ? 2 : 1;
 				end = qMin(end + 1, (int)l.size());
 				QString raw = l.mid(start + 1, end - start - 2);
-				raw.replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", "\"").replace("\\\\", "\\");
-				li.value = raw;
+				li.value = unescape(raw);
 			} else {
 				end = l.indexOf('#', start);
 				if (end < 0)

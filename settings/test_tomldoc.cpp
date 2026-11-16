@@ -39,6 +39,16 @@ int main()
 	TomlDoc d = TomlDoc::parse(sample);
 	CHECK_EQ(d.text(), sample);  /* Parsing and printing changes nothing. */
 
+	/* String escapes are decoded in one pass: an escaped backslash followed by n is a backslash and an n,
+	 * not a newline (printf '%s\n' commands depend on it). */
+	{
+		TomlDoc e = TomlDoc::parse(QStringLiteral("[s]\nk = \"a\\\\nb\\nc\\\"d\"\n"));
+		CHECK_EQ(e.get("s", "k").toString(), QStringLiteral("a\\nb\nc\"d"));
+		TomlDoc f = TomlDoc::parse(QString());
+		f.set("s", "k", QStringLiteral("a\\nb\nc\"d"));
+		CHECK_EQ(TomlDoc::parse(f.text()).get("s", "k").toString(), QStringLiteral("a\\nb\nc\"d"));   /* and back */
+	}
+
 	CHECK_EQ(d.get("general", "backend").toString(), "auto");
 	CHECK(d.get("general", "focus_follows_mouse").typeId() == QMetaType::Bool);
 	CHECK(d.get("general", "focus_follows_mouse").toBool() == false);

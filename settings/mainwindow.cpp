@@ -75,6 +75,7 @@ MainWindow::MainWindow(const QString &configPath, const QString &compositorBinar
 	tabs->addTab(buildInputTab(), tr("Input"));
 	tabs->addTab(buildToolbarTab(), tr("Toolbar"));
 	tabs->addTab(buildLookTab(), tr("Look"));
+	tabs->addTab(buildStartMenuTab(), tr("Start menu"));
 	tabs->addTab(buildKeysTab(), tr("Keybindings"));
 	tabs->addTab(buildOutputsTab(), tr("Monitors"));
 	outer->addWidget(tabs);
@@ -321,13 +322,88 @@ static QTableWidget *makeTable(const QStringList &headers)
 	return t;
 }
 
+QWidget *MainWindow::buildStartMenuTab()
+{
+	auto *w = new QWidget;
+	auto *v = new QVBoxLayout(w);
+	auto *f = new QFormLayout;
+	addField(f, tr("Show the Start button"), "start_menu", "enabled", Bool, true);
+	addField(f, tr("Button label"), "start_menu", "label", String, "Start");
+	addField(f, tr("Ask before logout, shutdown and reboot"), "start_menu", "confirm_power", Bool, true);
+	addField(f, tr("Shutdown command"), "start_menu", "shutdown_command", String,
+		 "loginctl poweroff || systemctl poweroff || poweroff");
+	addField(f, tr("Reboot command"), "start_menu", "reboot_command", String,
+		 "loginctl reboot || systemctl reboot || reboot");
+	addField(f, tr("Logout command"), "start_menu", "logout_command", String, "", {}, 0, 0, 1,
+		 tr("Empty: logging out just ends rei-wm."));
+	addField(f, tr("Run prompt font"), "start_menu", "run_font", Font, "Sans 26", {}, 0, 0, 1,
+		 tr("A Pango font description for the large Run prompt (Mod+r)."));
+	v->addLayout(f);
+
+	auto *hint = new QLabel(tr("<b>Shortcuts</b> appear at the top of the Start menu, in this order (at most 20). "
+				   "Each runs its command through the shell when clicked. Double-click a cell to edit it."));
+	hint->setWordWrap(true);
+	v->addWidget(hint);
+	shortcuts_ = makeTable({ tr("Name"), tr("Command") });
+	shortcuts_->setObjectName("shortcuts");
+	shortcuts_->setColumnWidth(0, 180);
+	v->addWidget(shortcuts_, 1);
+	auto *row = new QHBoxLayout;
+	auto *add = new QPushButton(tr("Add"));
+	auto *del = new QPushButton(tr("Remove"));
+	auto *up = new QPushButton(tr("Move up"));
+	auto *down = new QPushButton(tr("Move down"));
+	add->setObjectName("shortcut_add");
+	del->setObjectName("shortcut_remove");
+	up->setObjectName("shortcut_up");
+	down->setObjectName("shortcut_down");
+	row->addStretch(1);
+	row->addWidget(up);
+	row->addWidget(down);
+	row->addWidget(add);
+	row->addWidget(del);
+	v->addLayout(row);
+	connect(add, &QPushButton::clicked, this, [this] {
+		int r = shortcuts_->rowCount();
+		shortcuts_->insertRow(r);
+		shortcuts_->setItem(r, 0, new QTableWidgetItem(""));
+		shortcuts_->setItem(r, 1, new QTableWidgetItem(""));
+		shortcuts_->setCurrentCell(r, 0);
+		shortcuts_->editItem(shortcuts_->item(r, 0));   /* start typing the name */
+		markDirty();
+	});
+	connect(del, &QPushButton::clicked, this, [this] {
+		auto rows = shortcuts_->selectionModel()->selectedRows();
+		for (int i = rows.size() - 1; i >= 0; i--)
+			shortcuts_->removeRow(rows[i].row());
+		markDirty();
+	});
+	auto move = [this](int delta) {
+		int r = shortcuts_->currentRow(), to = r + delta;
+		if (r < 0 || to < 0 || to >= shortcuts_->rowCount())
+			return;
+		for (int c = 0; c < shortcuts_->columnCount(); c++) {
+			QString a = shortcuts_->item(r, c) ? shortcuts_->item(r, c)->text() : QString();
+			QString b = shortcuts_->item(to, c) ? shortcuts_->item(to, c)->text() : QString();
+			shortcuts_->setItem(r, c, new QTableWidgetItem(b));
+			shortcuts_->setItem(to, c, new QTableWidgetItem(a));
+		}
+		shortcuts_->setCurrentCell(to, shortcuts_->currentColumn() < 0 ? 0 : shortcuts_->currentColumn());
+		markDirty();
+	};
+	connect(up, &QPushButton::clicked, this, [move] { move(-1); });
+	connect(down, &QPushButton::clicked, this, [move] { move(1); });
+	connect(shortcuts_, &QTableWidget::itemChanged, this, &MainWindow::markDirty);
+	return w;
+}
+
 QWidget *MainWindow::buildKeysTab()
 {
 	auto *w = new QWidget;
 	auto *v = new QVBoxLayout(w);
 	auto *hint = new QLabel(tr("“Mod” is the composition key. Actions: exec &lt;command&gt;, close, quit, focus_next, "
 				   "focus_prev, focus|move left|right|up|down, split h|v, toggle_floating, fullscreen, minimize, "
-				   "workspace &lt;n&gt;, move_to_workspace &lt;n&gt;, none (removes a default binding)."));
+				   "run, messages, workspace &lt;n&gt;, move_to_workspace &lt;n&gt;, none (removes a default binding)."));
 	hint->setWordWrap(true);
 	v->addWidget(hint);
 	keys_ = makeTable({ tr("Keys"), tr("Action") });
@@ -404,6 +480,35 @@ QWidget *MainWindow::buildOutputsTab()
 /* ------------------------------------------------------------------------ */
 /* Loading                                                                  */
 /* ------------------------------------------------------------------------ */
+
+void MainWindow::loadShortcuts()
+{
+	shortcuts_->setRowCount(0);
+	for (const QVariantMap &t : doc_.tables("shortcut")) {
+		int r = shortcuts_->rowCount();
+		shortcuts_->insertRow(r);
+		shortcuts_->setItem(r, 0, new QTableWidgetItem(t.value("name").toString()));
+		shortcuts_->setItem(r, 1, new QTableWidgetItem(t.value("command").toString()));
+	}
+}
+
+QList<QVariantMap> MainWindow::shortcutTable() const
+{
+	QList<QVariantMap> list;
+	auto text = [this](int r, int c) {
+		return shortcuts_->item(r, c) ? shortcuts_->item(r, c)->text().trimmed() : QString();
+	};
+	for (int r = 0; r < shortcuts_->rowCount(); r++) {
+		QString name = text(r, 0), command = text(r, 1);
+		if (name.isEmpty() && command.isEmpty())
+			continue;   /* a blank row is just an unfinished one */
+		QVariantMap t;
+		t["name"] = name;   /* (a half-filled row is kept, so rei-wm's check can say what is missing) */
+		t["command"] = command;
+		list << t;
+	}
+	return list;
+}
 
 void MainWindow::loadKeys()
 {
@@ -484,6 +589,8 @@ bool MainWindow::load(QString *error)
 		setFieldValue(f2, v);
 	}
 	loadKeys();
+	loadShortcuts();
+	loadedShortcuts_ = shortcutTable();
 	loadOutputs();
 	loadedOutputs_ = outputTable();  /* In the table's own normal form, to compare against. */
 	loading_ = false;
@@ -602,6 +709,10 @@ bool MainWindow::save(QString *error)
 				doc.set("keybindings", it.key(), it.value());
 	}
 
+	QList<QVariantMap> shorts = shortcutTable();
+	if (shorts != loadedShortcuts_)
+		doc.setTables("shortcut", shorts);
+
 	QList<QVariantMap> outs = outputTable();
 	if (outs != loadedOutputs_) {
 		/* Rewritten as a block; compare against what the table would have produced from the
@@ -636,6 +747,7 @@ bool MainWindow::save(QString *error)
 		f.loaded = fieldValue(f);
 	loadedKeys_ = keyTable();
 	loadedOutputs_ = outs;
+	loadedShortcuts_ = shorts;
 	loading_ = false;
 	dirty_ = false;
 	status_->setText(tr("Saved. A running rei-wm applies most changes immediately; "

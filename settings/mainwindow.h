@@ -60,9 +60,12 @@ private:
 	QWidget *buildLookTab();
 	QWidget *buildKeysTab();
 	QWidget *buildOutputsTab();
+	QWidget *buildStartMenuTab();
 
 	void loadKeys();
 	void loadOutputs();
+	void loadShortcuts();
+	QList<QVariantMap> shortcutTable() const;
 	QMap<QString, QString> keyTable() const;
 	QList<QVariantMap> outputTable() const;
 	QString findCompositor() const;
@@ -71,10 +74,10 @@ private:
 	QString path_, binary_;
 	TomlDoc doc_;
 	QVector<Field> fields_;
-	QTableWidget *keys_ = nullptr, *outputs_ = nullptr;
+	QTableWidget *keys_ = nullptr, *outputs_ = nullptr, *shortcuts_ = nullptr;
 	QLabel *status_ = nullptr;
 	QMap<QString, QString> loadedKeys_;
-	QList<QVariantMap> loadedOutputs_;
+	QList<QVariantMap> loadedOutputs_, loadedShortcuts_;
 	bool loading_ = false;
 	bool dirty_ = false;
 };
