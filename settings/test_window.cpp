@@ -10,6 +10,7 @@
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QPushButton>
 #include <QSpinBox>
 #include <QTabWidget>
@@ -19,6 +20,7 @@
 #include <cstdlib>
 
 #include "mainwindow.h"
+#include "themeeditor.h"
 
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "%s:%d: CHECK failed: %s\n", __FILE__, __LINE__, #c); exit(1); } } while (0)
 
@@ -85,7 +87,7 @@ int main(int argc, char **argv)
 
 	/* Change some things. */
 	field<QSpinBox>(w, "layout.gap_outer")->setValue(24);
-	field<QCheckBox>(w, "general.focus_follows_mouse")->setChecked(true);
+	field<QCheckBox>(w, "general.focus_follows_mouse")->setChecked(false);   /* (on by default) */
 	field<QComboBox>(w, "toolbar.position")->setCurrentText("bottom");
 	field<QWidget>(w, "input.keyboard_layout")->findChild<QLineEdit *>("edit")->setText("us,de");
 	field<QDoubleSpinBox>(w, "input.pointer_accel")->setValue(0.5);
@@ -102,7 +104,7 @@ int main(int argc, char **argv)
 	CHECK(after.contains("backend = \"auto\"   # keep auto\n"));  /* untouched line, comment kept */
 	CHECK(after.contains("gap_outer = 24\n"));
 	CHECK(after.contains("gap_inner = 10\n"));
-	CHECK(after.contains("focus_follows_mouse = true\n"));
+	CHECK(after.contains("focus_follows_mouse = false\n"));
 	CHECK(after.contains("[toolbar]\nposition = \"bottom\"\n"));
 	CHECK(after.contains("keyboard_layout = \"us,de\"\n"));
 	CHECK(after.contains("pointer_accel = 0.5\n"));
@@ -220,6 +222,78 @@ int main(int argc, char **argv)
 		field<QPushButton>(ws4, "shortcut_remove")->click();
 		CHECK(ws4.save(&err));
 		CHECK(!slurp(spath).contains("[[shortcut]]"));
+	}
+
+	/* The new tabs' fields exist and carry rei-wm's defaults. */
+	{
+		MainWindow wn(path, wm);
+		CHECK(field<QCheckBox>(wn, "messages.enabled")->isChecked());
+		CHECK(field<QComboBox>(wn, "messages.position")->currentText() == "right");
+		CHECK(field<QDoubleSpinBox>(wn, "messages.duration")->value() == 10.0);
+		CHECK(field<QSpinBox>(wn, "messages.max_visible")->value() == 6);
+		CHECK(field<QCheckBox>(wn, "toolbar.sysinfo")->isChecked());
+		CHECK(field<QCheckBox>(wn, "audio.autostart")->isChecked());
+		CHECK(field<QSpinBox>(wn, "audio.max_volume")->value() == 100);
+		field<QComboBox>(wn, "messages.position")->setCurrentText("left");
+		field<QDoubleSpinBox>(wn, "messages.duration")->setValue(4.5);
+		field<QCheckBox>(wn, "toolbar.sysinfo")->setChecked(false);
+		field<QCheckBox>(wn, "audio.autostart")->setChecked(false);
+		CHECK(wn.save(&err));
+		QString t = slurp(path);
+		CHECK(t.contains("[messages]\nposition = \"left\"\nduration = 4.5\n"));
+		CHECK(t.contains("sysinfo = false\n") && t.contains("autostart = false\n"));
+	}
+
+	/* The theme editor: effective values from rei-wm, edits written as [theme.<element>] keys, the rest left alone. */
+	{
+		MainWindow wt(path, wm);
+		auto *radius = field<QDoubleSpinBox>(wt, "theme.tray_tile.radius");
+		CHECK(radius->value() == 4);   /* rei-wm's built-in look */
+		CHECK(field<QWidget>(wt, "theme.toolbar.color") != nullptr);
+		CHECK(field<QCheckBox>(wt, "theme.menu_row.icon")->isChecked());          /* iconable elements have an icon switch */
+		CHECK(wt.findChild<QDoubleSpinBox *>("theme.tooltip.icon_size") == nullptr);   /* others do not */
+		CHECK(field<QDoubleSpinBox>(wt, "theme.menu_row.glow_size")->value() > 0);
+		CHECK(!wt.dirty());
+		QString before2 = slurp(path);
+		CHECK(wt.save(&err));
+		CHECK(slurp(path) == before2);   /* nothing changed, nothing written */
+
+		if (qEnvironmentVariableIsSet("REI_SHOT_DIR")) {   /* for looking at, not for checking */
+			auto *tabs = wt.findChild<QTabWidget *>();
+			for (int i = 0; i < tabs->count(); i++)
+				if (tabs->tabText(i) == "Theme")
+					tabs->setCurrentIndex(i);
+			wt.findChild<ThemeEditor *>("theme_editor")->findChild<QListWidget *>("theme_elements")->setCurrentRow(6);   /* Menu rows */
+			wt.resize(1040, 900);
+			wt.show();
+			QString e;
+			CHECK(wt.findChild<ThemeEditor *>("theme_editor")->refreshPreviewNow(&e));
+			CHECK(wt.grab().save(qEnvironmentVariable("REI_SHOT_DIR") + "/settings-theme.png"));
+		}
+
+		radius->setValue(9);
+		field<QComboBox>(wt, "theme.dialog.shape")->setCurrentText("bevel");
+		field<QDoubleSpinBox>(wt, "theme.menu_row.glow_size")->setValue(0);
+		field<QWidget>(wt, "theme.messages.shadow_color");
+		CHECK(wt.dirty());
+		auto *te = wt.findChild<ThemeEditor *>("theme_editor");
+		CHECK(te && te->changed());
+		QString perr;
+		CHECK(te->refreshPreviewNow(&perr));   /* rei-wm draws the preview with the edits */
+		CHECK(te->previewSize().width() >= 900 && te->previewSize().height() >= 400);
+		CHECK(wt.save(&err));
+		QString tt = slurp(path);
+		CHECK(tt.contains("[theme.tray_tile]\nradius = 9.0\n"));
+		CHECK(tt.contains("[theme.dialog]\nshape = \"bevel\"\n"));
+		CHECK(tt.contains("[theme.menu_row]\nglow_size = 0.0\n"));
+		CHECK(!tt.contains("[theme.toolbar]"));   /* untouched elements are not written */
+		MainWindow wt2(path, wm);
+		CHECK(field<QDoubleSpinBox>(wt2, "theme.tray_tile.radius")->value() == 9);
+		CHECK(field<QComboBox>(wt2, "theme.dialog.shape")->currentText() == "bevel");
+		/* The flavor icons folder is a plain [theme] setting. */
+		field<QWidget>(wt2, "theme.flavor_icons")->findChild<QLineEdit *>("edit")->setText("/tmp/icons");
+		CHECK(wt2.save(&err));
+		CHECK(slurp(path).contains("flavor_icons = \"/tmp/icons\"\n"));
 	}
 
 	/* A missing file: the window starts from rei-wm's default config. */

@@ -14,6 +14,7 @@ core_sources = files(
   'scene.c',
   'popup.c',
   'confirm.c',
+  'theme_cli.c',
   'msgbuf.c',
   'proto/viewporter.c',
   'proto/fractional_scale.c',

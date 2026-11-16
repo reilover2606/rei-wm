@@ -5,10 +5,10 @@ qt6_dep = dependency('qt6', modules: ['Core', 'Widgets', 'Test'], required: get_
 if qt6_dep.found()
   add_languages('cpp', native: false)
 
-  moc_files = qt6.preprocess(moc_headers: ['mainwindow.h'])
+  moc_files = qt6.preprocess(moc_headers: ['mainwindow.h', 'themeeditor.h'])
 
   settings_lib = static_library('rei-settings-core',
-    ['tomldoc.cpp', 'mainwindow.cpp', moc_files],
+    ['tomldoc.cpp', 'mainwindow.cpp', 'themeeditor.cpp', moc_files],
     dependencies: qt6_dep,
     cpp_args: ['-Wall', '-Wextra'],
     override_options: ['cpp_std=c++17'],
