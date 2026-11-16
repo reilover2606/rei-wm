@@ -8,7 +8,7 @@
 #include "util/util.h"
 
 static const char *const element_names[REI_ELEM_COUNT] = {
-	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "start_button", "run_prompt", "sysinfo", "dialog", "battery",
+	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "start_button", "run_prompt", "messages", "sysinfo", "dialog", "battery",
 };
 bool rei_element_iconable(enum rei_element e)
 {
@@ -111,6 +111,15 @@ void rei_theme_defaults(struct rei_theme *t, uint32_t bg, uint32_t fg, uint32_t 
 	run->shadow = (struct rei_shadow){ 0x000000, 0.45f, 0, 4, 18 };
 	run->glow = (struct rei_glow){ 0xffffff, 0.45f, 14 };
 
+	/* The message column: plain text with a dark halo (there is no box); the stack view puts a
+	 * translucent backdrop behind everything. */
+	struct rei_style *msg = &t->e[REI_ELEM_MESSAGES];
+	msg->color = rei_color_mix(bg, 0x000000, 0.35);
+	msg->opacity = 0.86f;
+	msg->shape = REI_SHAPE_ROUNDED;
+	msg->radius = 10;
+	msg->shadow = (struct rei_shadow){ 0x000000, 0.85f, 0, 1, 2 };
+
 	/* The CPU/RAM readout: a quiet rounded box. */
 	struct rei_style *sys = &t->e[REI_ELEM_SYSINFO];
 	sys->color = rei_color_mix(bg, hi, 0.30);
@@ -192,7 +201,7 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				idx = e;
 		if (idx < 0) {
 			snprintf(err, errlen, "theme.%s: unknown element (known: toolbar, workspace_button, "
-				 "tray_tile, tray_overflow, tooltip, menu, menu_row, start_button, run_prompt, sysinfo, dialog, battery)", el->key);
+				 "tray_tile, tray_overflow, tooltip, menu, menu_row, start_button, run_prompt, messages, sysinfo, dialog, battery)", el->key);
 			return false;
 		}
 		if (el->val->type != TOML_TABLE) {

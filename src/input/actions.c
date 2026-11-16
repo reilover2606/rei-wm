@@ -1,6 +1,7 @@
 #include "input/actions.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +15,7 @@
 #include "util/log.h"
 #include "util/util.h"
 #include "audio.h"
+#include "msgbuf.h"
 #include "runprompt.h"
 #include "sessionbus.h"
 #include "xwayland.h"
@@ -76,10 +78,18 @@ static void free_environment(char **env)
 	free(env);
 }
 
-bool rei_spawn(struct rei_server *s, const char *command)
+/* Starts `command` through the shell, detached. With out_fd, its stdout and stderr are connected to a
+ * pipe whose read end is returned there (non-blocking); its stdin is /dev/null. */
+static bool spawn(struct rei_server *s, const char *command, int *out_fd)
 {
 	char **env = build_environment(s, s->socket_name);
 	bool ok = false;
+	int pfd[2] = { -1, -1 };
+	if (out_fd && pipe2(pfd, O_CLOEXEC) != 0) {
+		rei_error("cannot start '%s': pipe: %s", command, strerror(errno));
+		free_environment(env);
+		return false;
+	}
 
 	pid_t pid = fork();
 	if (pid < 0) {
@@ -95,6 +105,13 @@ bool rei_spawn(struct rei_server *s, const char *command)
 			sigset_t none;
 			sigemptyset(&none);
 			sigprocmask(SIG_SETMASK, &none, NULL);
+			if (out_fd) {
+				int nul = open("/dev/null", O_RDONLY);
+				if (nul >= 0)
+					dup2(nul, STDIN_FILENO);
+				dup2(pfd[1], STDOUT_FILENO);
+				dup2(pfd[1], STDERR_FILENO);
+			}
 			char *const argv[] = { "sh", "-c", (char *)command, NULL };
 			execve("/bin/sh", argv, env);
 			_exit(127);
@@ -108,7 +125,27 @@ bool rei_spawn(struct rei_server *s, const char *command)
 			rei_error("cannot start '%s'", command);
 	}
 	free_environment(env);
+	if (out_fd) {
+		if (pfd[1] >= 0)
+			close(pfd[1]);
+		if (ok) {
+			fcntl(pfd[0], F_SETFL, fcntl(pfd[0], F_GETFL) | O_NONBLOCK);
+			*out_fd = pfd[0];
+		} else if (pfd[0] >= 0) {
+			close(pfd[0]);
+		}
+	}
 	return ok;
+}
+
+bool rei_spawn(struct rei_server *s, const char *command)
+{
+	return spawn(s, command, NULL);
+}
+
+bool rei_spawn_capture(struct rei_server *s, const char *command, int *out_fd)
+{
+	return spawn(s, command, out_fd);
 }
 
 void rei_actions_run(struct rei_server *s, const struct rei_action *action)
@@ -118,6 +155,9 @@ void rei_actions_run(struct rei_server *s, const struct rei_action *action)
 		break;
 	case REI_ACTION_RUN:
 		rei_prompt_open(s);
+		break;
+	case REI_ACTION_MESSAGES:
+		rei_msg_toggle_stack(s);
 		break;
 	case REI_ACTION_MINIMIZE:
 		rei_wm_minimize_active(s);

@@ -952,6 +952,92 @@ struct rei_pixbuf *rei_bar_prompt_render(const struct rei_prompt_state *st, int 
 	return pb;
 }
 
+/* ---- The message column ---- */
+
+struct rei_pixbuf *rei_bar_message_render(const struct rei_message_state *st, int *w_out, int *h_out)
+{
+	cairo_surface_t *probe = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
+	cairo_t *pcr = cairo_create(probe);
+	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 12");
+	PangoLayout *l = make_layout(pcr, font, st->text);
+	pango_layout_set_width(l, st->width * PANGO_SCALE);
+	pango_layout_set_wrap(l, PANGO_WRAP_WORD_CHAR);
+	pango_layout_set_alignment(l, st->align_right ? PANGO_ALIGN_RIGHT : PANGO_ALIGN_LEFT);
+	int tw, th;
+	pango_layout_get_pixel_size(l, &tw, &th);
+	g_object_unref(l);
+	cairo_destroy(pcr);
+	cairo_surface_destroy(probe);
+
+	int w = st->width + 2 * REI_MSG_PAD, h = th + 2 * REI_MSG_PAD;
+	*w_out = w;
+	*h_out = h;
+	int scale = st->scale < 1 ? 1 : st->scale;
+	struct rei_pixbuf *pb = rei_pixbuf_create(w * scale, h * scale, false);
+	if (!pb) {
+		pango_font_description_free(font);
+		return NULL;
+	}
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w * scale, h * scale);
+	cairo_t *cr = cairo_create(surface);
+	cairo_scale(cr, scale, scale);
+	l = make_layout(cr, font, st->text);
+	pango_layout_set_width(l, st->width * PANGO_SCALE);
+	pango_layout_set_wrap(l, PANGO_WRAP_WORD_CHAR);
+	pango_layout_set_alignment(l, st->align_right ? PANGO_ALIGN_RIGHT : PANGO_ALIGN_LEFT);
+
+	/* The halo: the text in the shadow colour, nudged around, so it reads over any window. */
+	double halo = st->style.shadow.opacity * 0.45;
+	if (halo > 0.001) {
+		static const double dx[] = { -1.5, 1.5, 0, 0, -1, 1, -1, 1 };
+		static const double dy[] = { 0, 0, -1.5, 1.5, -1, -1, 1, 1 };
+		set_rgba(cr, st->style.shadow.color, halo);
+		for (int i = 0; i < 8; i++) {
+			cairo_move_to(cr, REI_MSG_PAD + dx[i], REI_MSG_PAD + dy[i] + st->style.shadow.dy);
+			pango_cairo_show_layout(cr, l);
+		}
+	}
+	set_color(cr, st->style.text_color);
+	cairo_move_to(cr, REI_MSG_PAD, REI_MSG_PAD);
+	pango_cairo_show_layout(cr, l);
+	g_object_unref(l);
+	pango_font_description_free(font);
+	cairo_destroy(cr);
+	cairo_surface_flush(surface);
+	const uint8_t *src = cairo_image_surface_get_data(surface);
+	int stride = cairo_image_surface_get_stride(surface);
+	for (int y = 0; y < pb->height; y++)
+		memcpy(pb->data + (size_t)y * (size_t)pb->width * 4, src + (size_t)y * (size_t)stride,
+		       (size_t)pb->width * 4);
+	cairo_surface_destroy(surface);
+	return pb;
+}
+
+struct rei_pixbuf *rei_bar_message_panel_render(const struct rei_style *style, int scale, int w, int h)
+{
+	if (scale < 1)
+		scale = 1;
+	struct rei_pixbuf *pb = rei_pixbuf_create(w * scale, h * scale, false);
+	if (!pb)
+		return NULL;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w * scale, h * scale);
+	cairo_t *cr = cairo_create(surface);
+	cairo_scale(cr, scale, scale);
+	struct rei_style flat = *style;
+	flat.shadow.opacity = 0;   /* its shadow is the text's halo, not the backdrop's */
+	flat.glow.size = 0;
+	draw_box(cr, &flat, 0, 0, w, h, style->color, 1.0);
+	cairo_destroy(cr);
+	cairo_surface_flush(surface);
+	const uint8_t *src = cairo_image_surface_get_data(surface);
+	int stride = cairo_image_surface_get_stride(surface);
+	for (int y = 0; y < pb->height; y++)
+		memcpy(pb->data + (size_t)y * (size_t)pb->width * 4, src + (size_t)y * (size_t)stride,
+		       (size_t)pb->width * 4);
+	cairo_surface_destroy(surface);
+	return pb;
+}
+
 /* ---- The volume popup ---- */
 
 void rei_bar_volpop_layout(struct rei_rect *button, struct rei_rect *track)

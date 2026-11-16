@@ -97,6 +97,7 @@ struct rei_server {
 	struct rei_prompt *prompt;
 	struct rei_confirm *confirm;
 	struct rei_volpop *volpop;
+	struct rei_messages *messages;
 	struct wl_list fractional_scales;   /* rei_fractional (wp_fractional_scale_v1 objects) */     /* The Run prompt. */
 	struct rei_startmenu *startmenu;
 	bool start_hover;

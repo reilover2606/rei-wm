@@ -239,6 +239,25 @@ struct rei_volpop_state {
 void rei_bar_volpop_layout(struct rei_rect *button, struct rei_rect *track);
 struct rei_pixbuf *rei_bar_volpop_render(const struct rei_volpop_state *state, int *margin);
 
+/* ---- The message column's pictures ---- */
+
+#define REI_MSG_PAD 4   /* room around the text for its halo */
+
+struct rei_message_state {
+	char text[4100];
+	char font[96];
+	int scale;
+	int width;          /* logical width of the text column (without the padding) */
+	bool align_right;
+	struct rei_style style;   /* text_color; shadow = the halo */
+};
+
+/* One message: wrapped text, aligned to the side, with a dark halo. *w and *h are the picture's
+ * logical size, padding included. */
+struct rei_pixbuf *rei_bar_message_render(const struct rei_message_state *state, int *w, int *h);
+/* The stack view's translucent backdrop. */
+struct rei_pixbuf *rei_bar_message_panel_render(const struct rei_style *style, int scale, int w, int h);
+
 /* A tooltip: `text` in a box styled by `style`. Returns the picture, which includes the box's
  * shadow; the box itself is box_w x box_h with `margin` pixels of picture around it. */
 struct rei_pixbuf *rei_bar_tooltip_render(const char *text, const char *font, const struct rei_style *style,

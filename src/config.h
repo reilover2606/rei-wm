@@ -87,6 +87,13 @@ struct rei_config {
 	char *start_reboot_command;
 	char *start_logout_command;     /* Empty: "Logout" simply ends rei-wm. */
 	bool start_confirm_power;       /* Ask for a second click before logging out, shutting down or rebooting. */
+	bool messages_enabled;          /* [messages] enabled */
+	bool messages_right;            /* [messages] position = "right" (else "left") */
+	double messages_duration;       /* seconds a new message stays visible */
+	int messages_max_visible;       /* most messages shown at once outside the stack view */
+	int messages_width;             /* logical width of the message column, pixels */
+	int messages_history;           /* messages kept for the stack view */
+	char *messages_font;            /* Pango font description */
 	char *start_run_font;           /* Pango font of the Run prompt. */
 	struct rei_shortcut_config *shortcuts;
 	size_t n_shortcuts;

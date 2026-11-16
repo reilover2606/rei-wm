@@ -254,6 +254,30 @@ static void test_exec_binding(struct client *c, const char *marker)
 	free(text);
 }
 
+/* A key the compositor consumed (a binding's) must not be reported as held to the window that takes
+ * focus while it is still down: its release is consumed too, so the client would think it was held
+ * forever (Xwayland then auto-repeats it). */
+static void test_swallowed_key_not_held_at_enter(struct client *c, const char *marker)
+{
+	unlink(marker);
+	inject("key %d 1", KEY_SUPER);
+	inject("key %d 1", KEY_T);   /* the binding fires; T is consumed */
+	settle(c);
+	wait_file(marker);
+	ev_clear(c);
+	struct window wx;
+	open_window(c, &wx, "swallow", 100, 80, 0x00ff00ff);   /* takes focus while T is still down */
+	CHECK(wl_display_roundtrip(c->d) >= 0);
+	CHECK(wl_display_roundtrip(c->d) >= 0);
+	const struct ev *enter = ev_nth(c, EV_KB_ENTER, 0);
+	CHECK(enter && enter->surface == wx.surface);
+	CHECK(enter->b == 1);   /* only Super, not Super and T */
+	inject("key %d 0", KEY_T);
+	inject("key %d 0", KEY_SUPER);
+	settle(c);
+	close_win(&wx);
+}
+
 static void test_close_binding_and_exact_modifiers(struct client *c, struct window *w1)
 {
 	/* Mod+q (no shift) is NOT bound: the client sees the keys. */
@@ -636,6 +660,7 @@ int main(int argc, char **argv)
 	test_pointer_motion(&a, &w1);
 	test_keys_and_modifiers(&a);
 	test_exec_binding(&a, marker);
+	test_swallowed_key_not_held_at_enter(&a, marker);
 	test_close_binding_and_exact_modifiers(&a, &w1);
 	test_axis(&a);
 	test_interactive_move(&a, &w1);          /* W1 now at (350,290) */
