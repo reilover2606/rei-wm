@@ -15,6 +15,7 @@
 #include "util/util.h"
 #include "audio.h"
 #include "runprompt.h"
+#include "sessionbus.h"
 #include "xwayland.h"
 
 extern char **environ;
@@ -28,14 +29,15 @@ static char **build_environment(struct rei_server *server, const char *socket_na
 	while (environ[n])
 		n++;
 
-	char **env = rei_xcalloc(n + 4, sizeof *env);
+	char **env = rei_xcalloc(n + 5, sizeof *env);
 	size_t out = 0;
 	for (size_t i = 0; i < n; i++) {
 		/* DISPLAY would point X11 programs at some other X server (e.g. your
 		 * desktop's) until rei-wm runs its own Xwayland. */
 		if (strncmp(environ[i], "WAYLAND_DISPLAY=", 16) != 0 &&
 		    strncmp(environ[i], "DISPLAY=", 8) != 0 &&
-		    strncmp(environ[i], "XDG_RUNTIME_DIR=", 16) != 0)
+		    strncmp(environ[i], "XDG_RUNTIME_DIR=", 16) != 0 &&
+		    !(rei_sessionbus_address(server) && strncmp(environ[i], "DBUS_SESSION_BUS_ADDRESS=", 25) == 0))
 			env[out++] = rei_xstrdup(environ[i]);
 	}
 	char *wd = NULL;
@@ -50,6 +52,12 @@ static char **build_environment(struct rei_server *server, const char *socket_na
 		if (asprintf(&xd, "DISPLAY=%s", xdisplay) < 0)
 			abort();
 		env[out++] = xd;
+	}
+	if (rei_sessionbus_address(server)) {
+		char *db = NULL;
+		if (asprintf(&db, "DBUS_SESSION_BUS_ADDRESS=%s", rei_sessionbus_address(server)) < 0)
+			abort();
+		env[out++] = db;
 	}
 	const char *rt = getenv("XDG_RUNTIME_DIR");
 	if (rt && rt[0]) {

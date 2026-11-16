@@ -307,6 +307,11 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		const struct toml_value *xw = get(&r, general, "general.", "xwayland", TOML_BOOL);
 		if (xw)
 			cfg->xwayland = xw->u.b;
+		static const char *const buses[] = { "inherit", "private", NULL };
+		char *bus = rei_xstrdup("inherit");
+		read_choice(&r, general, "general.", "session_bus", &bus, buses);
+		cfg->session_bus_private = strcmp(bus, "private") == 0;
+		free(bus);
 		const struct toml_value *ffm = get(&r, general, "general.", "focus_follows_mouse", TOML_BOOL);
 		if (ffm)
 			cfg->focus_follows_mouse = ffm->u.b;
