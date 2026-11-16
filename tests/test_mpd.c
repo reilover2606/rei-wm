@@ -64,6 +64,7 @@ static int fake_mpd(const char *path, const char *logpath)
 	for (int i = 0; i < 4; i++)
 		cl[i].fd = -1;
 	int state = 0 /* 0 stop 1 play 2 pause */, song = 0, id = 100, volume = 80;
+	int rnd = 0, rep = 0, single = 0;
 	for (;;) {
 		struct pollfd p[5];
 		int n = 0;
@@ -120,7 +121,8 @@ static int fake_mpd(const char *path, const char *logpath)
 					fclose(lf);
 				}
 				if (!strcmp(line, "status")) {
-					say(c->fd, "volume: %d\nstate: %s\n", volume, state == 1 ? "play" : state == 2 ? "pause" : "stop");
+					say(c->fd, "volume: %d\nrandom: %d\nrepeat: %d\nsingle: %d\nstate: %s\n", volume, rnd, rep, single,
+					    state == 1 ? "play" : state == 2 ? "pause" : "stop");
 					if (state)
 						say(c->fd, "songid: %d\n", id);
 					say(c->fd, "OK\n");
@@ -145,6 +147,16 @@ static int fake_mpd(const char *path, const char *logpath)
 						state = 2, change = true;
 					else if (!strcmp(line, "pause 0") && state == 2)
 						state = 1, change = true;
+					else if (!strcmp(line, "previous") && state) {
+						song = (song + 2) % 3;
+						id++;
+						change = true;
+					} else if (!strncmp(line, "random ", 7))
+						rnd = atoi(line + 7), change = true;
+					else if (!strncmp(line, "repeat ", 7))
+						rep = atoi(line + 7), change = true;
+					else if (!strncmp(line, "single ", 7))
+						single = atoi(line + 7), change = true;
 					else if (!strncmp(line, "setvol ", 7))
 						volume = atoi(line + 7), change = true;
 					else if (!strcmp(line, "play"))
@@ -221,7 +233,7 @@ static int g_panel_dx;   /* how far the panel was pushed aside (a wide message c
 
 static void button_center(bool running, int i, int *x, int *y)
 {
-	struct rei_rect b[3];
+	struct rei_rect b[REI_MPD_BUTTONS];
 	int n = rei_bar_mpd_buttons(running, b);
 	CHECK(i < n);
 	int bx = (g_w - REI_MPDP_W) / 2 + g_panel_dx, by = g_h - 10 - REI_MPDP_H;
@@ -374,17 +386,17 @@ int main(int argc, char **argv)
 	CHECK(!log_has("message: Now playing"));
 	keep("mpd-controls-stopped");
 	int px, py;
-	button_center(true, 0, &px, &py);   /* play */
+	button_center(true, 1, &px, &py);   /* play (the middle button: one for play and pause) */
 	click(px, py);
 	wait_cmd("play", 1);
 	wait_log("message: Now playing: Ada - One", 4000);
 	settle_all();
 	keep("mpd-controls-playing");
-	button_center(true, 1, &px, &py);   /* pause */
+	button_center(true, 1, &px, &py);   /* the same button now pauses */
 	click(px, py);
 	wait_cmd("pause 1", 1);
 	sleep_ms(250);                      /* (MPD tells us, then the button knows it is paused) */
-	button_center(true, 0, &px, &py);   /* resume */
+	button_center(true, 1, &px, &py);   /* and resumes */
 	click(px, py);
 	wait_cmd("pause 0", 1);
 	sleep_ms(250);
@@ -393,8 +405,47 @@ int main(int argc, char **argv)
 	click(px, py);
 	wait_cmd("next", 1);
 	wait_log("message: Now playing: Bob - Two", 4000);
+	sleep_ms(200);
+	button_center(true, 0, &px, &py);   /* previous */
+	click(px, py);
+	wait_cmd("previous", 1);
+	wait_log("message: Now playing: Ada - One", 4000);   /* (Bob - Two back to Ada - One: announced again, it is new) */
+	CHECK(log_count("message: Now playing: Ada - One") == 2);
+	sleep_ms(200);
+	button_center(true, 2, &px, &py);   /* skip again, to where it was */
+	click(px, py);
+	wait_cmd("next", 2);
+	wait_log("message: Now playing: Bob - Two", 4000);
+	sleep_ms(200);
 	CHECK(kill(fake, SIGUSR1) == 0);    /* someone else changes the song */
 	wait_log("message: Now playing: Cyd - Three", 4000);
+
+	/* The toggles: shuffle, loop all, loop one (the two loops exclude each other; the lit one turns itself off). */
+	sleep_ms(200);
+	button_center(true, 3, &px, &py);
+	click(px, py);
+	wait_cmd("random 1", 1);
+	sleep_ms(250);
+	keep("mpd-controls-shuffle");
+	button_center(true, 4, &px, &py);   /* loop all: repeat on, single off */
+	click(px, py);
+	wait_cmd("repeat 1", 1);
+	wait_cmd("single 0", 1);
+	sleep_ms(250);
+	button_center(true, 5, &px, &py);   /* loop one: repeat and single */
+	click(px, py);
+	wait_cmd("single 1", 1);
+	sleep_ms(250);
+	keep("mpd-controls-loop-one");
+	button_center(true, 5, &px, &py);   /* off again: no looping */
+	click(px, py);
+	wait_cmd("single 0", 2);
+	wait_cmd("repeat 0", 1);
+	sleep_ms(250);
+	button_center(true, 3, &px, &py);   /* shuffle off */
+	click(px, py);
+	wait_cmd("random 0", 1);
+	sleep_ms(250);
 	inject("key 57 1");                 /* Space: pause */
 	inject("key 57 0");
 	settle_all();
@@ -558,7 +609,7 @@ int main(int argc, char **argv)
 	CHECK(g_panel_dx < 0 && g_panel_dx > -60);   /* a small step left, not a jump */
 	open_stack();
 	int before = count_cmd("play");
-	button_center(true, 0, &px, &py);
+	button_center(true, 1, &px, &py);
 	click(px, py);
 	wait_cmd("play", before + 1);   /* the button was where it was drawn */
 	keep("mpd-wide");

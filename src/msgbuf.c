@@ -340,6 +340,9 @@ static void mpd_state_for(struct rei_server *s, struct rei_mpd_panel_state *st, 
 	memset(st, 0, sizeof *st);
 	st->running = info.connected;
 	st->mode = info.state == REI_MPD_PLAYING ? 1 : info.state == REI_MPD_PAUSED ? 2 : 0;
+	st->shuffle = info.shuffle;
+	st->loop_all = info.loop_all;
+	st->loop_one = info.loop_one;
 	if (!info.connected)
 		snprintf(st->label, sizeof st->label, "MPD is not running");
 	else if (!info.title[0])
@@ -392,7 +395,7 @@ static int mpd_button_at(const struct rei_server *s, double x, double y)
 		return -1;
 	struct rei_mpd_info info;
 	rei_mpd_info_get(s, &info);
-	struct rei_rect b[3];
+	struct rei_rect b[REI_MPD_BUTTONS];
 	int n = rei_bar_mpd_buttons(info.connected, b);
 	for (int i = 0; i < n; i++) {
 		double bx = m->mpd_box.x + b[i].x, by = m->mpd_box.y + b[i].y;
@@ -607,11 +610,17 @@ void rei_msg_stack_press(struct rei_server *s, double x, double y)
 		if (!info.connected)
 			rei_mpd_launch(s);
 		else if (b == 0)
-			rei_mpd_play(s);
+			rei_mpd_previous(s);
 		else if (b == 1)
-			rei_mpd_pause(s);
-		else
+			rei_mpd_toggle(s);   /* playing: pause; paused or stopped: play */
+		else if (b == 2)
 			rei_mpd_next(s);
+		else if (b == 3)
+			rei_mpd_toggle_shuffle(s);
+		else if (b == 4)
+			rei_mpd_toggle_loop_all(s);
+		else
+			rei_mpd_toggle_loop_one(s);
 		return;
 	}
 	bool on_controls = m->mpd_box.w > 0 && s->config->mpd_enabled && x >= m->mpd_box.x - 8 &&

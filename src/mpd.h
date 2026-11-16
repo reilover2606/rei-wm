@@ -11,7 +11,8 @@ struct rei_server;
  * rei-wm keeps one connection to MPD, which it keeps asking "tell me when the player changes" (idle), and
  * tries to reconnect every couple of seconds while MPD is not running (so the controls know whether to
  * show play/pause/skip or a button that starts it). A new song while playing is announced in the message
- * stack ("Now playing: Artist - Title").
+ * stack ("Now playing: Artist - Title"). Besides play/pause/next/previous it sets shuffle (random), loop all
+ * (repeat) and loop one (repeat with single).
  *
  * Where MPD is: [mpd] host (an IP address, "localhost" or the path of a socket), else $MPD_HOST, else
  * $XDG_RUNTIME_DIR/mpd/socket when that exists, else localhost; the port from [mpd] port or $MPD_PORT.
@@ -25,6 +26,9 @@ struct rei_mpd_info {
 	enum rei_mpd_state state;
 	int volume;       /* 0..100, or -1 when MPD has no mixer to set it with */
 	bool muted;       /* "muted" by rei-wm: the volume was set to 0 and will be put back */
+	bool shuffle;     /* random */
+	bool loop_all;    /* repeat the playlist */
+	bool loop_one;    /* repeat the current song */
 	char title[256];  /* "Artist - Title" (or the title, or the file name); "" when nothing is loaded */
 };
 
@@ -39,6 +43,12 @@ void rei_mpd_play(struct rei_server *server);    /* resumes when paused, starts 
 void rei_mpd_pause(struct rei_server *server);
 void rei_mpd_toggle(struct rei_server *server);
 void rei_mpd_next(struct rei_server *server);
+void rei_mpd_previous(struct rei_server *server);
+/* Shuffle (random); loop all (repeat the playlist); loop one (repeat the song). The two loops exclude each other,
+ * and turning the lit one off stops looping. */
+void rei_mpd_toggle_shuffle(struct rei_server *server);
+void rei_mpd_toggle_loop_all(struct rei_server *server);
+void rei_mpd_toggle_loop_one(struct rei_server *server);
 /* MPD's own volume (setvol), 0..100. The new value is known at once, before MPD has answered, so keys pressed
  * in quick succession add up. */
 void rei_mpd_set_volume(struct rei_server *server, int percent);

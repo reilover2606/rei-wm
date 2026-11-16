@@ -370,8 +370,10 @@ is swallowed (your keybindings and the Ctrl+Alt+F switch still work; a key relea
 before the view opened is still released in its window, so nothing stays held down). Escape, Mod+n, or a
 click on the blurred background closes it.
 
-At its bottom centre are the **music controls** for MPD: a "Now playing: ..." label and **play**, **pause** and
-**skip** buttons (Space also toggles play/pause). If MPD is not running there are no controls, only a
+At its bottom centre are the **music controls** for MPD: a "Now playing: ..." label, a row of **previous**, a
+single **play/pause** button in the middle (it shows pause while playing, and lights up) and **skip**, and
+below it three smaller toggles: **shuffle**, **loop all** (repeat the playlist) and **loop one** (repeat the
+song). The two loops exclude each other, and pressing the lit one stops looping. Space also toggles play/pause. If MPD is not running there are no controls, only a
 **Start MPD** button, which runs `[mpd] start_command` (default `mpd`) and picks the server up as soon as it
 answers. When the song changes, `Now playing: Artist - Title` is added to the messages. The panel keeps clear of
 the message column on a narrow screen. The look is the `[theme.mpd]` element (buttons use `start_button`).
