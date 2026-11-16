@@ -38,6 +38,7 @@ rei-wm starts and uses these, and carries on without them (with a log line) when
 | Program | Package | What breaks without it |
 |---|---|---|
 | **Xwayland** | `x11-base/xwayland` | Every X11 program (urxvt, leafpad, xterm, GTK2 programs) fails with "cannot open display". rei-wm logs `xwayland: the Xwayland process exited ...`. |
+| xrdb | `x11-apps/xrdb` | `~/.Xresources` is not loaded into Xwayland (urxvt/xterm ignore their colours, fonts and transparency) |
 | seatd or elogind | `sys-auth/seatd` or `sys-auth/elogind` | no access to the display and input devices |
 | PipeWire | `media-video/pipewire` | no volume widget |
 | WirePlumber | `media-video/wireplumber` | PipeWire without sound devices: no volume widget |

@@ -959,6 +959,52 @@ static bool composite_redirect_root(struct rei_xwayland *x)
 	return err == NULL;
 }
 
+/* Loads the user's X resources (~/.Xresources) into the X server, as an X session's startup script
+ * does with `xrdb -merge`. Without this the server has none: urxvt and xterm would ignore their
+ * colours, fonts and transparency, which a desktop session that runs xrdb applies. */
+static void load_xresources(struct rei_xwayland *x)
+{
+	const char *setting = x->server->config->xresources;
+	if (!setting || !setting[0])
+		return;
+	char path[1024];
+	const char *home = getenv("HOME");
+	if (setting[0] == '~' && (setting[1] == '/' || setting[1] == '\0') && home)
+		snprintf(path, sizeof path, "%s%s", home, setting + 1);
+	else
+		snprintf(path, sizeof path, "%s", setting);
+	if (access(path, R_OK) != 0) {
+		rei_debug("xwayland: no X resources file at %s", path);
+		return;
+	}
+	char display_env[40];
+	snprintf(display_env, sizeof display_env, "DISPLAY=%s", x->display_name);
+	extern char **environ;
+	size_t ne = 0;
+	while (environ[ne])
+		ne++;
+	char **env = rei_xcalloc(ne + 2, sizeof *env);
+	size_t out = 0;
+	for (size_t i = 0; i < ne; i++)
+		if (strncmp(environ[i], "DISPLAY=", 8) != 0)
+			env[out++] = environ[i];
+	env[out++] = display_env;
+	char *const argv[] = { "xrdb", "-merge", path, NULL };
+	pid_t pid = fork();
+	if (pid == 0) {
+		setsid();
+		if (fork() == 0) {   /* double fork: nothing for us to reap later */
+			execvpe("xrdb", argv, env);
+			_exit(127);
+		}
+		_exit(0);
+	}
+	if (pid > 0)
+		waitpid(pid, NULL, 0);
+	free(env);
+	rei_info("xwayland: loading X resources from %s (xrdb -merge)", path);
+}
+
 static void become_window_manager(struct rei_xwayland *x)
 {
 	x->conn = xcb_connect_to_fd(x->wm_fd, NULL);
@@ -1017,6 +1063,7 @@ static void become_window_manager(struct rei_xwayland *x)
 	event_add(x->xcb_event, NULL);
 	x->running = true;
 	rei_info("xwayland: ready on DISPLAY=%s", x->display_name);
+	load_xresources(x);
 	on_xcb_readable(-1, 0, x);  /* Anything that arrived while we were setting up. */
 }
 

@@ -93,6 +93,11 @@ if have_xwayland
     dependencies: [wayland_client, m_dep, xcb],
   )
   test('xwdeath', xwdeath_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)
+  xwalpha_test = executable('test_xwalpha', 'test_xwalpha.c', xdg_shell_client_h, xdg_shell_code,
+    include_directories: inc,
+    dependencies: [wayland_client, m_dep, xcb],
+  )
+  test('xwalpha', xwalpha_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
   test('xwscale', xwscale_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env,
     timeout: 120)
 endif

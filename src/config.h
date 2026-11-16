@@ -37,6 +37,7 @@ struct rei_config {
 	char *backend;          /* "auto", "headless", "nested" or "drm". */
 	char *composition_key;  /* "super", "alt", "ctrl" or "shift". */
 
+	char *xresources;          /* [general] xresources: loaded into Xwayland with xrdb ("" = no). */
 	bool xwayland;             /* Run Xwayland so X11 programs work. */
 	bool session_bus_private;  /* [general] session_bus = "private": launched programs get their own D-Bus session bus. */
 	bool focus_follows_mouse;  /* Moving the pointer onto a window focuses it. */

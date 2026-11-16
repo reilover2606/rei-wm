@@ -40,7 +40,7 @@ RDEPEND="
 	x11-misc/xkeyboard-config
 	media-fonts/dejavu
 	pipewire? ( media-video/wireplumber )
-	xwayland? ( x11-base/xwayland )
+	xwayland? ( x11-base/xwayland x11-apps/xrdb )
 "
 BDEPEND="
 	virtual/pkgconfig
