@@ -1,6 +1,7 @@
 #include "snapshot.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "util/util.h"
 
@@ -10,6 +11,22 @@ struct rei_scene_snapshot *rei_snapshot_create(uint64_t serial)
 	atomic_init(&s->refs, 1);
 	s->serial = serial;
 	s->clear_color[3] = 1.0f;
+	return s;
+}
+
+struct rei_scene_snapshot *rei_snapshot_clone(const struct rei_scene_snapshot *from, uint64_t serial)
+{
+	struct rei_scene_snapshot *s = rei_snapshot_create(serial);
+	memcpy(s->clear_color, from->clear_color, sizeof s->clear_color);
+	s->items = rei_xcalloc(from->n_items ? from->n_items : 1, sizeof *s->items);
+	s->n_items = s->cap_items = from->n_items;
+	memcpy(s->items, from->items, from->n_items * sizeof *s->items);
+	for (size_t i = 0; i < s->n_items; i++) {
+		if (s->items[i].pix)
+			rei_pixbuf_ref(s->items[i].pix);
+		if (s->items[i].dmabuf)
+			rei_dmabuf_ref(s->items[i].dmabuf);
+	}
 	return s;
 }
 

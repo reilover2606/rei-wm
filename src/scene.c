@@ -13,6 +13,16 @@
 #include "tray.h"
 #include "xwayland.h"
 
+void rei_scene_apply_cursor(struct rei_server *s, struct rei_scene_snapshot *snap)
+{
+	const struct rei_cursor_image *cur = rei_pointer_cursor_image(s);
+	if (cur)
+		rei_snapshot_set_cursor(snap, cur->pixbuf, (float)(s->cursor_x - cur->hotspot_x),
+					(float)(s->cursor_y - cur->hotspot_y), (float)cur->width, (float)cur->height);
+	else
+		rei_snapshot_set_cursor(snap, NULL, 0, 0, 0, 0);
+}
+
 struct rei_scene_snapshot *rei_scene_build(struct rei_server *s, uint64_t serial)
 {
 	struct rei_scene_snapshot *snap = rei_snapshot_create(serial);
@@ -46,9 +56,6 @@ struct rei_scene_snapshot *rei_scene_build(struct rei_server *s, uint64_t serial
 	rei_msg_emit(s, snap);
 	rei_tray_emit(s, snap);
 
-	const struct rei_cursor_image *cur = rei_pointer_cursor_image(s);
-	if (cur)
-		rei_snapshot_set_cursor(snap, cur->pixbuf, (float)(s->cursor_x - cur->hotspot_x),
-					(float)(s->cursor_y - cur->hotspot_y), (float)cur->width, (float)cur->height);
+	rei_scene_apply_cursor(s, snap);
 	return snap;
 }
