@@ -87,50 +87,21 @@ static bool rd32(const uint8_t *d, size_t len, size_t off, uint32_t *out)
 	return true;
 }
 
-struct rei_pixbuf *rei_xcursor_parse(const uint8_t *data, size_t len, int want_size, int *nominal,
-				     int32_t *hot_x, int32_t *hot_y)
+/* One image chunk at `off`. */
+static struct rei_pixbuf *parse_chunk(const uint8_t *data, size_t len, size_t off, int32_t *hot_x, int32_t *hot_y,
+				      uint32_t *delay)
 {
-	uint32_t magic, header, version, ntoc;
-	if (!rd32(data, len, 0, &magic) || magic != XCUR_MAGIC || !rd32(data, len, 4, &header) ||
-	    !rd32(data, len, 8, &version) || !rd32(data, len, 12, &ntoc) || header < 16 || ntoc > 4096)
-		return NULL;
-
-	/* The images of the nominal size closest to the one wanted (a file has several sizes; the images
-	 * of one size after the first are the frames of an animation, which are not played). */
-	size_t best_off = 0;
-	uint32_t best_size = 0;
-	long best_diff = -1;
-	for (uint32_t i = 0; i < ntoc; i++) {
-		size_t e = header + (size_t)i * 12;
-		uint32_t type, subtype, pos;
-		if (!rd32(data, len, e, &type) || !rd32(data, len, e + 4, &subtype) || !rd32(data, len, e + 8, &pos))
-			return NULL;
-		if (type != XCUR_IMAGE_TYPE || subtype == 0)
-			continue;
-		long diff = labs((long)subtype - (long)want_size);
-		if (best_diff < 0 || diff < best_diff) {
-			best_diff = diff;
-			best_off = pos;
-			best_size = subtype;
-		}
-	}
-	if (best_diff < 0)
-		return NULL;
-
-	uint32_t chdr, ctype, csub, cver, w, h, xh, yh, delay;
-	if (!rd32(data, len, best_off, &chdr) || !rd32(data, len, best_off + 4, &ctype) ||
-	    !rd32(data, len, best_off + 8, &csub) || !rd32(data, len, best_off + 12, &cver) ||
-	    !rd32(data, len, best_off + 16, &w) || !rd32(data, len, best_off + 20, &h) ||
-	    !rd32(data, len, best_off + 24, &xh) || !rd32(data, len, best_off + 28, &yh) ||
-	    !rd32(data, len, best_off + 32, &delay))
+	uint32_t chdr, ctype, csub, cver, w, h, xh, yh;
+	if (!rd32(data, len, off, &chdr) || !rd32(data, len, off + 4, &ctype) || !rd32(data, len, off + 8, &csub) ||
+	    !rd32(data, len, off + 12, &cver) || !rd32(data, len, off + 16, &w) || !rd32(data, len, off + 20, &h) ||
+	    !rd32(data, len, off + 24, &xh) || !rd32(data, len, off + 28, &yh) || !rd32(data, len, off + 32, delay))
 		return NULL;
 	if (ctype != XCUR_IMAGE_TYPE || w == 0 || h == 0 || w > XCUR_MAX_DIM || h > XCUR_MAX_DIM || chdr < 36)
 		return NULL;
-	size_t pix_off = best_off + chdr;
+	size_t pix_off = off + chdr;
 	size_t n = (size_t)w * h;
 	if (pix_off > len || (len - pix_off) / 4 < n)
 		return NULL;
-
 	struct rei_pixbuf *pb = rei_pixbuf_create_uninit((int32_t)w, (int32_t)h, false);
 	if (!pb)
 		return NULL;
@@ -143,10 +114,65 @@ struct rei_pixbuf *rei_xcursor_parse(const uint8_t *data, size_t len, int want_s
 			if (p[c] > p[3])
 				p[c] = p[3];
 	}
-	*nominal = (int)best_size;
 	*hot_x = (int32_t)(xh < w ? xh : w - 1);
 	*hot_y = (int32_t)(yh < h ? yh : h - 1);
 	return pb;
+}
+
+int rei_xcursor_parse_frames(const uint8_t *data, size_t len, int want_size, int *nominal, struct rei_pixbuf **pix,
+			     int32_t *hot_x, int32_t *hot_y, uint32_t *delay_ms, int max)
+{
+	uint32_t magic, header, version, ntoc;
+	if (!rd32(data, len, 0, &magic) || magic != XCUR_MAGIC || !rd32(data, len, 4, &header) ||
+	    !rd32(data, len, 8, &version) || !rd32(data, len, 12, &ntoc) || header < 16 || ntoc > 4096)
+		return 0;
+
+	/* The nominal size closest to the one wanted (a file has several sizes). */
+	uint32_t best_size = 0;
+	long best_diff = -1;
+	for (uint32_t i = 0; i < ntoc; i++) {
+		size_t e = header + (size_t)i * 12;
+		uint32_t type, subtype, pos;
+		if (!rd32(data, len, e, &type) || !rd32(data, len, e + 4, &subtype) || !rd32(data, len, e + 8, &pos))
+			return 0;
+		if (type != XCUR_IMAGE_TYPE || subtype == 0)
+			continue;
+		long diff = labs((long)subtype - (long)want_size);
+		if (best_diff < 0 || diff < best_diff) {
+			best_diff = diff;
+			best_size = subtype;
+		}
+	}
+	if (best_diff < 0)
+		return 0;
+
+	/* Its images in file order: more than one is an animation. */
+	int n = 0;
+	for (uint32_t i = 0; i < ntoc && n < max; i++) {
+		size_t e = header + (size_t)i * 12;
+		uint32_t type, subtype, pos;
+		if (!rd32(data, len, e, &type) || !rd32(data, len, e + 4, &subtype) || !rd32(data, len, e + 8, &pos))
+			break;
+		if (type != XCUR_IMAGE_TYPE || subtype != best_size)
+			continue;
+		pix[n] = parse_chunk(data, len, pos, &hot_x[n], &hot_y[n], &delay_ms[n]);
+		if (!pix[n]) {
+			if (n == 0)
+				return 0;   /* the first image is damaged: the file is no good */
+			break;          /* later frames missing: play what there is */
+		}
+		n++;
+	}
+	*nominal = (int)best_size;
+	return n;
+}
+
+struct rei_pixbuf *rei_xcursor_parse(const uint8_t *data, size_t len, int want_size, int *nominal,
+				     int32_t *hot_x, int32_t *hot_y)
+{
+	struct rei_pixbuf *pix;
+	uint32_t delay;
+	return rei_xcursor_parse_frames(data, len, want_size, nominal, &pix, hot_x, hot_y, &delay, 1) == 1 ? pix : NULL;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -439,10 +465,16 @@ struct rei_cursor_theme {
 	struct dir_list dirs;
 	int size, pixel_scale;
 	struct rei_cursor_image img[REI_SHAPE_COUNT];
+	struct rei_cursor_image *frames[REI_SHAPE_COUNT];   /* the ring behind img[], when this theme made it */
+	int n_frames[REI_SHAPE_COUNT];
 	bool tried[REI_SHAPE_COUNT];
 };
 
-static bool load_file(struct rei_cursor_theme *t, const char *dir, const char *file, struct rei_cursor_image *out)
+#define MAX_FRAMES 256
+
+/* Loads a cursor file as a ring of frames: *out_frames, *out_n. */
+static bool load_file(struct rei_cursor_theme *t, const char *dir, const char *file,
+		      struct rei_cursor_image **out_frames, int *out_n)
 {
 	char *path = join(dir, file, NULL);
 	size_t len;
@@ -451,28 +483,37 @@ static bool load_file(struct rei_cursor_theme *t, const char *dir, const char *f
 	if (!raw)
 		return false;
 	int want = t->size * t->pixel_scale, nominal = 0;
-	int32_t hx, hy;
-	struct rei_pixbuf *pb = rei_xcursor_parse(raw, len, want, &nominal, &hx, &hy);
+	struct rei_pixbuf *pix[MAX_FRAMES];
+	int32_t hx[MAX_FRAMES], hy[MAX_FRAMES];
+	uint32_t delay[MAX_FRAMES];
+	int n = rei_xcursor_parse_frames(raw, len, want, &nominal, pix, hx, hy, delay, MAX_FRAMES);
 	free(raw);
-	if (!pb)
+	if (n < 1)
 		return false;
 	/* The picture is for `nominal` pixels and is to look `size` big: scale its logical size to match. */
 	double k = (double)want / nominal / t->pixel_scale;
-	out->pixbuf = pb;
-	out->width = (int32_t)fmax(1.0, lround(pb->width * k));
-	out->height = (int32_t)fmax(1.0, lround(pb->height * k));
-	out->hotspot_x = (int32_t)lround(hx * k);
-	out->hotspot_y = (int32_t)lround(hy * k);
+	struct rei_cursor_image *f = rei_xcalloc((size_t)n, sizeof *f);
+	for (int i = 0; i < n; i++) {
+		f[i].pixbuf = pix[i];
+		f[i].width = (int32_t)fmax(1.0, lround(pix[i]->width * k));
+		f[i].height = (int32_t)fmax(1.0, lround(pix[i]->height * k));
+		f[i].hotspot_x = (int32_t)lround(hx[i] * k);
+		f[i].hotspot_y = (int32_t)lround(hy[i] * k);
+		f[i].delay_ms = delay[i] < 10 ? 50 : delay[i];   /* a missing delay would spin */
+		f[i].next = n > 1 ? &f[(i + 1) % n] : NULL;
+	}
+	*out_frames = f;
+	*out_n = n;
 	return true;
 }
 
-static bool load_shape(struct rei_cursor_theme *t, enum rei_cursor_shape shape, struct rei_cursor_image *out)
+static bool load_shape(struct rei_cursor_theme *t, enum rei_cursor_shape shape, struct rei_cursor_image **out, int *n)
 {
 	for (size_t d = 0; d < t->dirs.n; d++) {
-		if (load_file(t, t->dirs.dirs[d], shapes[shape].name, out))
+		if (load_file(t, t->dirs.dirs[d], shapes[shape].name, out, n))
 			return true;
 		for (int a = 0; a < 6 && shapes[shape].alias[a]; a++)
-			if (load_file(t, t->dirs.dirs[d], shapes[shape].alias[a], out))
+			if (load_file(t, t->dirs.dirs[d], shapes[shape].alias[a], out, n))
 				return true;
 	}
 	return false;
@@ -532,9 +573,11 @@ void rei_cursor_theme_close(struct rei_cursor_theme *t)
 {
 	if (!t)
 		return;
-	for (int i = 0; i < REI_SHAPE_COUNT; i++)
-		if (t->img[i].pixbuf && t->img[i].pixbuf != builtin_image.pixbuf)
-			rei_pixbuf_unref(t->img[i].pixbuf);
+	for (int i = 0; i < REI_SHAPE_COUNT; i++) {
+		for (int k = 0; k < t->n_frames[i]; k++)
+			rei_pixbuf_unref(t->frames[i][k].pixbuf);
+		free(t->frames[i]);
+	}
 	free_list(t->dirs.dirs, t->dirs.n);
 	free(t);
 }
@@ -550,13 +593,12 @@ const struct rei_cursor_image *rei_cursor_theme_shape(struct rei_cursor_theme *t
 		shape = REI_SHAPE_DEFAULT;
 	if (!t->tried[shape]) {
 		t->tried[shape] = true;
-		if (!load_shape(t, shape, &t->img[shape]) && shape != REI_SHAPE_DEFAULT) {
-			/* The theme lacks it: the default arrow stands in (loaded now, and shared). */
-			const struct rei_cursor_image *d = rei_cursor_theme_shape(t, REI_SHAPE_DEFAULT);
-			t->img[shape] = *d;
-			if (d->pixbuf != builtin_image.pixbuf)
-				rei_pixbuf_ref(d->pixbuf);
-		} else if (!t->img[shape].pixbuf) {
+		if (load_shape(t, shape, &t->frames[shape], &t->n_frames[shape])) {
+			t->img[shape] = t->frames[shape][0];
+		} else if (shape != REI_SHAPE_DEFAULT) {
+			/* The theme lacks it: the default arrow stands in (shared; the default owns it). */
+			t->img[shape] = *rei_cursor_theme_shape(t, REI_SHAPE_DEFAULT);
+		} else {
 			t->img[shape] = *builtin_arrow();
 		}
 	}

@@ -288,6 +288,8 @@ The theme is any XCursor theme: a folder with a `cursors/` directory, searched f
 (the latter two are where Gentoo's `x11-themes/*cursors` ebuilds install them), or in `$XCURSOR_PATH` if you set
 it. Themes that `Inherits=` another one in their `index.theme` work; shapes a theme lacks fall back to its
 arrow, and with no theme at all rei-wm draws a built-in arrow.
+Animated cursors (the busy/wait spinner of most themes) play: the frames and their delays come from the
+theme file, and the pointer is redrawn (or the hardware cursor re-uploaded) at each step.
 
 ```toml
 [cursor]
