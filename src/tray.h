@@ -74,6 +74,8 @@ void rei_tray_menu_view_gone(struct rei_server *server, const struct rei_view *v
 void rei_tray_pointer_moved(struct rei_server *server, double x, double y);
 /* The pointer left the toolbar, or something else took over. */
 void rei_tray_hover_clear(struct rei_server *server);
+/* The pointer is over a tray tile. */
+bool rei_tray_hovering(const struct rei_server *server);
 
 /* What the bar state needs to know. */
 int rei_tray_hover_index(const struct rei_server *server, const struct rei_output *output,

@@ -11,6 +11,7 @@
 #include "backend/drm/drm.h"
 #endif
 #include "server.h"
+#include "cursor_cli.h"
 #include "theme_cli.h"
 #include "util/log.h"
 
@@ -31,6 +32,8 @@ static void usage(FILE *out)
 "      --print-theme    print the effective theme (element.property=value) and exit\n"
 "      --print-theme-defaults  print the built-in theme for the config's toolbar colours and exit\n"
 "      --theme-preview PNG   draw one of each themed element to PNG and exit\n"
+"      --list-cursor-themes  list the installed cursor themes and exit\n"
+"      --cursor-preview PNG  draw a cursor theme's pointers to PNG and exit (see --cursor-theme, --cursor-size)\n"
 "      --drm-info       list the displays, modes and planes the DRM backend would see\n"
 "  -h, --help           show this help\n"
 "  -V, --version        show the version\n"
@@ -85,6 +88,10 @@ int main(int argc, char **argv)
 		{ "print-theme", no_argument, NULL, 1003 },
 		{ "print-theme-defaults", no_argument, NULL, 1005 },
 		{ "theme-preview", required_argument, NULL, 1004 },
+		{ "list-cursor-themes", no_argument, NULL, 1006 },
+		{ "cursor-preview", required_argument, NULL, 1007 },
+		{ "cursor-theme", required_argument, NULL, 1008 },
+		{ "cursor-size", required_argument, NULL, 1009 },
 		{ "help", no_argument, NULL, 'h' },
 		{ "version", no_argument, NULL, 'V' },
 		{ 0 },
@@ -95,6 +102,8 @@ int main(int argc, char **argv)
 	bool verbose = false, check_only = false, print_theme = false;
 	const char *preview_png = NULL;
 	bool print_defaults = false;
+	const char *cursor_preview = NULL, *cursor_theme = "";
+	int cursor_size = 24;
 
 	rei_log_set_thread_name("main");
 	install_crash_handler();
@@ -126,6 +135,10 @@ int main(int argc, char **argv)
 		case 1003: print_theme = true; break;
 		case 1005: print_defaults = true; break;
 		case 1004: preview_png = optarg; break;
+		case 1006: rei_cursor_cli_list(); return 0;
+		case 1007: cursor_preview = optarg; break;
+		case 1008: cursor_theme = optarg; break;
+		case 1009: cursor_size = atoi(optarg) > 0 ? atoi(optarg) : 24; break;
 		case 1001:
 #ifdef REI_HAVE_DRM
 			return rei_drm_print_info();
@@ -144,6 +157,9 @@ int main(int argc, char **argv)
 	}
 	if (verbose)
 		rei_log_set_level(REI_LOG_DEBUG);
+
+	if (cursor_preview)   /* needs no config */
+		return rei_cursor_cli_preview(cursor_theme, cursor_size, cursor_preview);
 
 	/* An explicit --config must exist; only the default path is auto-created. */
 	char *default_path = NULL;

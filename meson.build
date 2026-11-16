@@ -91,6 +91,16 @@ fractional_scale_server_h = scan_server_header.process(fractional_scale_xml)
 fractional_scale_client_h = scan_client_header.process(fractional_scale_xml)
 fractional_scale_code = scan_code.process(fractional_scale_xml)
 
+cursor_shape_xml = files(protocols_dir / 'staging' / 'cursor-shape' / 'cursor-shape-v1.xml')
+cursor_shape_server_h = scan_server_header.process(cursor_shape_xml)
+cursor_shape_client_h = scan_client_header.process(cursor_shape_xml)
+cursor_shape_code = scan_code.process(cursor_shape_xml)
+# cursor-shape-v1 names the tablet tool interface, so its symbols must exist (no tablets are offered).
+tablet_xml = files(protocols_dir / 'unstable' / 'tablet' / 'tablet-unstable-v2.xml')
+tablet_server_h = scan_server_header.process(tablet_xml)
+tablet_client_h = scan_client_header.process(tablet_xml)
+tablet_code = scan_code.process(tablet_xml)
+
 inc = include_directories('src')
 
 subdir('src')

@@ -23,7 +23,7 @@ static atomic_bool g_stop;
 static atomic_int g_suspended;   /* >0: the event loop is knowingly in a call that may take a while */
 static pthread_t g_thread;
 static bool g_running;
-static struct event *g_timer;
+static struct event *g_timer, *g_selftest;
 static int g_limit_s;
 static atomic_flag g_dump_lock = ATOMIC_FLAG_INIT;
 
@@ -172,7 +172,8 @@ void rei_watchdog_start(struct event_base *base)
 	const char *st = getenv("REI_WATCHDOG_SELFTEST");
 	if (st && (st[0] == '1' || !strcmp(st, "suspended"))) {
 		struct timeval later = { 2, 0 };
-		evtimer_add(evtimer_new(base, on_selftest, NULL), &later);
+		g_selftest = evtimer_new(base, on_selftest, NULL);
+		evtimer_add(g_selftest, &later);
 	}
 	atomic_store(&g_stop, false);
 	if (pthread_create(&g_thread, NULL, watch, NULL) == 0)
@@ -200,5 +201,9 @@ void rei_watchdog_stop(void)
 	if (g_timer) {
 		event_free(g_timer);
 		g_timer = NULL;
+	}
+	if (g_selftest) {
+		event_free(g_selftest);
+		g_selftest = NULL;
 	}
 }

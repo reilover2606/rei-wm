@@ -22,6 +22,7 @@
 #include "backend/drm/drm_logic.h"
 #include "backend/drm/session.h"
 #include "cursor.h"
+#include "pointer_cursor.h"
 #include "dmabuf.h"
 #include "input/libinput_input.h"
 #include "proto/linux_dmabuf.h"
@@ -112,6 +113,7 @@ struct drm_output {
 	int cursor_w, cursor_h;
 	bool crtc_on;            /* The first frame has reached the screen. */
 	bool cursor_shown;
+	uint64_t cursor_img_id;   /* the pixbuf in the cursor buffer */
 	int32_t cursor_px, cursor_py;
 	atomic_bool hw_cursor_active;
 };
@@ -663,31 +665,38 @@ static void drm_render_fini(void *data)
 static void cursor_setup(struct drm_output *o)
 {
 	struct drm_backend *be = o->be;
-	const struct rei_cursor_image *img = rei_cursor_default();
-	if (!be->hw_cursor_enabled || !img || be->cursor_w == 0 || be->cursor_h == 0)
+	if (!be->hw_cursor_enabled || be->cursor_w == 0 || be->cursor_h == 0)
 		return;
-	if (img->pixbuf->width > (int32_t)be->cursor_w || img->pixbuf->height > (int32_t)be->cursor_h)
-		return;
-
 	o->cursor_w = (int)be->cursor_w;
 	o->cursor_h = (int)be->cursor_h;
 	o->cursor_bo = gbm_bo_create(be->gbm, (uint32_t)o->cursor_w, (uint32_t)o->cursor_h,
 				     GBM_FORMAT_ARGB8888, GBM_BO_USE_CURSOR | GBM_BO_USE_WRITE);
-	if (!o->cursor_bo) {
+	o->cursor_img_id = 0;   /* the picture is uploaded when it is first shown, and whenever it changes */
+	if (!o->cursor_bo)
 		rei_debug("drm: %s: no hardware cursor buffer", o->name);
-		return;
-	}
+}
+
+/* Puts the pointer's picture into the cursor buffer. False if it cannot be shown by the hardware (too big,
+ * or drawn scaled), in which case the compositor draws it. */
+static bool cursor_upload(struct drm_output *o, const struct rei_cursor_image *img)
+{
+	const struct rei_pixbuf *pb = img->pixbuf;
+	if (pb->id == o->cursor_img_id)
+		return true;
+	if (pb->width > o->cursor_w || pb->height > o->cursor_h || pb->width != img->width || pb->height != img->height)
+		return false;
 	/* The cursor plane wants premultiplied ARGB, exactly what a pixbuf holds. */
 	size_t stride = (size_t)o->cursor_w * 4;
-	uint8_t *img_buf = rei_xcalloc((size_t)o->cursor_h, stride);
-	for (int32_t y = 0; y < img->pixbuf->height; y++)
-		memcpy(img_buf + (size_t)y * stride, img->pixbuf->data + (size_t)y * (size_t)img->pixbuf->width * 4,
-		       (size_t)img->pixbuf->width * 4);
-	if (gbm_bo_write(o->cursor_bo, img_buf, stride * (size_t)o->cursor_h) != 0) {
-		gbm_bo_destroy(o->cursor_bo);
-		o->cursor_bo = NULL;
-	}
-	free(img_buf);
+	uint8_t *buf = rei_xcalloc((size_t)o->cursor_h, stride);
+	for (int32_t y = 0; y < pb->height; y++)
+		memcpy(buf + (size_t)y * stride, pb->data + (size_t)y * (size_t)pb->width * 4, (size_t)pb->width * 4);
+	bool ok = gbm_bo_write(o->cursor_bo, buf, stride * (size_t)o->cursor_h) == 0;
+	free(buf);
+	if (!ok)
+		return false;
+	o->cursor_img_id = pb->id;
+	o->cursor_shown = false;   /* hand the buffer to the plane again, so it picks the new picture up */
+	return true;
 }
 
 static void cursor_hide(struct drm_output *o)
@@ -711,7 +720,19 @@ static bool cursor_update(struct drm_output *o)
 		return false;
 	}
 
-	const struct rei_cursor_image *img = rei_cursor_default();
+	const struct rei_cursor_image *img = rei_pointer_cursor_image(s);
+	if (!img) {   /* the client under the pointer wants none: neither plane nor compositor draws it */
+		cursor_hide(o);
+		if (!atomic_exchange(&o->hw_cursor_active, true))
+			rei_server_schedule_damage(s);
+		return true;
+	}
+	if (!cursor_upload(o, img)) {
+		if (atomic_exchange(&o->hw_cursor_active, false))
+			rei_server_schedule_damage(s);
+		cursor_hide(o);
+		return false;
+	}
 	struct rei_drm_view_rect vr = {
 		.x = (float)o->out->x, .y = (float)o->out->y,
 		.w = (float)o->out->width, .h = (float)o->out->height,
@@ -720,7 +741,7 @@ static bool cursor_update(struct drm_output *o)
 	int32_t px, py;
 	bool visible;
 	rei_drm_cursor_place((float)(s->cursor_x - img->hotspot_x), (float)(s->cursor_y - img->hotspot_y),
-			     img->pixbuf->width, img->pixbuf->height, &vr, 1.0, &px, &py, &visible);
+			     img->width, img->height, &vr, 1.0, &px, &py, &visible);
 
 	if (!visible) {
 		cursor_hide(o);

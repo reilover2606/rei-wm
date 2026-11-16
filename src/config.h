@@ -42,6 +42,10 @@ struct rei_config {
 	bool session_bus_private;  /* [general] session_bus = "private": launched programs get their own D-Bus session bus. */
 	bool focus_follows_mouse;  /* Moving the pointer onto a window focuses it. */
 
+	/* [cursor] */
+	char *cursor_theme;        /* An XCursor theme's name; "" = the system's default. */
+	int32_t cursor_size;       /* Logical pixels. */
+
 	/* [layout] */
 	bool float_new_windows;    /* new_windows = "float": don't tile new windows. */
 	int32_t gap_outer;  /* Between windows and the edge of the desktop. */

@@ -38,6 +38,7 @@ rei-wm starts and uses these, and carries on without them (with a log line) when
 | Program | Package | What breaks without it |
 |---|---|---|
 | **Xwayland** | `x11-base/xwayland` | Every X11 program (urxvt, leafpad, xterm, GTK2 programs) fails with "cannot open display". rei-wm logs `xwayland: the Xwayland process exited ...`. |
+| cursor themes | `x11-themes/adwaita-cursors` (or `x11-themes/xcursor-themes`, `x11-themes/vanilla-dmz-aa-xcursors`, ...) | Only the built-in arrow; install one, then pick it in the settings app's Cursor tab. Gentoo puts some under `/usr/share/cursors/xorg-x11`, which rei-wm searches |
 | xrdb | `x11-apps/xrdb` | `~/.Xresources` is not loaded into Xwayland (urxvt/xterm ignore their colours, fonts and transparency) |
 | seatd or elogind | `sys-auth/seatd` or `sys-auth/elogind` | no access to the display and input devices |
 | PipeWire | `media-video/pipewire` | no volume widget |

@@ -248,6 +248,38 @@ int main(int argc, char **argv)
 		CHECK(t.contains("sysinfo = false\n") && t.contains("autostart = false\n"));
 	}
 
+	/* The cursor tab: the installed themes (here two made-up ones, found through XCURSOR_PATH), a preview drawn by
+	 * rei-wm, and the choice written as [cursor] theme / size. */
+	{
+		QTemporaryDir themes;
+		CHECK(themes.isValid());
+		CHECK(QDir().mkpath(themes.path() + "/alpha/cursors") && QDir().mkpath(themes.path() + "/beta/cursors"));
+		CHECK(QDir().mkpath(themes.path() + "/not-a-cursor-theme/icons"));
+		qputenv("XCURSOR_PATH", themes.path().toUtf8());
+		MainWindow wc(path, wm);
+		auto *theme = field<QComboBox>(wc, "cursor.theme");
+		CHECK(theme->findText("alpha") >= 0 && theme->findText("beta") >= 0);
+		CHECK(theme->findText("not-a-cursor-theme") < 0);
+		CHECK(theme->currentText().isEmpty() && field<QSpinBox>(wc, "cursor.size")->value() == 24);   /* the defaults */
+		CHECK(!wc.dirty());
+		theme->setCurrentText("beta");
+		field<QSpinBox>(wc, "cursor.size")->setValue(32);
+		CHECK(wc.dirty());
+		auto *preview = field<QLabel>(wc, "cursor.preview");
+		CHECK(!preview->pixmap().isNull());   /* the PNG rei-wm drew, which has the pointers of two grounds */
+		CHECK(wc.save(&err));
+		QString t = slurp(path);
+		CHECK(t.contains("[cursor]\ntheme = \"beta\"\nsize = 32\n"));
+		/* And back: a theme the list does not know is kept as typed, not reset. */
+		MainWindow wc2(path, wm);
+		CHECK(field<QComboBox>(wc2, "cursor.theme")->currentText() == "beta");
+		field<QComboBox>(wc2, "cursor.theme")->setCurrentText("elsewhere");
+		CHECK(wc2.save(&err));
+		MainWindow wc3(path, wm);
+		CHECK(field<QComboBox>(wc3, "cursor.theme")->currentText() == "elsewhere");
+		qunsetenv("XCURSOR_PATH");
+	}
+
 	/* The theme editor: effective values from rei-wm, edits written as [theme.<element>] keys, the rest left alone. */
 	{
 		MainWindow wt(path, wm);

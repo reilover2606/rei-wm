@@ -20,6 +20,8 @@ void rei_confirm_open(struct rei_server *server, const char *title, const char *
 		      const char *confirm_label, rei_confirm_fn on_confirm, void *data);
 void rei_confirm_close(struct rei_server *server);
 bool rei_confirm_is_open(const struct rei_server *server);
+/* The button under the pointer (0 or 1), or -1. */
+int rei_confirm_hover(const struct rei_server *server);
 
 void rei_confirm_key(struct rei_server *server, uint32_t evdev_code, bool pressed);
 void rei_confirm_press(struct rei_server *server, double x, double y);

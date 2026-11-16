@@ -652,7 +652,7 @@ bool rei_gles_draw_into(struct rei_gles *g, const struct rei_scene_snapshot *sna
 	if (t->draw_cursor && snap->cursor.pix) {
 		struct rei_drawable cur = {
 			.pix = snap->cursor.pix, .x = snap->cursor.x, .y = snap->cursor.y, .alpha = 1.0f,
-			.w = (float)snap->cursor.pix->width, .h = (float)snap->cursor.pix->height,
+			.w = snap->cursor.w, .h = snap->cursor.h,
 		};
 		draw_one(g, &cur, t);
 	}

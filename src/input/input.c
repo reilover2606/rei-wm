@@ -1,6 +1,7 @@
 #include "audio.h"
 #include "tray.h"
 #include "input/input.h"
+#include "pointer_cursor.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -335,6 +336,7 @@ static void set_pointer_focus(struct rei_input *in, struct rei_surface *surface,
 		wl_list_init(&in->pointer_focus_destroy.link);
 	}
 	in->pointer_focus = surface;
+	rei_pointer_cursor_focus_changed(in->server);   /* the last client's cursor request ends here */
 	if (surface) {
 		in->pointer_focus_destroy.notify = on_pointer_focus_destroyed;
 		wl_signal_add(&surface->destroy_signal, &in->pointer_focus_destroy);

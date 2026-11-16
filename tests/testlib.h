@@ -128,6 +128,9 @@ static void start_compositor(const char *binary, const char *config_text, bool w
 		setenv("XDG_RUNTIME_DIR", g_dir, 1);
 		setenv("REI_AUDIO_AUTOSTART", getenv("REI_AUDIO_AUTOSTART") ? getenv("REI_AUDIO_AUTOSTART") : "0", 1);   /* tests must not start a sound system */
 		unsetenv("WAYLAND_DISPLAY");
+		/* The pointer is the built-in arrow, whatever cursor themes this machine has (a test may set its own). */
+		setenv("XCURSOR_PATH", "/nonexistent-cursor-themes", 0);
+		unsetenv("XCURSOR_THEME");
 		if (with_fifo)
 			setenv("REI_HEADLESS_INPUT", g_fifo, 1);
 		int fd = open(g_log, O_WRONLY | O_CREAT | O_TRUNC, 0600);

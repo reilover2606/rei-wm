@@ -6,6 +6,7 @@
 #include "desktop.h"
 #include "input/input.h"
 #include "input/xkb.h"
+#include "pointer_cursor.h"
 #include "proto/data_device.h"
 #include "proto/surface.h"
 #include "server.h"
@@ -23,15 +24,16 @@ static void release_request(struct wl_client *c, struct wl_resource *r)
 static void pointer_set_cursor(struct wl_client *c, struct wl_resource *r, uint32_t serial,
 			       struct wl_resource *surface_res, int32_t hx, int32_t hy)
 {
-	(void)c; (void)serial; (void)hx; (void)hy;
-	/* rei-wm draws the cursor itself, for every client, so the image a client
-	 * asks for is deliberately ignored. The surface still takes the cursor
-	 * role so the client's state stays consistent. */
-	if (!surface_res)
-		return;
-	struct rei_surface *s = rei_surface_from_resource(surface_res);
-	if (!rei_surface_set_role(s, REI_ROLE_CURSOR))
+	(void)serial;
+	struct rei_seat *seat = wl_resource_get_user_data(r);
+	/* No surface: the client wants no pointer at all. Otherwise the surface is its picture. Only the client
+	 * the pointer is in counts, as the protocol says. */
+	struct rei_surface *s = surface_res ? rei_surface_from_resource(surface_res) : NULL;
+	if (s && !rei_surface_set_role(s, REI_ROLE_CURSOR)) {
 		wl_resource_post_error(r, WL_POINTER_ERROR_ROLE, "surface already has a role");
+		return;
+	}
+	rei_pointer_cursor_request_surface(seat->server, c, s, hx, hy);
 }
 
 static const struct wl_pointer_interface pointer_impl = {
