@@ -12,6 +12,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QTabWidget>
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <cstdio>
@@ -137,6 +138,89 @@ int main(int argc, char **argv)
 	CHECK(outText.contains("mode = \"2560x1440@144\"\n"));
 	CHECK(outText.contains("scale = 1.5\n"));
 	CHECK(!outText.contains("width = 1920"));
+
+	/* Start menu shortcuts: add, edit, reorder and delete. */
+	{
+		QString spath = dir.path() + "/shortcuts.toml";
+		QFile f(spath);
+		CHECK(f.open(QIODevice::WriteOnly));
+		f.write("[start_menu]\nlabel = \"Go\"\n"
+			"[[shortcut]]\nname = \"Terminal\"\ncommand = \"foot\"\n"
+			"[[shortcut]]\nname = \"Browser\"\ncommand = \"firefox-bin\"\n");
+		f.close();
+		MainWindow ws(spath, wm);
+		auto *sc = field<QTableWidget>(ws, "shortcuts");
+		CHECK(sc->rowCount() == 2);
+		CHECK(sc->item(0, 0)->text() == "Terminal" && sc->item(1, 1)->text() == "firefox-bin");
+		CHECK(field<QWidget>(ws, "start_menu.label")->findChild<QLineEdit *>("edit")->text() == "Go");
+		CHECK(!ws.dirty());
+		QString same = slurp(spath);
+		CHECK(ws.save(&err));
+		CHECK(slurp(spath) == same);   /* untouched: byte for byte */
+
+		if (qEnvironmentVariableIsSet("REI_SHOT_DIR")) {   /* for looking at, not for checking */
+			auto *tabs = ws.findChild<QTabWidget *>();
+			CHECK(tabs);
+			for (int i = 0; i < tabs->count(); i++)
+				if (tabs->tabText(i) == "Start menu")
+					tabs->setCurrentIndex(i);
+			ws.resize(820, 600);
+			ws.show();
+			CHECK(ws.grab().save(qEnvironmentVariable("REI_SHOT_DIR") + "/settings-start-menu.png"));
+		}
+
+		/* Add one (with quotes and a backslash in its command), edit another, move it, then save. */
+		field<QPushButton>(ws, "shortcut_add")->click();
+		CHECK(sc->rowCount() == 3);
+		sc->item(2, 0)->setText("Say hi");
+		sc->item(2, 1)->setText("sh -c 'echo \"hi\\n\"'");
+		sc->item(1, 1)->setText("firefox-bin --private-window");
+		CHECK(ws.dirty());
+		sc->setCurrentCell(2, 0);
+		field<QPushButton>(ws, "shortcut_up")->click();   /* "Say hi" now sits between the other two */
+		CHECK(sc->item(1, 0)->text() == "Say hi");
+		CHECK(ws.save(&err));
+		QString st = slurp(spath);
+		CHECK(st.contains("label = \"Go\"\n"));
+		CHECK(st.indexOf("name = \"Terminal\"") < st.indexOf("name = \"Say hi\""));
+		CHECK(st.indexOf("name = \"Say hi\"") < st.indexOf("name = \"Browser\""));
+		CHECK(st.contains("command = \"firefox-bin --private-window\""));
+
+		/* Another window reads exactly what was typed back, escapes and all. */
+		MainWindow ws2(spath, wm);
+		auto *sc2 = field<QTableWidget>(ws2, "shortcuts");
+		CHECK(sc2->rowCount() == 3);
+		CHECK(sc2->item(1, 1)->text() == "sh -c 'echo \"hi\\n\"'");
+
+		/* Delete one and a blank row is ignored. */
+		sc2->setCurrentCell(0, 0);
+		sc2->selectRow(0);
+		field<QPushButton>(ws2, "shortcut_remove")->click();
+		field<QPushButton>(ws2, "shortcut_add")->click();   /* left blank */
+		CHECK(ws2.save(&err));
+		QString st2 = slurp(spath);
+		CHECK(!st2.contains("Terminal"));
+		CHECK(st2.contains("Say hi") && st2.contains("Browser"));
+		MainWindow ws3(spath, wm);
+		CHECK(field<QTableWidget>(ws3, "shortcuts")->rowCount() == 2);
+
+		/* A half-filled row is refused by rei-wm's own check, and the file is left alone. */
+		QString keep = slurp(spath);
+		field<QPushButton>(ws3, "shortcut_add")->click();
+		field<QTableWidget>(ws3, "shortcuts")->item(2, 0)->setText("No command");
+		QString why2;
+		CHECK(!ws3.save(&why2));
+		CHECK(!why2.isEmpty());
+		CHECK(slurp(spath) == keep);
+
+		/* Removing every shortcut removes the tables. */
+		MainWindow ws4(spath, wm);
+		auto *sc4 = field<QTableWidget>(ws4, "shortcuts");
+		sc4->selectAll();
+		field<QPushButton>(ws4, "shortcut_remove")->click();
+		CHECK(ws4.save(&err));
+		CHECK(!slurp(spath).contains("[[shortcut]]"));
+	}
 
 	/* A missing file: the window starts from rei-wm's default config. */
 	MainWindow w4(dir.path() + "/new/config.toml", wm);
