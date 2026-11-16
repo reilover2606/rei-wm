@@ -49,6 +49,8 @@ struct rei_audio {
 	char default_name[128];
 	bool connected;
 	bool pw_inited;
+	int reports;    /* 0: nothing reported yet; 1: the listing; 2: the volumes too */
+	int sync_seq;   /* the roundtrip after which we report what PipeWire has */
 };
 
 /* ------------------------------------------------------------------------ */
@@ -248,8 +250,38 @@ static void core_error(void *data, uint32_t id, int seq, int res, const char *me
 	}
 }
 
+/* The registry's first listing is complete: say what we found, so a missing widget can be explained. */
+static void core_done(void *data, uint32_t id, int seq)
+{
+	struct rei_audio *a = data;
+	if (id != PW_ID_CORE || seq != a->sync_seq)
+		return;
+	if (a->reports >= 2)
+		return;
+	if (a->reports++ == 0)   /* volumes arrive after the listing: look again after another roundtrip */
+		a->sync_seq = pw_core_sync(a->core, PW_ID_CORE, 0);
+	int n = 0, with_volume = 0;
+	char names[400] = "";
+	struct sink *s;
+	wl_list_for_each(s, &a->sinks, link) {
+		n++;
+		with_volume += s->have_props;
+		size_t used = strlen(names);
+		snprintf(names + used, sizeof names - used, "%s'%s'%s", used ? ", " : "", s->name,
+			 s->have_props ? "" : " (no volume yet)");
+	}
+	rei_info("audio: PipeWire lists %d audio sink(s)%s%s; default sink: %s; %d with a volume", n,
+		 n ? ": " : "", names, a->default_name[0] ? a->default_name : "(not announced)", with_volume);
+	if (n == 0 && a->reports == 2)
+		rei_warn("audio: no audio sinks, so no volume widget. PipeWire alone has no sound devices: "
+			 "a session manager (WirePlumber) must be running to create them (try: wpctl status)");
+	if (!a->metadata && a->reports == 2)
+		rei_info("audio: no 'default' metadata (WirePlumber not running?); the highest-priority sink is used");
+}
+
 static const struct pw_core_events core_events = {
 	PW_VERSION_CORE_EVENTS,
+	.done = core_done,
 	.error = core_error,
 };
 
@@ -363,6 +395,10 @@ static bool connect_pw(struct rei_audio *a)
 	pw_core_add_listener(a->core, &a->core_listener, &core_events, a);
 	a->registry = pw_core_get_registry(a->core, PW_VERSION_REGISTRY, 0);
 	pw_registry_add_listener(a->registry, &a->registry_listener, &registry_events, a);
+	a->sync_seq = pw_core_sync(a->core, PW_ID_CORE, 0);
+	/* Sinks' volumes arrive a little later than their announcement: report again after a second
+	 * roundtrip. */
+	a->reports = 0;
 	a->connected = true;
 	return true;
 }
