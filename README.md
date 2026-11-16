@@ -305,3 +305,18 @@ no output pushes no message; escape sequences are stripped and long output is cu
   translucent backdrop; the mouse wheel scrolls it; Mod+n or Escape closes it.
 - `width` and `font` set the column; the look is the `[theme.messages]` element (`text_color`, the text's
   halo through `shadow_*`, and `color`/`opacity` for the backdrop).
+
+## X resources and urxvt transparency
+
+An X session normally runs `xrdb -merge ~/.Xresources` at startup; under rei-wm nothing does, so Xwayland starts
+with an empty resource database. rei-wm now does it for you when Xwayland is ready (`[general] xresources =
+"~/.Xresources"`, `""` to turn off; needs `xrdb`). True transparency for urxvt works because rei-wm blends
+windows that have an alpha channel (a 32-bit visual):
+
+```
+URxvt.depth: 32
+URxvt.background: [80]#000000
+```
+
+(`[80]` is the opacity in percent.) The older "pseudo-transparency" (`URxvt.transparent: true`, `shading`), which
+copies the root window's wallpaper, cannot work: a rootless Xwayland has no root pixmap to copy.

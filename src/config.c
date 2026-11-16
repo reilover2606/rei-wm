@@ -280,6 +280,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->repeat_delay = 600;
 	cfg->tap_to_click = true;
 	cfg->xwayland = true;
+	cfg->xresources = rei_xstrdup("~/.Xresources");
 	cfg->audio_enabled = true;
 	cfg->audio_autostart = true;
 	cfg->volume_step = 5;
@@ -312,6 +313,7 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		read_choice(&r, general, "general.", "backend", &cfg->backend, backends);
 		read_choice(&r, general, "general.", "composition_key",
 			    &cfg->composition_key, mod_keys);
+		read_string(&r, general, "general.", "xresources", &cfg->xresources);
 		const struct toml_value *xw = get(&r, general, "general.", "xwayland", TOML_BOOL);
 		if (xw)
 			cfg->xwayland = xw->u.b;
@@ -680,6 +682,7 @@ void rei_config_free(struct rei_config *cfg)
 	free(cfg->start_shutdown_command);
 	free(cfg->start_reboot_command);
 	free(cfg->start_logout_command);
+	free(cfg->xresources);
 	free(cfg->start_run_font);
 	free(cfg->messages_font);
 	for (size_t i = 0; i < cfg->n_shortcuts; i++) {
