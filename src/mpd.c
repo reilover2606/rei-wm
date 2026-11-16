@@ -57,12 +57,17 @@ struct rei_mpd {
 
 	/* What MPD said. */
 	enum rei_mpd_state state;
+	int volume;         /* -1: no mixer */
+	int premute;        /* the volume before it was "muted" (0: not muted) */
+	bool shuffle, repeat, single;   /* random, repeat, single (the loop of one song needs repeat and single) */
 	long songid;
 	char title[256];
 	bool known;         /* the first status has been seen (so the first song is not announced) */
 	long announced;     /* the songid last announced */
 	char pending_state[64];
 	long pending_songid;
+	int pending_volume;
+	bool pending_random, pending_repeat, pending_single;
 
 	/* Settings in use. */
 	bool enabled;
@@ -152,6 +157,9 @@ static void close_connection(struct rei_mpd *m, const char *why)
 	m->resp_len = 0;
 	m->known = false;
 	m->state = REI_MPD_STOPPED;
+	m->volume = -1;
+	m->premute = 0;
+	m->shuffle = m->repeat = m->single = false;
 	m->title[0] = '\0';
 	m->songid = -1;
 	if (was_up) {
@@ -207,7 +215,15 @@ static void pump(struct rei_mpd *m);
 
 static void enqueue(struct rei_mpd *m, enum kind kind, const char *text)
 {
-	if (m->phase != M_READY || m->nq == MAX_QUEUE)
+	if (m->phase != M_READY)
+		return;
+	/* A slider drag or a held key sends many volumes: only the last one matters. */
+	if (kind == K_CMD && !strncmp(text, "setvol", 6) && m->nq > 0 && m->queue[m->nq - 1].kind == K_CMD &&
+	    !strncmp(m->queue[m->nq - 1].text, "setvol", 6)) {
+		snprintf(m->queue[m->nq - 1].text, sizeof m->queue[0].text, "%s", text);
+		return;
+	}
+	if (m->nq == MAX_QUEUE)
 		return;
 	struct req *r = &m->queue[m->nq++];
 	r->kind = kind;
@@ -248,7 +264,7 @@ static void pump(struct rei_mpd *m)
 	m->idling = true;
 	m->noidle_sent = false;
 	m->resp_len = 0;
-	send_text(m, "idle player");
+	send_text(m, "idle player mixer");   /* (the mixer: someone else turned the volume) */
 }
 
 /* The status and the current song are both known: apply them and announce a new song. */
@@ -270,7 +286,14 @@ static void apply(struct rei_mpd *m, const char *song_resp)
 		st = REI_MPD_PAUSED;
 	(void)v;
 
-	bool differs = st != m->state || strcmp(text, m->title) != 0;
+	bool differs = st != m->state || strcmp(text, m->title) != 0 || m->pending_volume != m->volume ||
+		       m->pending_random != m->shuffle || m->pending_repeat != m->repeat || m->pending_single != m->single;
+	m->shuffle = m->pending_random;
+	m->repeat = m->pending_repeat;
+	m->single = m->pending_single;
+	if (m->pending_volume != m->volume && m->pending_volume != 0)
+		m->premute = 0;   /* someone raised it: no longer muted by us */
+	m->volume = m->pending_volume;
 	long id = m->pending_songid;
 	bool announce = m->known && m->announce && st == REI_MPD_PLAYING && text[0] && id != m->announced &&
 			(id != m->songid || m->state != REI_MPD_PLAYING);
@@ -308,6 +331,13 @@ static void handle_response(struct rei_mpd *m, bool ok)
 		if (field(m->resp, "state", v, sizeof v))
 			snprintf(m->pending_state, sizeof m->pending_state, "%s", v);
 		m->pending_songid = field(m->resp, "songid", v, sizeof v) ? atol(v) : -1;
+		m->pending_random = field(m->resp, "random", v, sizeof v) && atoi(v) == 1;
+		m->pending_repeat = field(m->resp, "repeat", v, sizeof v) && atoi(v) == 1;
+		/* single is 0, 1 or "oneshot" (stop after this song, once) */
+		m->pending_single = field(m->resp, "single", v, sizeof v) && !strcmp(v, "1");
+		m->pending_volume = field(m->resp, "volume", v, sizeof v) ? atoi(v) : -1;
+		if (m->pending_volume < 0 || m->pending_volume > 100)
+			m->pending_volume = -1;
 	} else if (k == K_SONG) {
 		apply(m, m->resp);
 	} else if (k == K_CMD) {
@@ -562,6 +592,7 @@ void rei_mpd_configure(struct rei_server *s)
 		s->mpd->server = s;
 		s->mpd->fd = -1;
 		s->mpd->songid = -1;
+		s->mpd->volume = -1;
 		s->mpd->announced = -2;
 		s->mpd->retry = evtimer_new(s->base, on_retry, s->mpd);
 	}
@@ -611,12 +642,18 @@ void rei_mpd_stop(struct rei_server *s)
 void rei_mpd_info_get(const struct rei_server *s, struct rei_mpd_info *out)
 {
 	memset(out, 0, sizeof *out);
+	out->volume = -1;
 	const struct rei_mpd *m = of(s);
 	out->enabled = s->config->mpd_enabled;
 	if (!m)
 		return;
 	out->connected = m->phase == M_READY;
 	out->state = m->state;
+	out->volume = m->volume;
+	out->muted = m->volume == 0 && m->premute > 0;
+	out->shuffle = m->shuffle;
+	out->loop_all = m->repeat && !m->single;
+	out->loop_one = m->repeat && m->single;
 	snprintf(out->title, sizeof out->title, "%s", m->title);
 }
 
@@ -666,4 +703,83 @@ void rei_mpd_launch(struct rei_server *s)
 		rei_msg_push(s, "MPD could not be started");
 	m->launch_left = LAUNCH_ATTEMPTS;   /* look for it more often for a few seconds */
 	schedule_retry(m, LAUNCH_RETRY_MS);
+}
+
+void rei_mpd_set_volume(struct rei_server *s, int percent)
+{
+	struct rei_mpd *m = of(s);
+	if (!m || m->phase != M_READY || m->volume < 0)
+		return;
+	percent = percent < 0 ? 0 : percent > 100 ? 100 : percent;
+	if (percent != 0)
+		m->premute = 0;
+	char cmd[32];
+	snprintf(cmd, sizeof cmd, "setvol %d", percent);
+	enqueue(m, K_CMD, cmd);
+	if (percent != m->volume) {
+		m->volume = percent;   /* known now; MPD confirms it */
+		changed(m);
+	}
+}
+
+void rei_mpd_toggle_mute(struct rei_server *s)
+{
+	struct rei_mpd *m = of(s);
+	if (!m || m->phase != M_READY || m->volume < 0)
+		return;
+	if (m->volume == 0 && m->premute > 0) {
+		int back = m->premute;
+		m->premute = 0;
+		rei_mpd_set_volume(s, back);
+	} else if (m->volume > 0) {
+		int was = m->volume;
+		rei_mpd_set_volume(s, 0);
+		m->premute = was;
+	}
+}
+
+void rei_mpd_previous(struct rei_server *s)
+{
+	struct rei_mpd *m = of(s);
+	if (m && m->phase == M_READY)
+		enqueue(m, K_CMD, "previous");
+}
+
+static void set_flag(struct rei_mpd *m, const char *name, bool *flag, bool on)
+{
+	char cmd[32];
+	snprintf(cmd, sizeof cmd, "%s %d", name, on ? 1 : 0);
+	enqueue(m, K_CMD, cmd);
+	*flag = on;   /* known now; MPD confirms it */
+}
+
+void rei_mpd_toggle_shuffle(struct rei_server *s)
+{
+	struct rei_mpd *m = of(s);
+	if (!m || m->phase != M_READY)
+		return;
+	set_flag(m, "random", &m->shuffle, !m->shuffle);
+	changed(m);
+}
+
+void rei_mpd_toggle_loop_all(struct rei_server *s)
+{
+	struct rei_mpd *m = of(s);
+	if (!m || m->phase != M_READY)
+		return;
+	bool on = !(m->repeat && !m->single);
+	set_flag(m, "single", &m->single, false);
+	set_flag(m, "repeat", &m->repeat, on);
+	changed(m);
+}
+
+void rei_mpd_toggle_loop_one(struct rei_server *s)
+{
+	struct rei_mpd *m = of(s);
+	if (!m || m->phase != M_READY)
+		return;
+	bool on = !(m->repeat && m->single);
+	set_flag(m, "repeat", &m->repeat, on);
+	set_flag(m, "single", &m->single, on);
+	changed(m);
 }

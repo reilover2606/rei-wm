@@ -370,8 +370,10 @@ is swallowed (your keybindings and the Ctrl+Alt+F switch still work; a key relea
 before the view opened is still released in its window, so nothing stays held down). Escape, Mod+n, or a
 click on the blurred background closes it.
 
-At its bottom centre are the **music controls** for MPD: a "Now playing: ..." label and **play**, **pause** and
-**skip** buttons (Space also toggles play/pause). If MPD is not running there are no controls, only a
+At its bottom centre are the **music controls** for MPD: a "Now playing: ..." label, a row of **previous**, a
+single **play/pause** button in the middle (it shows pause while playing, and lights up) and **skip**, and
+below it three smaller toggles: **shuffle**, **loop all** (repeat the playlist) and **loop one** (repeat the
+song). The two loops exclude each other, and pressing the lit one stops looping. Space also toggles play/pause. If MPD is not running there are no controls, only a
 **Start MPD** button, which runs `[mpd] start_command` (default `mpd`) and picks the server up as soon as it
 answers. When the song changes, `Now playing: Artist - Title` is added to the messages. The panel keeps clear of
 the message column on a narrow screen. The look is the `[theme.mpd]` element (buttons use `start_button`).
@@ -385,6 +387,14 @@ port = 6600
 start_command = "mpd"
 announce = true     # "Now playing: ..." messages
 ```
+
+**The volume.** MPD has a volume of its own, which the sound system's does not affect when MPD plays straight to
+the card or uses its software mixer, so the media keys could appear to do nothing while it played. They now
+follow MPD while it is playing: the keys, the wheel, the toolbar text (shown as `♪ 60%` so it is clear whose
+volume it is) and the slider all change it, and a change made from outside (`mpc volume -10`) shows up at
+once. MPD has no mute, so the mute key sets it to 0 and the next press puts it back. `[audio] volume_target`:
+`"auto"` (default: MPD's while it plays, the sound system's otherwise), `"sink"` (always the sound system's),
+`"mpd"` (MPD's whenever it runs) or `"both"` (the sound system's, with MPD set to the same percentage).
 
 rei-wm speaks MPD's protocol itself (no libmpdclient); it keeps one connection waiting for player changes and
 looks for MPD every two seconds while it is away. Names other than IP addresses and `localhost` are not looked

@@ -1276,43 +1276,95 @@ struct rei_pixbuf *rei_bar_volpop_render(const struct rei_volpop_state *st, int 
 
 /* ---- The music controls ---- */
 
-int rei_bar_mpd_buttons(bool running, struct rei_rect out[3])
+int rei_bar_mpd_buttons(bool running, struct rei_rect out[REI_MPD_BUTTONS])
 {
-	const int bh = 36, y = REI_MPDP_H - 16 - bh;
 	if (!running) {
-		out[0] = (struct rei_rect){ (REI_MPDP_W - 150) / 2, y, 150, bh };
+		out[0] = (struct rei_rect){ (REI_MPDP_W - 150) / 2, (REI_MPDP_H - 36) / 2 + 8, 150, 36 };
 		return 1;
 	}
-	const int bw = 86, gap = 12, total = 3 * bw + 2 * gap;
+	/* The main row: previous, play/pause, skip. */
+	const int bw = 86, gap = 12, total = 3 * bw + 2 * gap, y = 44, bh = 36;
 	for (int i = 0; i < 3; i++)
 		out[i] = (struct rei_rect){ (REI_MPDP_W - total) / 2 + i * (bw + gap), y, bw, bh };
-	return 3;
+	/* Below it, smaller: shuffle, loop all, loop one. */
+	const int sw = 62, sgap = 10, stotal = 3 * sw + 2 * sgap, sy = 92, sh = 28;
+	for (int i = 0; i < 3; i++)
+		out[3 + i] = (struct rei_rect){ (REI_MPDP_W - stotal) / 2 + i * (sw + sgap), sy, sw, sh };
+	return 6;
 }
 
-/* The icons are drawn, not typeset: a triangle, two bars, a triangle against a bar. */
+/* The icons are drawn, not typeset. `which`: 0 previous, 1 play, 2 pause, 3 skip, 4 shuffle, 5 loop, 6 loop one. */
 static void mpd_icon(cairo_t *cr, int which, double cx, double cy)
 {
 	const double h = 9, w = 8;
 	switch (which) {
-	case 0:   /* play */
+	case 1:   /* play */
 		cairo_move_to(cr, cx - w * 0.6, cy - h);
 		cairo_line_to(cr, cx - w * 0.6, cy + h);
 		cairo_line_to(cr, cx + w, cy);
 		cairo_close_path(cr);
+		cairo_fill(cr);
 		break;
-	case 1:   /* pause */
+	case 2:   /* pause */
 		cairo_rectangle(cr, cx - 6.5, cy - h, 4.5, 2 * h);
 		cairo_rectangle(cr, cx + 2, cy - h, 4.5, 2 * h);
+		cairo_fill(cr);
 		break;
-	default:  /* skip */
+	case 0:   /* previous: a bar, and a triangle pointing at it */
+		cairo_rectangle(cr, cx - 8.5, cy - h, 3.5, 2 * h);
+		cairo_move_to(cr, cx + 8, cy - h);
+		cairo_line_to(cr, cx + 8, cy + h);
+		cairo_line_to(cr, cx - 3, cy);
+		cairo_close_path(cr);
+		cairo_fill(cr);
+		break;
+	case 3:   /* skip */
 		cairo_move_to(cr, cx - 8, cy - h);
 		cairo_line_to(cr, cx - 8, cy + h);
 		cairo_line_to(cr, cx + 3, cy);
 		cairo_close_path(cr);
 		cairo_rectangle(cr, cx + 5, cy - h, 3.5, 2 * h);
+		cairo_fill(cr);
+		break;
+	case 4: {   /* shuffle: two arrows that cross */
+		cairo_set_line_width(cr, 1.8);
+		cairo_move_to(cr, cx - 8, cy - 4.5);
+		cairo_curve_to(cr, cx - 1, cy - 4.5, cx - 1, cy + 4.5, cx + 4, cy + 4.5);
+		cairo_move_to(cr, cx - 8, cy + 4.5);
+		cairo_curve_to(cr, cx - 1, cy + 4.5, cx - 1, cy - 4.5, cx + 4, cy - 4.5);
+		cairo_stroke(cr);
+		for (int k = -1; k <= 1; k += 2) {   /* the heads */
+			cairo_move_to(cr, cx + 4, cy + k * 4.5 - 3);
+			cairo_line_to(cr, cx + 9, cy + k * 4.5);
+			cairo_line_to(cr, cx + 4, cy + k * 4.5 + 3);
+			cairo_close_path(cr);
+		}
+		cairo_fill(cr);
 		break;
 	}
-	cairo_fill(cr);
+	default: {   /* loop: a circle that does not quite close, with an arrow head; loop one has a 1 in it */
+		const double r = 6.5, a0 = -M_PI / 2 + 0.55, a1 = -M_PI / 2 - 0.55 + 2 * M_PI;
+		cairo_set_line_width(cr, 1.8);
+		cairo_new_path(cr);
+		cairo_arc(cr, cx, cy, r, a0, a1);
+		cairo_stroke(cr);
+		double ex = cx + r * cos(a1), ey = cy + r * sin(a1);   /* where the arc ends, going clockwise */
+		double tx = -sin(a1), ty = cos(a1), nx = cos(a1), ny = sin(a1);
+		cairo_move_to(cr, ex + 4.2 * tx, ey + 4.2 * ty);
+		cairo_line_to(cr, ex + 3.2 * nx, ey + 3.2 * ny);
+		cairo_line_to(cr, ex - 3.2 * nx, ey - 3.2 * ny);
+		cairo_close_path(cr);
+		cairo_fill(cr);
+		if (which == 6) {   /* the 1 */
+			cairo_move_to(cr, cx - 1.6, cy - 2.2);
+			cairo_line_to(cr, cx + 0.4, cy - 3.6);
+			cairo_line_to(cr, cx + 0.4, cy + 3.6);
+			cairo_set_line_width(cr, 1.5);
+			cairo_stroke(cr);
+		}
+		break;
+	}
+	}
 }
 
 struct rei_pixbuf *rei_bar_mpd_render(const struct rei_mpd_panel_state *st, int *margin_out)
@@ -1343,18 +1395,22 @@ struct rei_pixbuf *rei_bar_mpd_render(const struct rei_mpd_panel_state *st, int 
 	show_text(cr, l, &st->box);
 	g_object_unref(l);
 
-	struct rei_rect b[3];
+	struct rei_rect b[REI_MPD_BUTTONS];
 	int n = rei_bar_mpd_buttons(st->running, b);
 	for (int i = 0; i < n; i++) {
-		/* The play button lights while playing, the pause button while paused. */
-		bool lit = st->running && ((i == 0 && st->mode == 1) || (i == 1 && st->mode == 2));
+		/* Lit: the play/pause button while playing; a toggle while it is on. */
+		bool lit = st->running && ((i == 1 && st->mode == 1) || (i == 3 && st->shuffle) ||
+					   (i == 4 && st->loop_all) || (i == 5 && st->loop_one));
 		uint32_t fill = lit ? st->button.active_color : st->button.color;
 		if (st->hover == i)
 			fill = rei_bar_mix(fill, st->button.text_color, 0.15);
 		draw_box(cr, &st->button, m + b[i].x, m + b[i].y, b[i].w, b[i].h, fill, 1.0);
 		set_color(cr, lit ? st->button.active_text_color : st->button.text_color);
-		if (st->running)
-			mpd_icon(cr, i, m + b[i].x + b[i].w / 2.0, m + b[i].y + b[i].h / 2.0);
+		if (st->running) {
+			static const int icon_of[REI_MPD_BUTTONS] = { 0, 1, 3, 4, 5, 6 };
+			int icon = i == 1 && st->mode == 1 ? 2 : icon_of[i];   /* playing: it shows pause, what a press does */
+			mpd_icon(cr, icon, m + b[i].x + b[i].w / 2.0, m + b[i].y + b[i].h / 2.0);
+		}
 		else
 			draw_centered(cr, font, "Start MPD", m + b[i].x + b[i].w / 2.0, m + b[i].y + b[i].h / 2.0, &st->button);
 	}

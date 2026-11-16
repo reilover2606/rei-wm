@@ -42,6 +42,8 @@ struct rei_config {
 	bool session_bus_private;  /* [general] session_bus = "private": launched programs get their own D-Bus session bus. */
 	bool focus_follows_mouse;  /* Moving the pointer onto a window focuses it. */
 
+	enum rei_volume_target { REI_VOLUME_AUTO, REI_VOLUME_SINK, REI_VOLUME_MPD, REI_VOLUME_BOTH } volume_target;   /* [audio] volume_target */
+
 	/* [mpd] */
 	bool mpd_enabled;
 	char *mpd_host;            /* "" = $MPD_HOST, else the default socket, else localhost */

@@ -193,7 +193,7 @@ static void label(cairo_t *cr, const char *text, double x, double y, uint32_t fg
 
 int rei_theme_preview(const struct rei_config *cfg, const char *png_path)
 {
-	const int W = 1000, H = 685;
+	const int W = 1000, H = 710;
 	g_n_items = 0;
 	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, W, H);
 	cairo_t *cr = cairo_create(surface);
@@ -370,6 +370,7 @@ int rei_theme_preview(const struct rei_config *cfg, const char *png_path)
 		snprintf(ms.label, sizeof ms.label, "Now playing: Ada - One");
 		ms.running = true;
 		ms.mode = 1;
+		ms.shuffle = true;
 		ms.hover = 2;
 		ms.scale = 1;
 		snprintf(ms.font, sizeof ms.font, "%s", cfg->messages_font);

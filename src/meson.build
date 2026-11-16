@@ -21,6 +21,7 @@ core_sources = files(
   'theme_cli.c',
   'msgbuf.c',
   'mpd.c',
+  'volume.c',
   'proto/viewporter.c',
   'proto/fractional_scale.c',
   'volpop.c',
