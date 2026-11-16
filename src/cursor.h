@@ -60,6 +60,10 @@ struct rei_cursor_image {
 	struct rei_pixbuf *pixbuf;   /* Premultiplied; owned by whoever made the image. */
 	int32_t width, height;       /* Logical size (the pixbuf may be larger on a scaled output). */
 	int32_t hotspot_x, hotspot_y;   /* Logical, from the image's top-left. */
+	/* An animated cursor is a ring of these: `next` is the following frame (NULL when there is only one) and
+	 * `delay_ms` how long this one is shown. The theme owns the ring. */
+	const struct rei_cursor_image *next;
+	uint32_t delay_ms;
 };
 
 /* The name of a shape as the protocol and CSS spell it ("pointer", "ew-resize"...), or NULL. */
@@ -72,6 +76,11 @@ enum rei_cursor_shape rei_cursor_shape_from_name(const char *name);
  */
 struct rei_pixbuf *rei_xcursor_parse(const uint8_t *data, size_t len, int want_size, int *nominal,
 				     int32_t *hot_x, int32_t *hot_y);
+
+/* Like rei_xcursor_parse, but every image of that size, in order (the frames of an animation, up to `max`),
+ * with each one's delay in milliseconds. Returns how many; the caller unrefs the pixbufs. */
+int rei_xcursor_parse_frames(const uint8_t *data, size_t len, int want_size, int *nominal, struct rei_pixbuf **pix,
+			     int32_t *hot_x, int32_t *hot_y, uint32_t *delay_ms, int max);
 
 /* The directories searched for themes: $XCURSOR_PATH, else ~/.local/share/icons:~/.icons:
  * /usr/share/icons:/usr/share/pixmaps:/usr/share/cursors:/usr/share/cursors/xorg-x11. The result is

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <event2/event.h>
 #include <wayland-server-core.h>
 
 #include "confirm.h"
@@ -39,6 +40,10 @@ struct rei_pointer_cursor {
 	struct rei_cursor_image shown;
 	bool hidden;
 	uint64_t shown_id;   /* the pixbuf's id, to tell a new picture from the same one */
+
+	/* An animated theme cursor: which one (the theme's first frame), the frame now shown, and the timer. */
+	const struct rei_cursor_image *anim_base, *anim_cur;
+	struct event *anim_timer;
 };
 
 static void drop_surface(struct rei_pointer_cursor *p)
@@ -129,8 +134,9 @@ static struct wl_client *pointer_client(struct rei_server *s)
 }
 
 /* Fills `out` with what to draw and returns false when the pointer is to be hidden. */
-static bool decide(struct rei_server *s, struct rei_cursor_image *out)
+static bool decide(struct rei_server *s, struct rei_cursor_image *out, const struct rei_cursor_image **src)
 {
+	*src = NULL;
 	struct rei_pointer_cursor *p = s->pcursor;
 	enum rei_cursor_shape shape = ui_shape(s);
 	if (shape == REI_SHAPE_NONE && p->req != REQ_NONE && p->req_client && p->req_client == pointer_client(s)) {
@@ -163,8 +169,18 @@ static bool decide(struct rei_server *s, struct rei_cursor_image *out)
 	}
 	if (shape == REI_SHAPE_NONE)
 		shape = REI_SHAPE_DEFAULT;
-	*out = *rei_cursor_theme_shape(p->theme, shape);
+	*src = rei_cursor_theme_shape(p->theme, shape);
+	*out = **src;
 	return true;
+}
+
+static void on_anim_timer(evutil_socket_t fd, short what, void *arg);
+
+static void anim_stop(struct rei_pointer_cursor *p)
+{
+	if (p->anim_timer)
+		evtimer_del(p->anim_timer);
+	p->anim_base = p->anim_cur = NULL;
 }
 
 void rei_pointer_cursor_refresh(struct rei_server *s)
@@ -173,7 +189,22 @@ void rei_pointer_cursor_refresh(struct rei_server *s)
 	if (!p || !p->theme)
 		return;
 	struct rei_cursor_image img = { 0 };
-	bool visible = decide(s, &img);
+	const struct rei_cursor_image *src;
+	bool visible = decide(s, &img, &src);
+	if (visible && src && src->next) {
+		/* An animation: keep playing it if it is the one already running, else start it from the top. */
+		if (p->anim_base != src) {
+			anim_stop(p);
+			p->anim_base = p->anim_cur = src;
+			if (!p->anim_timer)
+				p->anim_timer = evtimer_new(s->base, on_anim_timer, s);
+			struct timeval tv = { src->delay_ms / 1000, (src->delay_ms % 1000) * 1000 };
+			evtimer_add(p->anim_timer, &tv);
+		}
+		img = *p->anim_cur;
+	} else if (p->anim_base) {
+		anim_stop(p);
+	}
 	bool changed;
 	if (!visible) {
 		changed = !p->hidden;
@@ -192,6 +223,19 @@ void rei_pointer_cursor_refresh(struct rei_server *s)
 		rei_server_cursor_moved(s);   /* redraws it, or re-uploads the hardware cursor */
 }
 
+static void on_anim_timer(evutil_socket_t fd, short what, void *arg)
+{
+	(void)fd; (void)what;
+	struct rei_server *s = arg;
+	struct rei_pointer_cursor *p = s->pcursor;
+	if (!p || !p->anim_cur)
+		return;
+	p->anim_cur = p->anim_cur->next;
+	struct timeval tv = { p->anim_cur->delay_ms / 1000, (p->anim_cur->delay_ms % 1000) * 1000 };
+	evtimer_add(p->anim_timer, &tv);
+	rei_pointer_cursor_refresh(s);
+}
+
 const struct rei_cursor_image *rei_pointer_cursor_image(struct rei_server *s)
 {
 	struct rei_pointer_cursor *p = s->pcursor;
@@ -204,14 +248,14 @@ const struct rei_cursor_image *rei_pointer_cursor_image(struct rei_server *s)
 
 /* ---- Requests ---- */
 
-static bool accept(struct rei_server *s, struct wl_client *client)
+static bool accepts_request(struct rei_server *s, struct wl_client *client)
 {
 	return s->pcursor && client && client == pointer_client(s);
 }
 
 void rei_pointer_cursor_request_shape(struct rei_server *s, struct wl_client *client, enum rei_cursor_shape shape)
 {
-	if (!accept(s, client))
+	if (!accepts_request(s, client))
 		return;
 	struct rei_pointer_cursor *p = s->pcursor;
 	drop_surface(p);
@@ -224,7 +268,7 @@ void rei_pointer_cursor_request_shape(struct rei_server *s, struct wl_client *cl
 void rei_pointer_cursor_request_surface(struct rei_server *s, struct wl_client *client,
 					struct rei_surface *surface, int32_t hot_x, int32_t hot_y)
 {
-	if (!accept(s, client))
+	if (!accepts_request(s, client))
 		return;
 	struct rei_pointer_cursor *p = s->pcursor;
 	drop_surface(p);
@@ -289,6 +333,7 @@ void rei_pointer_cursor_reconfigure(struct rei_server *s)
 		return;
 
 	/* The pictures of the old theme go with it, so nothing may still point at them. */
+	anim_stop(p);
 	struct rei_cursor_theme *old = p->theme;
 	p->theme = rei_cursor_theme_open(want, size, scale);
 	snprintf(p->theme_setting, sizeof p->theme_setting, "%s", want);
@@ -318,6 +363,9 @@ void rei_pointer_cursor_finish(struct rei_server *s)
 	if (!p)
 		return;
 	drop_surface(p);
+	anim_stop(p);
+	if (p->anim_timer)
+		event_free(p->anim_timer);
 	rei_cursor_theme_close(p->theme);
 	free(p);
 	s->pcursor = NULL;

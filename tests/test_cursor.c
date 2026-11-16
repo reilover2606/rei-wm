@@ -45,6 +45,30 @@ static void write_xcursor(const char *path, const int *sizes, int n, uint32_t ar
 	free(f);
 }
 
+/* An animated cursor: `n` images of one size, one colour each, `delay` ms apart. */
+static void write_xcursor_anim(const char *path, int size, const uint32_t *argb, int n, uint32_t delay)
+{
+	size_t img = 36 + (size_t)size * (size_t)size * 4, total = 16 + (size_t)n * 12 + (size_t)n * img;
+	uint8_t *f = calloc(1, total);
+	CHECK(f);
+	put32(f, 0x72756358u); put32(f + 4, 16); put32(f + 8, 0x10000); put32(f + 12, (uint32_t)n);
+	for (int i = 0; i < n; i++) {
+		size_t off = 16 + (size_t)n * 12 + (size_t)i * img;
+		uint8_t *toc = f + 16 + i * 12;
+		put32(toc, 0xfffd0002u); put32(toc + 4, (uint32_t)size); put32(toc + 8, (uint32_t)off);
+		uint8_t *c = f + off;
+		put32(c, 36); put32(c + 4, 0xfffd0002u); put32(c + 8, (uint32_t)size); put32(c + 12, 1);
+		put32(c + 16, (uint32_t)size); put32(c + 20, (uint32_t)size);
+		put32(c + 32, delay);
+		for (int k = 0; k < size * size; k++)
+			put32(c + 36 + k * 4, argb[i]);
+	}
+	FILE *o = fopen(path, "wb");
+	CHECK(o && fwrite(f, 1, total, o) == total);
+	fclose(o);
+	free(f);
+}
+
 static void make_dir(const char *path)
 {
 	CHECK(mkdir(path, 0700) == 0 || errno == EEXIST);
@@ -143,6 +167,18 @@ static void test_theme_lookup(void)
 	CHECK(i->pixbuf->data[2] == 0xff);
 	rei_cursor_theme_close(t);
 
+	/* An animated cursor is a ring of its frames with their delays; a plain one has no ring. */
+	snprintf(a, sizeof a, "%s/base/cursors/watch", g_themes);
+	const uint32_t cols[3] = { 0xffff0000, 0xff00ff00, 0xff0000ff };
+	write_xcursor_anim(a, 24, cols, 3, 80);
+	t = rei_cursor_theme_open("base", 24, 1);
+	i = rei_cursor_theme_shape(t, REI_SHAPE_WAIT);
+	CHECK(i->next && i->delay_ms == 80 && i->pixbuf->data[2] == 0xff);
+	CHECK(i->next->pixbuf->data[1] == 0xff && i->next->next->pixbuf->data[0] == 0xff);
+	CHECK(i->next->next->next->pixbuf == i->pixbuf);   /* back to the first frame */
+	CHECK(!rei_cursor_theme_shape(t, REI_SHAPE_POINTER)->next);
+	rei_cursor_theme_close(t);
+
 	/* A bigger pointer is asked for from a bigger picture and shown at the logical size. */
 	t = rei_cursor_theme_open("kid", 24, 2);   /* 48 pixels wanted, only a 24px picture exists: still 24 logical */
 	i = rei_cursor_theme_shape(t, REI_SHAPE_TEXT);
@@ -208,6 +244,11 @@ int main(int argc, char **argv)
 	snprintf(b, sizeof b, "%s/left_ptr", a); write_xcursor(b, s8, 1, 0xffff0000, 0, 0);
 	snprintf(b, sizeof b, "%s/xterm", a); write_xcursor(b, s8, 1, 0xff0000ff, 0, 0);
 	snprintf(b, sizeof b, "%s/hand2", a); write_xcursor(b, s8, 1, 0xff00ff00, 0, 0);
+	snprintf(b, sizeof b, "%s/watch", a);
+	{
+		const uint32_t anim[2] = { 0xffff0000, 0xff0000ff };
+		write_xcursor_anim(b, 8, anim, 2, 60);
+	}
 	setenv("XCURSOR_PATH", g_themes, 1);
 
 	char config[400];
@@ -259,6 +300,24 @@ int main(int argc, char **argv)
 	/* Coming back in is a new enter: the request has ended. */
 	move(400, 300);
 	expect_cursor("a new enter starts from the arrow", 403, 303, 255, 0, 0);
+
+	/* A client asks for the animated shape: the pointer keeps changing by itself. */
+	wp_cursor_shape_device_v1_set_shape(g_dev, enter_serial(&c), WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_WAIT);
+	CHECK(wl_display_roundtrip(c.d) >= 0);
+	settle_all();
+	{
+		bool red = false, blue = false;
+		for (int k = 0; k < 40 && !(red && blue); k++) {
+			struct ppm img = screenshot();
+			red |= near_px(&img, 403, 303, 255, 0, 0, 8);
+			blue |= near_px(&img, 403, 303, 0, 0, 255, 8);
+			free(img.rgb);
+		}
+		CHECK(red && blue);
+	}
+	move(12, 14);     /* off the window and back: a new enter: the animation ends with the request */
+	move(400, 300);
+	expect_cursor("the animation stopped with the request", 403, 303, 255, 0, 0);
 
 	/* A picture: 6x6 yellow, hotspot (2,2), so it covers (398..403, 298..303). */
 	struct wl_surface *cs = wl_compositor_create_surface(c.compositor);
