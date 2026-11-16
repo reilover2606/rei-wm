@@ -64,6 +64,20 @@ static const char prelude[] =
 	"  return texture(tex, uv);\n"
 	"}\n"
 	"vec4 default_post_processing(vec4 c) { return c * u_alpha; }\n"
+	/* Whether the row through px is a highlighted line: of the clearly bright and the clearly dark samples
+	 * along it (37 pixels either way), the share that is bright. Text is bright strokes on a dark row (low,
+	 * about 0.3); a selection or reverse video is dark strokes on a bright row (high, 0.6 and more), however
+	 * dense the text is. */
+	"float rei_row_brightness(vec2 px) {\n"
+	"  float bright = 0.0, dark = 0.0;\n"
+	"  for (int i = 0; i < 16; i++) {\n"
+	"    vec4 c = rei_texel(px + vec2((float(i) - 7.5) * 5.0 * u_px, 0.0));\n"
+	"    float v = max(c.r, max(c.g, c.b));\n"
+	"    bright += step(0.6, v);\n"
+	"    dark += step(v, 0.25);\n"
+	"  }\n"
+	"  return bright / max(bright + dark, 1.0);\n"
+	"}\n"
 	/* Bloom: the picture around px, as far as `radius` pixels, weighted towards the centre; only what is
 	 * brighter than `threshold` counts (0: everything). 40 taps on a spiral. */
 	"vec4 rei_glow(vec2 px, float radius, float threshold) {\n"
@@ -129,6 +143,10 @@ static const char window_glow_body[] =
 	"    float lum = max(g.r, max(g.g, g.b));\n"
 	"    vec3 gc = mix(g.rgb, u_p[1].rgb * lum, u_p[0].z);\n"
 	"    float k = u_p[0].y * 2.0;\n"
+	/* Not over a highlighted line: there the light would wash out the dark text on it. u_p[2].y is the share
+	 * of bright samples along the row from which on it counts as highlighted; 1 turns this off. */
+	"    if (u_p[2].y < 1.0)\n"
+	"      k *= 1.0 - smoothstep(u_p[2].y - 0.1, u_p[2].y + 0.1, rei_row_brightness(texcoord));\n"
 	"    c.rgb = min(c.rgb + gc * k, vec3(1.0));\n"
 	"    c.a = min(c.a + lum * k, 1.0);\n"
 	"  }\n"
@@ -310,8 +328,8 @@ void rei_fx_for_text(const struct rei_text_fx *t, struct rei_fx *out)
 	out->blink = t->blink;
 }
 
-void rei_fx_for_window(const struct rei_text_fx *t, float threshold, const struct rei_shader *shader,
-		       struct rei_fx *out)
+void rei_fx_for_window(const struct rei_text_fx *t, float threshold, float area_limit,
+		       const struct rei_shader *shader, struct rei_fx *out)
 {
 	memset(out, 0, sizeof *out);
 	out->shader = shader;
@@ -319,6 +337,7 @@ void rei_fx_for_window(const struct rei_text_fx *t, float threshold, const struc
 	out->p[1] = t->glow_strength;
 	out->p[2] = t->glow_tint;
 	out->p[3] = threshold;
+	out->p[9] = area_limit;
 	rgb(t->glow_color, &out->p[4]);
 	out->blink = t->blink;
 }

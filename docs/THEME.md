@@ -62,6 +62,8 @@ shader = "glow"           # or the path of a GLSL file (see below)
 text_glow_size = 5        # pixels; 0 turns it off
 text_glow_strength = 1.0
 glow_threshold = 0.35     # only pixels brighter than this glow (0 = everything, for light-on-dark at any level)
+glow_area_limit = 0.5     # no glow on a row that is bright more than this share of the way along (a highlighted
+                          # line, e.g. a selection in a file manager, whose dark text it would wash out); 1 = always
 text_glow_tint = 0        # towards 1: the glow takes text_glow_color instead of the text's colour
 text_blink = 0            # seconds per cycle: the whole window blinks (0 = steady)
 ```

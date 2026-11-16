@@ -27,8 +27,11 @@ struct rei_text_fx;
  *     float u_px               texture pixels per logical pixel (2 on a 2x output)
  *     float time               milliseconds, for animation (a shader that mentions it is redrawn continuously)
  *     float opacity            the window's overall opacity
- *     vec4 u_p[4]              the effect's parameters (see rei_fx)
+ *     vec4 u_p[4]              the effect's parameters (see rei_fx); for the window glow u_p[0] = size, strength, tint,
+ *                              threshold, u_p[1].rgb = tint colour, u_p[2].y = highlighted-row limit
  *     float u_blink            1 or 0, per the effect's blink period
+ *     float rei_row_brightness(vec2 px)   0..1: how much of the row through px (37 pixels either way) is bright rather
+ *                              than dark; high on a highlighted line
  *     vec4 rei_texel(vec2 px)  the picture at a pixel position (clamped to its edges)
  *     vec4 rei_glow(vec2 px, float radius, float threshold)   the bright parts around px, blurred
  *     vec4 default_post_processing(vec4 c)    applies the opacity; call it on the result
@@ -62,7 +65,7 @@ bool rei_text_fx_enabled(const struct rei_text_fx *t);
 void rei_fx_for_text(const struct rei_text_fx *t, struct rei_fx *out);
 /* ...and for a window: glow (threshold: how bright a pixel must be to glow, 0..1) and blink from the same
  * settings, through `shader` (rei_shader_window_glow() or a custom one). */
-void rei_fx_for_window(const struct rei_text_fx *t, float threshold, const struct rei_shader *shader,
-		       struct rei_fx *out);
+void rei_fx_for_window(const struct rei_text_fx *t, float threshold, float area_limit,
+		       const struct rei_shader *shader, struct rei_fx *out);
 
 #endif

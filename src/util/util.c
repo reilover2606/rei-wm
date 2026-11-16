@@ -1,10 +1,16 @@
 #include <math.h>
 #include "util/util.h"
 
+#include <errno.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <time.h>
+#include <unistd.h>
+
+#include "util/log.h"
 
 uint64_t rei_now_ns(void)
 {
@@ -103,4 +109,37 @@ void rei_utf8_prefix(char *buf, const char *s, size_t max)
 	memcpy(buf, s, n);
 	buf[n] = '\0';
 	rei_utf8_trim(buf);
+}
+
+void rei_child_reset_signals(void)
+{
+	static const int sigs[] = { SIGINT, SIGTERM, SIGHUP, SIGUSR1, SIGUSR2, SIGCHLD, SIGPIPE, SIGQUIT };
+	for (size_t i = 0; i < sizeof sigs / sizeof sigs[0]; i++)
+		signal(sigs[i], SIG_DFL);
+	sigset_t none;
+	sigemptyset(&none);
+	sigprocmask(SIG_SETMASK, &none, NULL);
+}
+
+bool rei_wait_child(int pid, int term_ms, const char *what)
+{
+	if (pid <= 0)
+		return true;
+	for (int phase = 0; phase < 2; phase++) {
+		int limit = phase == 0 ? term_ms : 1000;
+		for (int waited = 0; waited <= limit; waited += 10) {
+			int status;
+			pid_t r = waitpid((pid_t)pid, &status, WNOHANG);
+			if (r == (pid_t)pid || (r < 0 && errno == ECHILD))
+				return true;
+			struct timespec nap = { 0, 10 * 1000000L };
+			nanosleep(&nap, NULL);
+		}
+		if (phase == 0) {
+			rei_warn("%s (pid %d) did not exit within %d ms of SIGTERM; killing it", what, pid, term_ms);
+			kill((pid_t)pid, SIGKILL);
+		}
+	}
+	rei_warn("%s (pid %d) cannot be killed (stuck in the kernel?); not waiting for it any longer", what, pid);
+	return false;
 }

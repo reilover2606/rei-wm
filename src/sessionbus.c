@@ -37,6 +37,7 @@ void rei_sessionbus_start(struct rei_server *s)
 		return;
 	}
 	if (pid == 0) {
+		rei_child_reset_signals();
 		dup2(out[1], STDOUT_FILENO);
 		close(out[0]);
 		close(out[1]);
@@ -77,6 +78,6 @@ void rei_sessionbus_stop(struct rei_server *s)
 		return;
 	s->sessionbus = NULL;
 	kill(b->pid, SIGTERM);
-	waitpid(b->pid, NULL, 0);
+	rei_wait_child(b->pid, 2000, "dbus-daemon");
 	free(b);
 }

@@ -726,9 +726,9 @@ void rei_server_fail(struct rei_server *s)
 
 void rei_server_destroy(struct rei_server *s)
 {
-	rei_watchdog_stop();
 	if (!s)
 		return;
+	rei_watchdog_shutdown();   /* keeps watching: a shutdown that hangs is reported and ended */
 	s->shutting_down = true;
 	rei_info("summary scene_builds=%llu cursor_redraws=%llu", (unsigned long long)s->scene_builds,
 		 (unsigned long long)s->cursor_redraws);
@@ -793,6 +793,7 @@ void rei_server_destroy(struct rei_server *s)
 	rei_wm_finish(s);
 	rei_seat_finish(s);
 	rei_image_free(s->wallpaper_image);
+	rei_watchdog_stop();
 	if (s->base)
 		event_base_free(s->base);
 	free(s->socket_name);

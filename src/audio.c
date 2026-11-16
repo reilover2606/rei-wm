@@ -460,12 +460,9 @@ static void start_daemon(struct daemon *d)
 	if (pid < 0)
 		return;
 	if (pid == 0) {
+		rei_child_reset_signals();
 		setsid();
 		prctl(PR_SET_PDEATHSIG, SIGTERM);   /* gone with rei-wm, even if it crashes */
-		signal(SIGPIPE, SIG_DFL);
-		sigset_t none;
-		sigemptyset(&none);
-		sigprocmask(SIG_SETMASK, &none, NULL);
 		int nul = open("/dev/null", O_RDWR);
 		if (nul >= 0) {
 			dup2(nul, STDIN_FILENO);
@@ -518,7 +515,7 @@ static void autostart_stop(void)
 	for (int i = 2; i >= 0; i--) {
 		if (g_daemons[i].pid > 0) {
 			kill(g_daemons[i].pid, SIGTERM);
-			waitpid(g_daemons[i].pid, NULL, 0);
+			rei_wait_child(g_daemons[i].pid, 2000, g_daemons[i].name);
 		}
 		g_daemons[i].pid = 0;
 		g_daemons[i].decided = false;

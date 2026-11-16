@@ -11,6 +11,9 @@ struct event_base;
  * and the log says why.
  */
 void rei_watchdog_start(struct event_base *base);
+/* The event loop has ended and the server is being taken down: the watchdog now watches that instead (a hang
+ * is reported and ends the process, as for the loop). Call rei_watchdog_stop() when it is done. */
+void rei_watchdog_shutdown(void);
 /* Around a call the event loop makes on purpose and that may legitimately take a long time (switching
  * VTs goes through logind, which can take many seconds when the other session is slow to take over):
  * the watchdog does not count that as a hang. Calls nest. */

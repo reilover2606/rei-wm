@@ -40,7 +40,7 @@ void rei_winfx_configure(struct rei_server *s)
 	if (!sh)
 		rei_warn("theme.window_text.shader: %s", err);
 	else {
-		rei_fx_for_window(&glow, theme->window_threshold, sh, &w->theme_fx);
+		rei_fx_for_window(&glow, theme->window_threshold, theme->window_area_limit, sh, &w->theme_fx);
 		w->theme_on = true;
 	}
 
@@ -63,7 +63,7 @@ void rei_winfx_configure(struct rei_server *s)
 		}
 		struct rule *r = &w->rules[w->n_rules++];
 		snprintf(r->app, sizeof r->app, "%s", colon ? colon + 1 : "");
-		rei_fx_for_window(&glow, theme->window_threshold, sh, &r->fx);
+		rei_fx_for_window(&glow, theme->window_threshold, theme->window_area_limit, sh, &r->fx);
 		rei_info("window shader '%s' for %s", rei_shader_name(sh), r->app[0] ? r->app : "every window");
 	}
 }

@@ -107,6 +107,7 @@ const PropInfo kWindowText[] = {
 	{ "text_glow_size", "Glow size (px, 0 = none)", "number", 0, 40, 1, 1 },
 	{ "text_glow_strength", "Glow strength", "number", 0, 4, 0.1, 2 },
 	{ "glow_threshold", "Only pixels brighter than (0..1)", "number", 0, 1, 0.05, 2 },
+	{ "glow_area_limit", "No glow on mostly bright rows, above this share (0..1; 1 = always glow): keeps highlighted lines readable", "number", 0, 1, 0.05, 2 },
 	{ "text_glow_tint", "Glow tint (0 = the text's own colour)", "number", 0, 1, 0.05, 2 },
 	{ "text_glow_color", "Glow tint colour", "color", 0, 0, 0, 0 },
 	{ "text_blink", "Blink (seconds per cycle, 0 = steady)", "number", 0, 30, 0.1, 2 },

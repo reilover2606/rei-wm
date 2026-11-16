@@ -341,6 +341,7 @@ int main(int argc, char **argv)
 		static_cast<ColorButton *>(field<QWidget>(wt2, "theme.toolbar.text_glow_color"))->setColor("#ff8800");
 		field<QLineEdit>(wt2, "theme.window_text.apps")->setText("URxvt, foot");
 		field<QDoubleSpinBox>(wt2, "theme.window_text.glow_threshold")->setValue(0.5);
+		CHECK(field<QDoubleSpinBox>(wt2, "theme.window_text.glow_area_limit")->value() == 0.5);
 		CHECK(wt2.dirty());
 		CHECK(wt2.save(&err));
 		QString fxText = slurp(path);

@@ -100,6 +100,7 @@ struct rei_theme {
 	char window_apps[256];     /* app ids / X11 classes, comma separated, case-insensitive; "*" = every window */
 	char window_shader[256];   /* "glow" (built in) or the path of a GLSL file */
 	float window_threshold;    /* 0..1: how bright a pixel must be to glow (keeps a dark background dark) */
+	float window_area_limit;   /* 0..1: a row that is bright more than this share of the way (a highlighted line) does not glow; 1 = off */
 };
 
 /* Whether a window of this application is shaded per [theme.window_text] (and the effect is not all off). */

@@ -20,6 +20,7 @@
 
 static atomic_llong g_beat_ms;
 static atomic_bool g_stop;
+static atomic_bool g_shutdown;   /* the event loop has ended and the server is being taken down */
 static atomic_int g_suspended;   /* >0: the event loop is knowingly in a call that may take a while */
 static pthread_t g_thread;
 static bool g_running;
@@ -88,7 +89,10 @@ static void slurp_line(const char *path, char *out, size_t n)
 
 static void report_and_exit(void)
 {
-	dprintf(STDERR_FILENO, "\nrei-wm watchdog: the event loop has not run for %d seconds. Threads:\n", g_limit_s);
+	if (atomic_load(&g_shutdown))
+		dprintf(STDERR_FILENO, "\nrei-wm watchdog: shutting down has not finished after %d seconds. Threads:\n", g_limit_s);
+	else
+		dprintf(STDERR_FILENO, "\nrei-wm watchdog: the event loop has not run for %d seconds. Threads:\n", g_limit_s);
 	DIR *d = opendir("/proc/self/task");
 	pid_t self = getpid();
 	if (d) {
@@ -178,6 +182,18 @@ void rei_watchdog_start(struct event_base *base)
 	atomic_store(&g_stop, false);
 	if (pthread_create(&g_thread, NULL, watch, NULL) == 0)
 		g_running = true;
+}
+
+void rei_watchdog_shutdown(void)
+{
+	/* From here the loop no longer beats; the watchdog gives the shutdown the same time as a frame. A shutdown
+	 * that hangs (a child that ignores SIGTERM, a driver call that never returns) is reported, with where each
+	 * thread is, and the process is ended: the console must never be left to a compositor that cannot exit. */
+	atomic_store(&g_beat_ms, now_ms());
+	atomic_store(&g_shutdown, true);
+	if (getenv("REI_WATCHDOG_SELFTEST") && !strcmp(getenv("REI_WATCHDOG_SELFTEST"), "shutdown") && g_running)
+		for (volatile unsigned long i = 0;; i++)
+			;
 }
 
 void rei_watchdog_suspend(void)
