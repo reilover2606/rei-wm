@@ -94,6 +94,25 @@ int main(int argc, char **argv)
 		sleep_ms(50);
 	}
 
+	/* Closing a window that has a fractional-scale object must not touch the freed window (it did). */
+	{
+		struct window w2;
+		toplevel_create(&c, &w2, "W2");
+		struct wp_fractional_scale_v1 *f2 = wp_fractional_scale_manager_v1_get_fractional_scale(mgr, w2.surface);
+		wp_fractional_scale_v1_add_listener(f2, &frac_listener, NULL);
+		struct wl_buffer *b2 = make_buffer(&c, 40, 40, WL_SHM_FORMAT_XRGB8888, 0xaa5500);
+		window_show(&w2, b2, false);
+		CHECK(wl_display_roundtrip(c.d) >= 0);
+		settle_all();
+		xdg_toplevel_destroy(w2.tl);
+		xdg_surface_destroy(w2.xs);
+		wl_surface_destroy(w2.surface);
+		CHECK(wl_display_roundtrip(c.d) >= 0);
+		CHECK(log_has("window destroyed: \"W2\""));
+		wp_fractional_scale_v1_destroy(f2);
+		CHECK(wl_display_roundtrip(c.d) >= 0);
+	}
+
 	/* A second viewport on the same surface is a protocol error. */
 	struct wp_viewport *second = wp_viewporter_get_viewport(vp, w.surface);
 	(void)second;

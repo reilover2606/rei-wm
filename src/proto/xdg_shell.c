@@ -482,8 +482,11 @@ static const struct xdg_toplevel_interface toplevel_impl = {
 static void unmap_xdg_surface(struct rei_xdg_surface *xs)
 {
 	if (xs->toplevel && xs->toplevel->view) {
-		rei_view_destroy(xs->toplevel->view);
+		/* Forget the view first: destroying it re-arranges, and code that runs then (fractional
+		 * scale updates, focus) looks surfaces up and must not find the view being freed. */
+		struct rei_view *v = xs->toplevel->view;
 		xs->toplevel->view = NULL;
+		rei_view_destroy(v);
 	}
 	xs->mapped = false;
 	rei_input_refocus(xs->server);
