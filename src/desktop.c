@@ -10,6 +10,7 @@
 #include "tray.h"
 #include "server.h"
 #include "proto/fractional_scale.h"
+#include "winfx.h"
 #include "util/log.h"
 #include "util/util.h"
 
@@ -1208,7 +1209,7 @@ void rei_wm_drag_finish(struct rei_view *v, double x, double y)
 /* Scene and hit-testing                                                    */
 /* ------------------------------------------------------------------------ */
 
-static void emit_view(struct rei_view *v, struct rei_scene_snapshot *snap, bool clip)
+static void emit_view(struct rei_server *s, struct rei_view *v, struct rei_scene_snapshot *snap, bool clip)
 {
 	if (!SHOWN(v))
 		return;
@@ -1217,6 +1218,9 @@ static void emit_view(struct rei_view *v, struct rei_scene_snapshot *snap, bool 
 		rei_xwindow_emit(v, snap);
 	else
 		rei_xdg_emit_view(v, snap);
+	const struct rei_fx *fx = rei_winfx_for(s, v);   /* a window shader (a terminal's glowing text) */
+	if (fx)
+		rei_snapshot_set_fx_from(snap, first, fx);
 	if (clip) {
 		/* A tiled window must stay inside its slot even while its client is
 		 * still redrawing at the old size. */
@@ -1227,7 +1231,6 @@ static void emit_view(struct rei_view *v, struct rei_scene_snapshot *snap, bool 
 
 void rei_wm_emit_views(struct rei_server *s, struct rei_output *o, struct rei_scene_snapshot *snap)
 {
-	(void)s;
 	struct rei_workspace *ws = o->workspace;
 	if (!ws)
 		return;
@@ -1238,17 +1241,17 @@ void rei_wm_emit_views(struct rei_server *s, struct rei_output *o, struct rei_sc
 	for (size_t i = 0; i < n; i++) {
 		struct rei_view *v = leaves[i]->data;
 		if (v != ws->fullscreen)
-			emit_view(v, snap, true);
+			emit_view(s, v, snap, true);
 	}
 	free(leaves);
 
 	struct rei_view *v;
 	wl_list_for_each(v, &ws->floating, float_link) {
 		if (v != ws->fullscreen)
-			emit_view(v, snap, false);
+			emit_view(s, v, snap, false);
 	}
 	if (ws->fullscreen)
-		emit_view(ws->fullscreen, snap, true);
+		emit_view(s, ws->fullscreen, snap, true);
 }
 
 static bool view_pick(const struct rei_view *v, double x, double y, struct rei_surface **out,

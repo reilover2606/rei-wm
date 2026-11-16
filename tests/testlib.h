@@ -100,6 +100,9 @@ static void kill_compositor_at_exit(void)
 		kill(g_pid, SIGKILL);
 }
 
+/* More command-line arguments for the compositor (NULL-terminated), for tests of its options. */
+static const char *g_extra_args[7] __attribute__((unused));
+
 static void start_compositor(const char *binary, const char *config_text, bool with_fifo)
 {
 	char cfg[192];
@@ -137,7 +140,12 @@ static void start_compositor(const char *binary, const char *config_text, bool w
 		dup2(fd, STDERR_FILENO);
 		if (!getenv("REI_TEST_XWAYLAND"))
 			setenv("REI_NO_XWAYLAND", "1", 1);
-		execl(binary, binary, "-c", cfg, "-b", "headless", "-s", SOCKET, "-v", (char *)NULL);
+		const char *argv[16] = { binary, "-c", cfg, "-b", "headless", "-s", SOCKET, "-v" };
+		int argc = 8;
+		for (int i = 0; i < 6 && g_extra_args[i]; i++)
+			argv[argc++] = g_extra_args[i];
+		argv[argc] = NULL;
+		execv(binary, (char *const *)argv);
 		_exit(127);
 	}
 

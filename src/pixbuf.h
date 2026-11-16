@@ -6,6 +6,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "fx.h"
+
 /*
  * An immutable (once published), reference-counted block of 32-bit pixels.
  *
@@ -15,11 +17,20 @@
  * never touch libwayland objects, and a client's buffer can be released the
  * moment it is committed.
  */
+/* A picture drawn over a pixbuf, at the same place and size, through a shader: the text of a themed element
+ * whose text has an effect (glow, blink, shine) is kept out of the element's own picture and put in one. */
+struct rei_pixbuf_layer {
+	struct rei_pixbuf *pix;
+	struct rei_fx fx;
+};
+
 struct rei_pixbuf {
 	atomic_int refs;
 	uint64_t id;     /* Unique per pixbuf; renderers key their texture caches on it. */
 	int32_t width, height;
 	bool opaque;     /* Alpha channel is to be ignored (XRGB). */
+	struct rei_pixbuf_layer *layers;   /* Owned; set while the pixbuf is being made, never after it is shared. */
+	int n_layers;
 	uint8_t data[];  /* width * height * 4 bytes, tightly packed. */
 };
 
@@ -34,5 +45,8 @@ struct rei_pixbuf *rei_pixbuf_create_uninit(int32_t width, int32_t height, bool 
 struct rei_pixbuf *rei_pixbuf_create(int32_t width, int32_t height, bool opaque);
 struct rei_pixbuf *rei_pixbuf_ref(struct rei_pixbuf *p);
 void rei_pixbuf_unref(struct rei_pixbuf *p);
+
+/* Adds a layer (taking over the caller's reference to it). Only before `p` is handed to anyone else. */
+void rei_pixbuf_add_layer(struct rei_pixbuf *p, struct rei_pixbuf *layer, const struct rei_fx *fx);
 
 #endif

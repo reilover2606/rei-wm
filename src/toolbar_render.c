@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "shader.h"
 #include "toolbar.h"
 #include "sysinfo.h"
 #include "util/util.h"
@@ -100,15 +101,148 @@ static PangoLayout *make_layout(cairo_t *cr, const PangoFontDescription *font, c
 	return layout;
 }
 
+/* ---- Text with an effect ------------------------------------------------------------------------
+ *
+ * An element whose style has a text effect (glow, blink, shine) does not get its text painted into its
+ * picture. The text goes into a separate layer instead, which the renderer draws over the picture through
+ * the text shader (shader.h). A layer is twice the picture's height: the upper half is the text in its
+ * colours, the lower half says, for each pixel of it, how far down its line it is (red, over alpha: 0 at
+ * the top of the capitals, 1 at the baseline), which is what the metallic shine goes by.
+ *
+ * Layers are collected per target surface while a picture is being drawn and handed to its pixbuf by
+ * text_layers_finish(). Event thread only.
+ */
+#define MAX_TEXT_LAYERS 8
+
+struct text_layer {
+	cairo_surface_t *target;   /* the picture this text belongs to */
+	cairo_surface_t *surf;
+	cairo_t *cr;
+	struct rei_text_fx fx;
+};
+static struct text_layer g_layers[MAX_TEXT_LAYERS];
+static int g_n_layers;
+
+static void copy_clip(cairo_t *from, cairo_t *to)
+{
+	cairo_rectangle_list_t *rl = cairo_copy_clip_rectangle_list(from);
+	if (rl->status == CAIRO_STATUS_SUCCESS && rl->num_rectangles > 0) {
+		for (int i = 0; i < rl->num_rectangles; i++)
+			cairo_rectangle(to, rl->rectangles[i].x, rl->rectangles[i].y, rl->rectangles[i].width,
+					rl->rectangles[i].height);
+		cairo_clip(to);
+	}
+	cairo_rectangle_list_destroy(rl);
+}
+
+/* pango_cairo_show_layout() at the current point, for text that belongs to an element of `style` (NULL:
+ * plain text, e.g. a drawn shadow of it). */
+static void show_text(cairo_t *cr, PangoLayout *l, const struct rei_style *style)
+{
+	cairo_surface_t *target = cairo_get_target(cr);
+	if (!style || !rei_text_fx_enabled(&style->text_fx) ||
+	    cairo_surface_get_type(target) != CAIRO_SURFACE_TYPE_IMAGE ||
+	    cairo_image_surface_get_format(target) != CAIRO_FORMAT_ARGB32) {
+		pango_cairo_show_layout(cr, l);
+		return;
+	}
+	int w = cairo_image_surface_get_width(target), h = cairo_image_surface_get_height(target);
+	struct text_layer *tl = NULL;
+	for (int i = 0; i < g_n_layers; i++)
+		if (g_layers[i].target == target && memcmp(&g_layers[i].fx, &style->text_fx, sizeof tl->fx) == 0)
+			tl = &g_layers[i];
+	if (!tl) {
+		if (g_n_layers == MAX_TEXT_LAYERS) {
+			pango_cairo_show_layout(cr, l);
+			return;
+		}
+		tl = &g_layers[g_n_layers++];
+		tl->target = target;
+		tl->fx = style->text_fx;
+		tl->surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, 2 * h);
+		tl->cr = cairo_create(tl->surf);
+	}
+	cairo_t *lcr = tl->cr;
+	double x = 0, y = 0;
+	if (cairo_has_current_point(cr))
+		cairo_get_current_point(cr, &x, &y);
+	cairo_matrix_t m;
+	cairo_get_matrix(cr, &m);
+
+	/* The text itself, where and how it would have been painted. */
+	cairo_save(lcr);
+	cairo_rectangle(lcr, 0, 0, w, h);
+	cairo_clip(lcr);
+	cairo_set_matrix(lcr, &m);
+	copy_clip(cr, lcr);
+	cairo_set_source(lcr, cairo_get_source(cr));
+	cairo_move_to(lcr, x, y);
+	pango_cairo_show_layout(lcr, l);
+	cairo_restore(lcr);
+
+	/* The same glyphs again in the lower half, painted with "how far down the line". */
+	cairo_save(lcr);
+	cairo_rectangle(lcr, 0, h, w, h);
+	cairo_clip(lcr);
+	m.y0 += h;
+	cairo_set_matrix(lcr, &m);
+	copy_clip(cr, lcr);
+	PangoLayoutIter *it = pango_layout_get_iter(l);
+	do {
+		PangoRectangle logical;
+		pango_layout_iter_get_line_extents(it, NULL, &logical);
+		double base = y + (double)pango_layout_iter_get_baseline(it) / PANGO_SCALE;
+		double ascent = base - (y + (double)logical.y / PANGO_SCALE);
+		cairo_pattern_t *grad = cairo_pattern_create_linear(0, base - 0.75 * ascent, 0, base);
+		cairo_pattern_add_color_stop_rgb(grad, 0, 0, 0, 0);
+		cairo_pattern_add_color_stop_rgb(grad, 1, 1, 0, 0);
+		cairo_set_source(lcr, grad);
+		cairo_pattern_destroy(grad);
+		cairo_move_to(lcr, x + (double)logical.x / PANGO_SCALE, base);
+		pango_cairo_show_layout_line(lcr, pango_layout_iter_get_line_readonly(it));
+	} while (pango_layout_iter_next_line(it));
+	pango_layout_iter_free(it);
+	cairo_restore(lcr);
+	cairo_new_path(cr);   /* as pango_cairo_show_layout leaves it */
+}
+
+/* Gives the text layers drawn for `surface` to its pixbuf. Call when the picture is complete. */
+static void text_layers_finish(struct rei_pixbuf *pb, cairo_surface_t *surface)
+{
+	int kept = 0;
+	for (int i = 0; i < g_n_layers; i++) {
+		struct text_layer *tl = &g_layers[i];
+		if (tl->target != surface && surface) {
+			g_layers[kept++] = *tl;
+			continue;
+		}
+		cairo_destroy(tl->cr);
+		cairo_surface_flush(tl->surf);
+		int w = cairo_image_surface_get_width(tl->surf), h = cairo_image_surface_get_height(tl->surf);
+		struct rei_pixbuf *lp = pb ? rei_pixbuf_create_uninit(w, h, false) : NULL;
+		if (lp) {
+			const uint8_t *src = cairo_image_surface_get_data(tl->surf);
+			int stride = cairo_image_surface_get_stride(tl->surf);
+			for (int row = 0; row < h; row++)
+				memcpy(lp->data + (size_t)row * (size_t)w * 4, src + (size_t)row * (size_t)stride, (size_t)w * 4);
+			struct rei_fx fx;
+			rei_fx_for_text(&tl->fx, &fx);
+			rei_pixbuf_add_layer(pb, lp, &fx);
+		}
+		cairo_surface_destroy(tl->surf);
+	}
+	g_n_layers = kept;
+}
+
 /* Draws `text` centred on (cx, cy). */
 static void draw_centered(cairo_t *cr, const PangoFontDescription *font, const char *text,
-			  double cx, double cy)
+			  double cx, double cy, const struct rei_style *style)
 {
 	PangoLayout *layout = make_layout(cr, font, text);
 	int w, h;
 	pango_layout_get_pixel_size(layout, &w, &h);
 	cairo_move_to(cr, cx - w / 2.0, cy - h / 2.0);
-	pango_cairo_show_layout(cr, layout);
+	show_text(cr, layout, style);
 	g_object_unref(layout);
 }
 
@@ -694,7 +828,7 @@ static void draw_tile(cairo_t *cr, PangoFontDescription *font, const struct rei_
 		pango_layout_get_pixel_size(l, &tw, &th);
 		set_color(cr, text);
 		cairo_move_to(cr, tx, ry + (main_h - th) / 2.0);
-		pango_cairo_show_layout(cr, l);
+		show_text(cr, l, ts);
 		g_object_unref(l);
 	}
 }
@@ -710,7 +844,7 @@ static void draw_overflow(cairo_t *cr, PangoFontDescription *font, const struct 
 	char label[16];
 	snprintf(label, sizeof label, "+%d", windows);
 	set_color(cr, os->text_color);
-	draw_centered(cr, font, label, r.x + r.w / 2.0, r.y + r.h / 2.0);
+	draw_centered(cr, font, label, r.x + r.w / 2.0, r.y + r.h / 2.0, os);
 	(void)st;
 }
 
@@ -800,7 +934,7 @@ static void draw_battery(cairo_t *cr, PangoFontDescription *font, const struct r
 		cairo_move_to(cr, ix + BATT_ICON_W + BATT_GAP, y + (h - th) / 2.0);
 	else
 		cairo_move_to(cr, x + (w - tw) / 2.0, y + BATT_BODY_H + 3);
-	pango_cairo_show_layout(cr, l);
+	show_text(cr, l, bs);
 	g_object_unref(l);
 }
 
@@ -859,11 +993,12 @@ struct rei_pixbuf *rei_bar_tooltip_render(const char *text, const char *font_des
 	pango_layout_set_ellipsize(label, PANGO_ELLIPSIZE_END);
 	set_color(cr, style->text_color);
 	cairo_move_to(cr, m + TIP_PAD_X, m + TIP_PAD_Y);
-	pango_cairo_show_layout(cr, label);
+	show_text(cr, label, style);
 	g_object_unref(label);
 	pango_font_description_free(font);
 	cairo_destroy(cr);
 	cairo_surface_flush(surface);
+	text_layers_finish(pb, surface);
 	const uint8_t *src = cairo_image_surface_get_data(surface);
 	int stride = cairo_image_surface_get_stride(surface);
 	for (int y = 0; y < pb->height; y++)
@@ -926,7 +1061,7 @@ struct rei_pixbuf *rei_bar_prompt_render(const struct rei_prompt_state *st, int 
 	PangoLayout *l = prompt_layout(cr, font, st, empty ? "Run a command" : st->text);
 	set_color(cr, empty ? st->style.inactive_text_color : st->style.text_color);
 	cairo_move_to(cr, m + PROMPT_PAD_X, m + PROMPT_PAD_Y);
-	pango_cairo_show_layout(cr, l);
+	show_text(cr, l, &st->style);
 
 	if (st->cursor_on) {
 		/* The cursor is at the end of the text (the start of the placeholder). */
@@ -943,6 +1078,7 @@ struct rei_pixbuf *rei_bar_prompt_render(const struct rei_prompt_state *st, int 
 	cairo_destroy(cr);
 	cairo_surface_flush(surface);
 
+	text_layers_finish(pb, surface);
 	const uint8_t *src = cairo_image_surface_get_data(surface);
 	int stride = cairo_image_surface_get_stride(surface);
 	for (int y = 0; y < pb->height; y++)
@@ -999,11 +1135,12 @@ struct rei_pixbuf *rei_bar_message_render(const struct rei_message_state *st, in
 	}
 	set_color(cr, st->style.text_color);
 	cairo_move_to(cr, REI_MSG_PAD, REI_MSG_PAD);
-	pango_cairo_show_layout(cr, l);
+	show_text(cr, l, &st->style);
 	g_object_unref(l);
 	pango_font_description_free(font);
 	cairo_destroy(cr);
 	cairo_surface_flush(surface);
+	text_layers_finish(pb, surface);
 	const uint8_t *src = cairo_image_surface_get_data(surface);
 	int stride = cairo_image_surface_get_stride(surface);
 	for (int y = 0; y < pb->height; y++)
@@ -1029,6 +1166,7 @@ struct rei_pixbuf *rei_bar_message_panel_render(const struct rei_style *style, i
 	draw_box(cr, &flat, 0, 0, w, h, style->color, 1.0);
 	cairo_destroy(cr);
 	cairo_surface_flush(surface);
+	text_layers_finish(pb, surface);
 	const uint8_t *src = cairo_image_surface_get_data(surface);
 	int stride = cairo_image_surface_get_stride(surface);
 	for (int y = 0; y < pb->height; y++)
@@ -1121,11 +1259,12 @@ struct rei_pixbuf *rei_bar_volpop_render(const struct rei_volpop_state *st, int 
 	char text[16];
 	snprintf(text, sizeof text, "%d%%", st->percent);   /* dimmed when muted; the speaker shows the cross */
 	set_color(cr, st->muted ? rs->inactive_text_color : fg);
-	draw_centered(cr, font, text, m + REI_VPOP_W - 33, m + REI_VPOP_H / 2.0);
+	draw_centered(cr, font, text, m + REI_VPOP_W - 33, m + REI_VPOP_H / 2.0, rs);
 	pango_font_description_free(font);
 
 	cairo_destroy(cr);
 	cairo_surface_flush(surface);
+	text_layers_finish(pb, surface);
 	const uint8_t *src = cairo_image_surface_get_data(surface);
 	int stride = cairo_image_surface_get_stride(surface);
 	for (int y = 0; y < pb->height; y++)
@@ -1168,7 +1307,7 @@ struct rei_pixbuf *rei_bar_confirm_render(const struct rei_confirm_state *st, in
 	set_color(cr, st->box.text_color);
 	PangoLayout *t = make_layout(cr, big, st->title);
 	cairo_move_to(cr, m + 24, m + 22);
-	pango_cairo_show_layout(cr, t);
+	show_text(cr, t, &st->box);
 	g_object_unref(t);
 
 	PangoLayout *msg = make_layout(cr, font, st->message);
@@ -1176,7 +1315,7 @@ struct rei_pixbuf *rei_bar_confirm_render(const struct rei_confirm_state *st, in
 	pango_layout_set_wrap(msg, PANGO_WRAP_WORD_CHAR);
 	set_color(cr, st->box.inactive_text_color ? st->box.inactive_text_color : st->box.text_color);
 	cairo_move_to(cr, m + 24, m + 62);
-	pango_cairo_show_layout(cr, msg);
+	show_text(cr, msg, &st->box);
 	g_object_unref(msg);
 
 	struct rei_rect b[2];
@@ -1194,12 +1333,13 @@ struct rei_pixbuf *rei_bar_confirm_render(const struct rei_confirm_state *st, in
 			cairo_stroke(cr);
 		}
 		set_color(cr, i == 1 ? st->button.active_text_color : st->button.text_color);
-		draw_centered(cr, font, labels[i], m + b[i].x + b[i].w / 2.0, m + b[i].y + b[i].h / 2.0);
+		draw_centered(cr, font, labels[i], m + b[i].x + b[i].w / 2.0, m + b[i].y + b[i].h / 2.0, &st->button);
 	}
 	pango_font_description_free(big);
 	pango_font_description_free(font);
 	cairo_destroy(cr);
 	cairo_surface_flush(surface);
+	text_layers_finish(pb, surface);
 	const uint8_t *src = cairo_image_surface_get_data(surface);
 	int stride = cairo_image_surface_get_stride(surface);
 	for (int y = 0; y < pb->height; y++)
@@ -1327,7 +1467,7 @@ struct rei_pixbuf *rei_bar_menu_render(const struct rei_menu_state *st)
 						    : st->rows[i].minimized ? rs->inactive_text_color : rs->text_color;
 				set_color(cr, text);
 				cairo_move_to(cr, m + bw + MENU_PAD_X + room, y + (row_h - th) / 2.0);
-				pango_cairo_show_layout(cr, l);
+				show_text(cr, l, rs);
 				g_object_unref(l);
 			}
 			y += row_h;
@@ -1337,6 +1477,7 @@ struct rei_pixbuf *rei_bar_menu_render(const struct rei_menu_state *st)
 	cairo_destroy(cr);
 	cairo_surface_flush(surface);
 
+	text_layers_finish(pb, surface);
 	const uint8_t *src = cairo_image_surface_get_data(surface);
 	int stride = cairo_image_surface_get_stride(surface);
 	for (int y = 0; y < pb->height; y++)
@@ -1378,11 +1519,12 @@ struct rei_pixbuf *rei_bar_letter_icon(const char *name)
 	}
 	PangoFontDescription *font = pango_font_description_from_string("Sans Bold 22");
 	cairo_set_source_rgb(cr, 1, 1, 1);
-	draw_centered(cr, font, letter, size / 2.0, size / 2.0);
+	draw_centered(cr, font, letter, size / 2.0, size / 2.0, NULL);
 	pango_font_description_free(font);
 
 	cairo_destroy(cr);
 	cairo_surface_flush(surface);
+	text_layers_finish(pb, surface);
 	const uint8_t *src = cairo_image_surface_get_data(surface);
 	int stride = cairo_image_surface_get_stride(surface);
 	for (int y = 0; y < pb->height; y++)
@@ -1442,10 +1584,10 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 				double x0 = cell.x + (cell.w - total) / 2.0;
 				draw_icon(cr, st->start_icon, x0, cell.y + (cell.h - isz) / 2.0, isz, 1.0);
 				cairo_move_to(cr, x0 + isz + 5, cell.y + (cell.h - th) / 2.0);
-				pango_cairo_show_layout(cr, l);
+				show_text(cr, l, sbs);
 				g_object_unref(l);
 			} else {
-				draw_centered(cr, font, st->start_label, cell.x + cell.w / 2.0, cell.y + cell.h / 2.0);
+				draw_centered(cr, font, st->start_label, cell.x + cell.w / 2.0, cell.y + cell.h / 2.0, sbs);
 			}
 		} else if (isz > 0) {
 			draw_icon(cr, st->start_icon, cell.x + (cell.w - isz) / 2.0, cell.y + (cell.h - isz) / 2.0, isz, 1.0);
@@ -1516,7 +1658,7 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 		char label[16];
 		snprintf(label, sizeof label, "%d", b->number);
 		set_color(cr, b->kind == REI_BAR_BUTTON_FOCUSED ? wsb->active_text_color : wsb->text_color);
-		draw_centered(cr, font, label, cell.x + cell.w / 2.0, cell.y + cell.h / 2.0);
+		draw_centered(cr, font, label, cell.x + cell.w / 2.0, cell.y + cell.h / 2.0, wsb);
 	}
 
 	draw_tray(cr, font, st, &theme);
@@ -1537,7 +1679,7 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 		int iw, ih;
 		pango_layout_get_pixel_size(l, &iw, &ih);
 		cairo_move_to(cr, sx + (sw2 - iw) / 2.0, sy + (sh2 - ih) / 2.0);
-		pango_cairo_show_layout(cr, l);
+		show_text(cr, l, ss);
 		g_object_unref(l);
 	}
 
@@ -1548,7 +1690,7 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 		set_color(cr, st->volume_muted ? bar->inactive_text_color : bar->text_color);
 		PangoLayout *layout = make_layout(cr, font, st->volume);
 		cairo_move_to(cr, vx, vy);
-		pango_cairo_show_layout(cr, layout);
+		show_text(cr, layout, bar);
 		g_object_unref(layout);
 	}
 
@@ -1562,7 +1704,7 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 			int w, h;
 			pango_layout_get_pixel_size(layout, &w, &h);
 			cairo_move_to(cr, lw - pad - w, (lh - h) / 2.0);
-			pango_cairo_show_layout(cr, layout);
+			show_text(cr, layout, bar);
 			g_object_unref(layout);
 		} else {
 			char parts[4][32];
@@ -1582,7 +1724,7 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 			}
 			double y = lh - pad - line_h * n;
 			for (int i = 0; i < n; i++)
-				draw_centered(cr, font, parts[i], lw / 2.0, y + line_h * (i + 0.5));
+				draw_centered(cr, font, parts[i], lw / 2.0, y + line_h * (i + 0.5), bar);
 		}
 	}
 
@@ -1591,6 +1733,7 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 	cairo_surface_flush(surface);
 
 	/* Cairo's ARGB32 is premultiplied BGRA in memory, exactly our pixel format. */
+	text_layers_finish(pb, surface);
 	const uint8_t *src = cairo_image_surface_get_data(surface);
 	int stride = cairo_image_surface_get_stride(surface);
 	for (int y = 0; y < pb->height; y++)

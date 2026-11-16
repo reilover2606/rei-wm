@@ -326,6 +326,36 @@ int main(int argc, char **argv)
 		MainWindow wt2(path, wm);
 		CHECK(field<QDoubleSpinBox>(wt2, "theme.tray_tile.radius")->value() == 9);
 		CHECK(field<QComboBox>(wt2, "theme.dialog.shape")->currentText() == "bevel");
+		/* Text effects are part of every element's page; terminal windows have a page of their own. */
+		CHECK(field<QDoubleSpinBox>(wt2, "theme.toolbar.text_glow_size")->value() == 0);
+		CHECK(field<QDoubleSpinBox>(wt2, "theme.toolbar.text_glow_strength")->value() == 1);
+		CHECK(field<QLineEdit>(wt2, "theme.window_text.apps")->text() == "URxvt");
+		CHECK(field<QLineEdit>(wt2, "theme.window_text.shader")->text() == "glow");
+		CHECK(field<QDoubleSpinBox>(wt2, "theme.window_text.text_glow_size")->value() == 5);
+		CHECK(wt2.findChild<QWidget *>("theme.window_text.color") == nullptr);        /* nothing else applies to it */
+		CHECK(wt2.findChild<QWidget *>("theme.window_text.text_shine") == nullptr);
+		field<QDoubleSpinBox>(wt2, "theme.toolbar.text_glow_size")->setValue(6);
+		field<QDoubleSpinBox>(wt2, "theme.run_prompt.text_shine")->setValue(0.8);
+		field<QDoubleSpinBox>(wt2, "theme.tray_tile.text_blink")->setValue(1.5);
+		field<ColorButton>(wt2, "theme.toolbar.text_glow_color")->setColor("#ff8800");
+		field<QLineEdit>(wt2, "theme.window_text.apps")->setText("URxvt, foot");
+		field<QDoubleSpinBox>(wt2, "theme.window_text.glow_threshold")->setValue(0.5);
+		CHECK(wt2.dirty());
+		CHECK(wt2.save(&err));
+		QString fxText = slurp(path);
+		CHECK(fxText.contains("text_glow_size = 6.0\n") && fxText.contains("text_glow_color = \"#ff8800\"\n"));
+		CHECK(fxText.contains("[theme.run_prompt]\ntext_shine = 0.8\n"));
+		CHECK(fxText.contains("text_blink = 1.5\n"));
+		CHECK(fxText.contains("[theme.window_text]\napps = \"URxvt, foot\"\nglow_threshold = 0.5\n"));
+		{
+			MainWindow wt3(path, wm);
+			CHECK(field<QLineEdit>(wt3, "theme.window_text.apps")->text() == "URxvt, foot");
+			CHECK(field<QDoubleSpinBox>(wt3, "theme.run_prompt.text_shine")->value() == 0.8);
+			/* Back to the built-in value removes the line again. */
+			field<QLineEdit>(wt3, "theme.window_text.apps")->setText("URxvt");
+			CHECK(wt3.save(&err));
+			CHECK(!slurp(path).contains("apps ="));
+		}
 		/* The flavor icons folder is a plain [theme] setting. */
 		field<QWidget>(wt2, "theme.flavor_icons")->findChild<QLineEdit *>("edit")->setText("/tmp/icons");
 		CHECK(wt2.save(&err));

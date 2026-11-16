@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "dmabuf.h"
+#include "fx.h"
 #include "pixbuf.h"
 
 /* One textured rectangle, in global (logical) layout coordinates. */
@@ -18,6 +19,9 @@ struct rei_drawable {
 	float alpha;             /* Overall transparency, 0..1 (1: as is). */
 	bool has_clip;           /* Drawn only inside `clip` (global coordinates). */
 	float clip_x, clip_y, clip_w, clip_h;
+	struct rei_fx fx;        /* Drawn through a shader (fx.shader set), else plainly. */
+	uint64_t content;        /* Changes whenever the pixels do (a pixbuf's id; for a dma-buf, the surface's
+	                          * content serial): what a cached shader result is good for. */
 };
 
 /*
@@ -27,6 +31,8 @@ struct rei_drawable {
  * reference to each render thread, so rendering never touches live compositor
  * state and needs no locks.
  */
+#define REI_SNAPSHOT_MAX_BLINK 8
+
 struct rei_scene_snapshot {
 	atomic_int refs;
 	uint64_t serial;
@@ -43,6 +49,12 @@ struct rei_scene_snapshot {
 
 	struct rei_drawable *items;
 	size_t n_items, cap_items;
+
+	/* What in it changes by itself, so the event thread knows when to have it drawn again: the blink periods
+	 * in use (seconds), and whether a shader that reads the clock is in it (redrawn continuously). */
+	float blink[REI_SNAPSHOT_MAX_BLINK];
+	int n_blink;
+	bool animated;
 };
 
 struct rei_scene_snapshot *rei_snapshot_create(uint64_t serial);
@@ -51,6 +63,9 @@ struct rei_scene_snapshot *rei_snapshot_create(uint64_t serial);
 struct rei_scene_snapshot *rei_snapshot_clone(const struct rei_scene_snapshot *from, uint64_t serial);
 struct rei_scene_snapshot *rei_snapshot_ref(struct rei_scene_snapshot *s);
 void rei_snapshot_unref(struct rei_scene_snapshot *s);
+
+/* Shades every drawable added since index `first` with `fx` (a window's surfaces, for a window shader). */
+void rei_snapshot_set_fx_from(struct rei_scene_snapshot *s, size_t first, const struct rei_fx *fx);
 
 /* Restricts every drawable added since index `first` to a rectangle. Used to keep
  * a tiled window inside its slot while its client catches up with a resize. */

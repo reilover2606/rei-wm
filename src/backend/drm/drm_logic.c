@@ -251,6 +251,8 @@ const struct rei_drawable *rei_drm_scanout_candidate(const struct rei_scene_snap
 
 		if (!d->dmabuf || !d->opaque || d->pix)
 			return NULL;
+		if (d->fx.shader)
+			return NULL;   /* a window shader: it has to go through the renderer */
 		if (d->x != out->x || d->y != out->y || d->w != out->w || d->h != out->h)
 			return NULL;
 		if (d->dmabuf->width != out->pixel_w || d->dmabuf->height != out->pixel_h)

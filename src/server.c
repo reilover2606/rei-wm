@@ -23,6 +23,7 @@
 #include "audio.h"
 #include "battery.h"
 #include "pointer_cursor.h"
+#include "winfx.h"
 #include "proto/cursor_shape.h"
 #include "proto/fractional_scale.h"
 #include "proto/viewporter.h"
@@ -208,6 +209,42 @@ void rei_server_cursor_moved(struct rei_server *s)
 	event_active(s->damage_event, 0, 0);
 }
 
+/* Something in the scene changes by itself (blinking text, a shader that reads the clock): have it drawn
+ * again when it next does. */
+static void on_anim_timer(evutil_socket_t fd, short what, void *arg)
+{
+	(void)fd; (void)what;
+	struct rei_server *s = arg;
+	if (s->shutting_down)
+		return;
+	s->cursor_redraw_pending = true;   /* the same scene again is enough */
+	event_active(s->damage_event, 0, 0);
+}
+
+static void arm_animation(struct rei_server *s, const struct rei_scene_snapshot *snap)
+{
+	double wait = snap->animated ? 1.0 / 30.0 : -1.0;
+	if (snap->n_blink > 0) {
+		double now = (double)rei_now_ns() / 1e9;
+		for (int i = 0; i < snap->n_blink; i++) {
+			/* The renderer shows blinking text for the first half of each period of the monotonic clock. */
+			double half = (double)snap->blink[i] * 0.5;
+			double next = (floor(now / half) + 1.0) * half - now + 0.003;
+			if (wait < 0 || next < wait)
+				wait = next;
+		}
+	}
+	if (wait < 0) {
+		if (s->anim_timer)
+			evtimer_del(s->anim_timer);
+		return;
+	}
+	if (!s->anim_timer)
+		s->anim_timer = evtimer_new(s->base, on_anim_timer, s);
+	struct timeval tv = { (time_t)wait, (suseconds_t)((wait - floor(wait)) * 1e6) };
+	evtimer_add(s->anim_timer, &tv);
+}
+
 void rei_server_flush_damage(struct rei_server *s)
 {
 	if (!s->damage_pending) {
@@ -225,6 +262,7 @@ void rei_server_flush_damage(struct rei_server *s)
 			rei_snapshot_unref(s->last_snapshot);
 			s->last_snapshot = snap;
 			s->cursor_redraws++;
+			arm_animation(s, snap);
 			return;
 		}
 	}
@@ -249,6 +287,7 @@ void rei_server_flush_damage(struct rei_server *s)
 	struct rei_output *o;
 	wl_list_for_each(o, &s->outputs, link)
 		rei_render_submit(o->render, snap);
+	arm_animation(s, snap);
 	rei_snapshot_unref(snap);
 }
 
@@ -591,6 +630,14 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 		goto fail;
 	}
 	rei_pointer_cursor_init(s);
+	if (opts) {
+		s->n_window_shaders = opts->n_window_shaders;
+		for (int i = 0; i < opts->n_window_shaders; i++) {
+			s->window_shaders[i] = opts->window_shaders[i];
+			s->window_shader_is_rule[i] = opts->window_shader_is_rule[i];
+		}
+	}
+	rei_winfx_configure(s);
 
 	s->wl_event = event_new(s->base, wl_event_loop_get_fd(s->wl_loop),
 				EV_READ | EV_PERSIST, on_wayland_readable, s);
@@ -737,6 +784,10 @@ void rei_server_destroy(struct rei_server *s)
 	if (s->display)
 		wl_display_destroy(s->display);
 	rei_pointer_cursor_finish(s);
+	rei_winfx_finish(s);
+	if (s->anim_timer)
+		event_free(s->anim_timer);
+	s->anim_timer = NULL;
 	rei_input_finish(s);
 	rei_toolbar_finish(s);
 	rei_wm_finish(s);
