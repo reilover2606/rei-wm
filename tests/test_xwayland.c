@@ -254,7 +254,7 @@ static void test_fullscreen(void)
 	sleep_ms(500);
 	int x, y, w, h;
 	geometry(win, &x, &y, &w, &h);
-	CHECK(x == 0 && y == 0 && w == OUT_W && h == OUT_H);
+	CHECK(x == 4 && y == 4 && w == OUT_W - 8 && h == OUT_H - 8);   /* inside the outer gap */
 	xcb_destroy_window(g_x, win);
 	xcb_flush(g_x);
 }

@@ -32,6 +32,7 @@ opacity = 0.85
 | `radius` | corner size in pixels, for `rounded` and `bevel` |
 | `opacity` | 0 to 1: how opaque the element's fill is (transparency) |
 | `shadow_color`, `shadow_opacity`, `shadow_offset_x`, `shadow_offset_y`, `shadow_blur` | a soft drop shadow; `shadow_opacity = 0` means none |
+| `glow_color` (white), `glow_size` (pixels, 0 = none), `glow_opacity` | a halo outside the element. On by default for `menu_row` (when hovered), `dialog` and `run_prompt` |
 
 Colours are `"#rrggbb"`. Hovering a tile or button lightens its fill by a fixed amount toward its text colour.
 
@@ -44,6 +45,8 @@ Colours are `"#rrggbb"`. Hovering a tile or button lightens its fill by a fixed 
 | `tray_tile` | an application in the tray; the stack of tiles behind it is derived from these colours | everything |
 | `tray_overflow` | the "+N" tile that holds what no longer fits | everything |
 | `tooltip` | the hover tooltip | `color`, `text_color`, shape, border, `opacity`, shadow |
+| `sysinfo` | the CPU/RAM box left of the clock | `color`, `text_color`, shape, border |
+| `dialog` | confirmation dialogs | `color`, `text_color`, shape, border, `opacity`, shadow, glow |
 | `menu` | the pop-up window list | `color`, border, shape, `opacity`, shadow |
 | `battery` | the battery icon: `color` is the level fill, `active_color` the fill while charging (with a bolt), `inactive_color` the fill and text at 15% or less; `border_color`/`border_width` the outline, `shape`/`radius` the cell's corners | `color`, `active_color`, `inactive_color`, `text_color`, border, `shape`, `radius` |
 | `menu_row` | one row of a list | `active_color` (hovered row), `text_color`, `active_text_color`, `inactive_text_color` (minimized windows) |
@@ -60,3 +63,9 @@ the wallpaper and the cursor are the next elements to join it, with the same pro
 Elements and properties are added in `src/theme.h` (the `rei_style` and `rei_element` types) and
 `src/theme.c` (names, defaults, parsing); the drawing helpers that apply a style
 (`draw_box` and friends in `src/toolbar_render.c`) are the model for how a new element is wired in.
+
+## Icons (the iconable elements)
+
+`tray_tile`, `start_button` and `menu_row` are *iconable*. Their style also takes `icon` (true/false) and
+`icon_size` (0-64 pixels; 0 fits the element). `[theme] flavor_icons = "dir"` gives each of them a random icon
+from that directory of PNGs; files that are not square or are larger than 64x64 are rejected (logged).

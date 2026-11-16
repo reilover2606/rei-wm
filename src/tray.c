@@ -8,6 +8,7 @@
 
 #include "desktop.h"
 #include "icons.h"
+#include "confirm.h"
 #include "popup.h"
 #include "proto/xdg_shell.h"
 #include "server.h"
@@ -436,7 +437,13 @@ int rei_tray_drag_index(const struct rei_server *s, const struct rei_output *o, 
 
 void rei_tray_pointer_moved(struct rei_server *s, double x, double y)
 {
+	rei_confirm_motion(s, x, y);
 	bool over_start = rei_toolbar_start_at(s, x, y);
+	bool over_mode = rei_toolbar_mode_at(s, x, y);
+	if (over_mode != s->mode_hover) {
+		s->mode_hover = over_mode;
+		rei_server_schedule_damage(s);
+	}
 	if (over_start != s->start_hover) {
 		s->start_hover = over_start;
 		rei_server_schedule_damage(s);

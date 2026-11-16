@@ -59,7 +59,7 @@ int main(int argc, char **argv)
 
 	char config[300];
 	snprintf(config, sizeof config,
-		 "[toolbar]\nenabled = true\n[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n", OUT_W, OUT_H);
+		 "[toolbar]\nenabled = true\nsysinfo = false\n[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n", OUT_W, OUT_H);
 	start_compositor(argv[1], config, true);
 
 	CHECK(log_has("battery: 2 found, 63%"));

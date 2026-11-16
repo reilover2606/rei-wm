@@ -16,6 +16,8 @@
 #include "proto/surface.h"
 #include "proto/xdg_shell.h"
 #include "backend/backend.h"
+#include "popup.h"
+#include "confirm.h"
 #include "runprompt.h"
 #include "server.h"
 #include "toolbar.h"
@@ -219,6 +221,15 @@ void rei_input_key(struct rei_server *server, uint32_t time_ms, uint32_t code, b
 		return;
 	}
 
+	/* A confirmation dialog is modal: it takes every key. */
+	if (rei_confirm_is_open(server) && !(pressed && rei_xkb_sym(in->xkb, code) >= XKB_KEY_XF86Switch_VT_1 &&
+					     rei_xkb_sym(in->xkb, code) <= XKB_KEY_XF86Switch_VT_12)) {
+		if (pressed)
+			set_add(in->swallowed, &in->n_swallowed, REI_MAX_PRESSED, code);
+		rei_confirm_key(server, code, pressed);
+		return;
+	}
+
 	/* The Run prompt takes every key (VT switching below still works, so check it first). */
 	if (rei_prompt_is_open(server) && !(pressed && rei_xkb_sym(in->xkb, code) >= XKB_KEY_XF86Switch_VT_1 &&
 					    rei_xkb_sym(in->xkb, code) <= XKB_KEY_XF86Switch_VT_12)) {
@@ -402,6 +413,8 @@ static void update_pointer(struct rei_input *in, uint32_t time_ms, bool send_mot
 	if (!hit && rei_toolbar_hit(s, s->cursor_x, s->cursor_y, &bar_output, &bar_ws)) {
 		rei_toolbar_set_hover(s, bar_output, bar_ws);
 		set_pointer_focus(in, NULL, 0, 0);
+		if (send_motion && s->config->focus_follows_mouse && !rei_xdg_topmost_grab_surface(s))
+			rei_wm_clear_focus(s);
 		return;
 	}
 	rei_toolbar_set_hover(s, NULL, 0);
@@ -416,6 +429,9 @@ static void update_pointer(struct rei_input *in, uint32_t time_ms, bool send_mot
 		struct rei_view *v = rei_wm_view_for_surface(s, hit);
 		if (v && v != rei_wm_active_view(s))
 			rei_wm_focus_view(v);
+	} else if (send_motion && s->config->focus_follows_mouse && !hit && !rei_xdg_topmost_grab_surface(s) &&
+		   !rei_popup_is_open(s) && !rei_prompt_is_open(s)) {
+		rei_wm_clear_focus(s);   /* Over the desktop: no window is focused. */
 	}
 }
 
@@ -455,6 +471,16 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 	if (pressed ? !set_add(in->buttons, &in->n_buttons, REI_MAX_BUTTONS, button)
 		    : !set_remove(in->buttons, &in->n_buttons, button))
 		return;
+
+	if (pressed && rei_confirm_is_open(s)) {
+		rei_confirm_press(s, s->cursor_x, s->cursor_y);
+		in->bar_press = true;
+		in->bar_press_ws = 0;
+		in->bar_press_volume = false;
+		in->bar_press_tray = -1;
+		rei_server_schedule_flush(s);
+		return;
+	}
 
 	if (pressed && rei_prompt_is_open(s)) {
 		rei_prompt_press(s);
@@ -511,6 +537,13 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 			in->bar_press_tray = -1;
 			struct rei_output *tray_output;
 			int tray_index;
+			if (ws == 0 && rei_toolbar_mode_at(s, s->cursor_x, s->cursor_y)) {
+				in->bar_press_ws = 0;
+				in->bar_press_output = bo;
+				rei_toolbar_mode_click(s);
+				rei_server_schedule_flush(s);
+				return;
+			}
 			if (ws == 0 && rei_toolbar_start_at(s, s->cursor_x, s->cursor_y)) {
 				in->bar_press_ws = 0;
 				in->bar_press_output = bo;

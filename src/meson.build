@@ -13,6 +13,8 @@ core_sources = files(
   'render_thread.c',
   'scene.c',
   'popup.c',
+  'confirm.c',
+  'sysinfo.c',
   'runprompt.c',
   'startmenu.c',
   'theme.c',

@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "toolbar.h"
+#include "sysinfo.h"
 #include "util/util.h"
 
 /* ------------------------------------------------------------------------ */
@@ -115,9 +116,46 @@ static void draw_centered(cairo_t *cr, const PangoFontDescription *font, const c
 
 static const double BAR_PAD = 8, VOLUME_GAP = 14;
 
-/* Size of the clock's text block, for placing the volume next to it. */
-static void clock_extent(cairo_t *cr, PangoFontDescription *font, const struct rei_bar_state *st,
-			 double *w, double *h, double *line_h)
+#define SYS_PAD_X 8.0
+#define SYS_GAP 10.0
+
+/* The CPU/RAM readout: "CPU 12%  RAM 34%" (two short lines, "12%" over "34%", on a vertical bar). */
+static void sysinfo_text(const struct rei_bar_state *st, char *out, size_t n)
+{
+	char mem[32];
+	rei_sysinfo_format_mem(st->sysinfo_mem_used_kb, st->sysinfo_mem_total_kb, mem, sizeof mem);
+	if (rei_bar_vertical(st->position))   /* no room for the total: "12%" over "5.2G" */
+		snprintf(out, n, "%d%%\n%.1fG", st->sysinfo_cpu, (double)st->sysinfo_mem_used_kb / 1048576.0);
+	else
+		snprintf(out, n, "CPU %d%%   RAM %s", st->sysinfo_cpu, mem);
+}
+
+/* The readout's box: its size; (0, 0) when it is off. */
+static void sysinfo_size(cairo_t *cr, PangoFontDescription *font, const struct rei_bar_state *st,
+			 double *w, double *h)
+{
+	*w = *h = 0;
+	if (!st->sysinfo_on)
+		return;
+	char text[64];
+	sysinfo_text(st, text, sizeof text);
+	PangoLayout *l = make_layout(cr, font, text);
+	pango_layout_set_alignment(l, PANGO_ALIGN_CENTER);
+	int iw, ih;
+	pango_layout_get_pixel_size(l, &iw, &ih);
+	g_object_unref(l);
+	if (rei_bar_vertical(st->position)) {
+		*w = st->thickness - 8;
+		*h = ih + 8;
+	} else {
+		*w = iw + 2 * SYS_PAD_X;
+		*h = st->thickness - 8 < ih + 4 ? ih + 4 : st->thickness - 8;
+	}
+}
+
+/* Size of the clock's own text block. */
+static void clock_only_extent(cairo_t *cr, PangoFontDescription *font, const struct rei_bar_state *st,
+			      double *w, double *h, double *line_h)
 {
 	*w = *h = *line_h = 0;
 	if (!st->clock[0])
@@ -144,6 +182,43 @@ static void clock_extent(cairo_t *cr, PangoFontDescription *font, const struct r
 		n++;
 	}
 	*h = *line_h * n;
+}
+
+/* What sits at the end of the bar: the clock and, left of it, the CPU/RAM box. Everything else
+ * (volume, battery, tray) is placed relative to this. */
+static void clock_extent(cairo_t *cr, PangoFontDescription *font, const struct rei_bar_state *st,
+			 double *w, double *h, double *line_h)
+{
+	clock_only_extent(cr, font, st, w, h, line_h);
+	double sw, sh;
+	sysinfo_size(cr, font, st, &sw, &sh);
+	if (sw <= 0)
+		return;
+	if (!rei_bar_vertical(st->position)) {
+		*w += (*w > 0 ? SYS_GAP : 0) + sw;
+	} else {
+		*h += (*h > 0 ? SYS_GAP : 0) + sh;
+		*w = *w > sw ? *w : sw;
+	}
+}
+
+/* Where the CPU/RAM box goes: just left of (above, when vertical) the clock. */
+static void sysinfo_place(cairo_t *cr, PangoFontDescription *font, const struct rei_bar_state *st,
+			  double *x, double *y, double *w, double *h)
+{
+	bool vertical = rei_bar_vertical(st->position);
+	int lw = vertical ? st->thickness : st->length;
+	int lh = vertical ? st->length : st->thickness;
+	double cw, ch, cl;
+	clock_only_extent(cr, font, st, &cw, &ch, &cl);
+	sysinfo_size(cr, font, st, w, h);
+	if (!vertical) {
+		*x = lw - BAR_PAD - cw - (cw > 0 ? SYS_GAP : 0) - *w;
+		*y = (lh - *h) / 2.0;
+	} else {
+		*x = (lw - *w) / 2.0;
+		*y = lh - BAR_PAD - ch - (ch > 0 ? SYS_GAP : 0) - *h;
+	}
 }
 
 /* Where the volume text goes, and its size. */
@@ -303,6 +378,35 @@ static void draw_shadow(cairo_t *cr, const struct rei_style *st, double x, doubl
 	}
 }
 
+/* A halo hugging the outside of the element: strong at its edge, fading to nothing `glow.size`
+ * pixels out. Only the ring is painted, so a see-through element is not tinted from behind. */
+static void draw_glow(cairo_t *cr, const struct rei_style *st, double x, double y, double w, double h,
+		      double mult)
+{
+	const struct rei_glow *g = &st->glow;
+	if (g->size < 0.5f || g->opacity <= 0.001f || mult <= 0)
+		return;
+	int n = (int)ceil(g->size);
+	if (n > 40)
+		n = 40;
+	/* n nested rings, outermost faintest; stacked alpha builds towards the edge. */
+	double total = g->opacity * mult;
+	double layer = 1.0 - pow(1.0 - (total > 0.98 ? 0.98 : total), 1.0 / n);
+	cairo_save(cr);
+	cairo_set_fill_rule(cr, CAIRO_FILL_RULE_EVEN_ODD);
+	shape_path(cr, st->shape, x, y, w, h, st->radius);
+	cairo_path_t *inner = cairo_copy_path(cr);   /* shape_path starts a fresh path, so keep this one aside */
+	for (int j = 0; j < n; j++) {
+		double grow = g->size * (double)(n - j) / n;
+		shape_path(cr, st->shape, x - grow, y - grow, w + 2 * grow, h + 2 * grow, st->radius + grow);
+		cairo_append_path(cr, inner);
+		set_rgba(cr, g->color, layer);
+		cairo_fill(cr);
+	}
+	cairo_path_destroy(inner);
+	cairo_restore(cr);
+}
+
 /* Shadow, fill and border of one element. `mult` is any extra transparency (a fade, a drag). */
 static void draw_box(cairo_t *cr, const struct rei_style *st, double x, double y, double w, double h,
 		     uint32_t fill, double mult)
@@ -357,7 +461,7 @@ static void tray_bounds(const struct rei_bar_state *st, double *start, double *e
 	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
 	cairo_t *cr = cairo_create(surface);
 	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
-	*start = st->start_w + st->n_buttons * (double)st->thickness + 12;
+	*start = st->start_w + st->mode_w + st->n_buttons * (double)st->thickness + 12;
 	*end = length;
 	double cw, ch, cl;
 	clock_extent(cr, font, st, &cw, &ch, &cl);
@@ -572,6 +676,13 @@ static void draw_tile(cairo_t *cr, PangoFontDescription *font, const struct rei_
 		icon = main_w - 6;
 	if (!vertical && main_w < icon + 6)
 		icon = main_w - 6;
+	if (ts->icon_size > 0 && ts->icon_size < icon) {   /* theme: tray_tile.icon_size */
+		if (!vertical)
+			iy += (icon - ts->icon_size) / 2.0;
+		else
+			ix += (icon - ts->icon_size) / 2.0;
+		icon = ts->icon_size;
+	}
 	draw_icon(cr, it->icon, ix, iy, icon, it->minimized ? 0.5 : 1.0);
 
 	if (!vertical && st->tray_mode == REI_TRAY_ICONS_NAMES && main_w > tile + 14) {
@@ -699,11 +810,14 @@ static void draw_battery(cairo_t *cr, PangoFontDescription *font, const struct r
 #define TIP_PAD_Y 5
 #define TIP_MAX_W 420
 
+/* How far past the element's box its shadow and glow reach: the margin its picture needs. */
 static int shadow_margin(const struct rei_style *s)
 {
-	if (s->shadow.opacity <= 0.001f)
-		return 0;
-	double reach = s->shadow.blur / 2.0 + fmax(fabs(s->shadow.dx), fabs(s->shadow.dy)) + 1;
+	double reach = 0;
+	if (s->shadow.opacity > 0.001f)
+		reach = s->shadow.blur / 2.0 + fmax(fabs(s->shadow.dx), fabs(s->shadow.dy)) + 1;
+	if (s->glow.size >= 0.5f && s->glow.opacity > 0.001f)
+		reach = fmax(reach, ceil(s->glow.size) + 1);
 	return (int)ceil(reach);
 }
 
@@ -804,6 +918,7 @@ struct rei_pixbuf *rei_bar_prompt_render(const struct rei_prompt_state *st, int 
 	cairo_t *cr = cairo_create(surface);
 	cairo_scale(cr, scale, scale);
 
+	draw_glow(cr, &st->style, m, m, st->box_w, bh, 1.0);
 	draw_box(cr, &st->style, m, m, st->box_w, bh, st->style.color, 1.0);
 
 	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 26");
@@ -837,12 +952,101 @@ struct rei_pixbuf *rei_bar_prompt_render(const struct rei_prompt_state *st, int 
 	return pb;
 }
 
+/* ---- The confirmation dialog ---- */
+
+void rei_bar_confirm_buttons(struct rei_rect out[2])
+{
+	const int bw = 130, bh = 38, gap = 14, pad = 24;
+	out[1] = (struct rei_rect){ REI_DIALOG_W - pad - bw, REI_DIALOG_H - pad - bh, bw, bh };
+	out[0] = (struct rei_rect){ out[1].x - gap - bw, out[1].y, bw, bh };
+}
+
+struct rei_pixbuf *rei_bar_confirm_render(const struct rei_confirm_state *st, int *margin_out)
+{
+	int m = shadow_margin(&st->box);
+	*margin_out = m;
+	int scale = st->scale < 1 ? 1 : st->scale;
+	int pw = (REI_DIALOG_W + 2 * m) * scale, ph = (REI_DIALOG_H + 2 * m) * scale;
+	struct rei_pixbuf *pb = rei_pixbuf_create(pw, ph, false);
+	if (!pb)
+		return NULL;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw, ph);
+	cairo_t *cr = cairo_create(surface);
+	cairo_scale(cr, scale, scale);
+	draw_glow(cr, &st->box, m, m, REI_DIALOG_W, REI_DIALOG_H, 1.0);
+	draw_box(cr, &st->box, m, m, REI_DIALOG_W, REI_DIALOG_H, st->box.color, 1.0);
+
+	const char *fname = st->font[0] ? st->font : "Sans 11";
+	PangoFontDescription *font = pango_font_description_from_string(fname);
+	PangoFontDescription *big = pango_font_description_copy(font);
+	pango_font_description_set_size(big, pango_font_description_get_size(font) * 3 / 2);
+	pango_font_description_set_weight(big, PANGO_WEIGHT_BOLD);
+
+	set_color(cr, st->box.text_color);
+	PangoLayout *t = make_layout(cr, big, st->title);
+	cairo_move_to(cr, m + 24, m + 22);
+	pango_cairo_show_layout(cr, t);
+	g_object_unref(t);
+
+	PangoLayout *msg = make_layout(cr, font, st->message);
+	pango_layout_set_width(msg, (REI_DIALOG_W - 48) * PANGO_SCALE);
+	pango_layout_set_wrap(msg, PANGO_WRAP_WORD_CHAR);
+	set_color(cr, st->box.inactive_text_color ? st->box.inactive_text_color : st->box.text_color);
+	cairo_move_to(cr, m + 24, m + 62);
+	pango_cairo_show_layout(cr, msg);
+	g_object_unref(msg);
+
+	struct rei_rect b[2];
+	rei_bar_confirm_buttons(b);
+	const char *labels[2] = { "Cancel", st->confirm_label };
+	for (int i = 0; i < 2; i++) {
+		uint32_t fill = i == 1 ? st->button.active_color : st->button.color;
+		if (st->hover == i)
+			fill = rei_bar_mix(fill, st->button.text_color, 0.15);
+		draw_box(cr, &st->button, m + b[i].x, m + b[i].y, b[i].w, b[i].h, fill, 1.0);
+		if (st->selected == i) {   /* The button Enter will press gets a ring. */
+			set_color(cr, i == 1 ? st->button.active_text_color : st->button.text_color);
+			cairo_set_line_width(cr, 1.5);
+			cairo_rectangle(cr, m + b[i].x + 3.5, m + b[i].y + 3.5, b[i].w - 7, b[i].h - 7);
+			cairo_stroke(cr);
+		}
+		set_color(cr, i == 1 ? st->button.active_text_color : st->button.text_color);
+		draw_centered(cr, font, labels[i], m + b[i].x + b[i].w / 2.0, m + b[i].y + b[i].h / 2.0);
+	}
+	pango_font_description_free(big);
+	pango_font_description_free(font);
+	cairo_destroy(cr);
+	cairo_surface_flush(surface);
+	const uint8_t *src = cairo_image_surface_get_data(surface);
+	int stride = cairo_image_surface_get_stride(surface);
+	for (int y = 0; y < pb->height; y++)
+		memcpy(pb->data + (size_t)y * (size_t)pb->width * 4, src + (size_t)y * (size_t)stride,
+		       (size_t)pb->width * 4);
+	cairo_surface_destroy(surface);
+	return pb;
+}
+
 /* ---- The window list ---- */
 
 #define MENU_ROW_H 26
 #define MENU_PAD_X 10
 #define MENU_MIN_W 180
 #define MENU_MAX_W 400
+
+/* A row's icon: its size in pixels (0 = none), and the room it takes at the row's front. */
+static int menu_icon_size(const struct rei_menu_state *st, int i)
+{
+	if (!st->rows[i].icon || !st->row.icon)
+		return 0;
+	int size = st->row.icon_size > 0 ? (int)st->row.icon_size : MENU_ROW_H - 6;
+	return size > MENU_ROW_H - 4 ? MENU_ROW_H - 4 : size;
+}
+
+static int menu_icon_room(const struct rei_menu_state *st, int i)
+{
+	int size = menu_icon_size(st, i);
+	return size > 0 ? size + 8 : 0;
+}
 
 void rei_bar_menu_size(const struct rei_menu_state *st, int *w, int *h, int *row_h, int *margin)
 {
@@ -855,6 +1059,7 @@ void rei_bar_menu_size(const struct rei_menu_state *st, int *w, int *h, int *row
 		int iw, ih;
 		pango_layout_get_pixel_size(l, &iw, &ih);
 		g_object_unref(l);
+		iw += menu_icon_room(st, i);
 		widest = iw > widest ? iw : widest;
 	}
 	pango_font_description_free(font);
@@ -868,7 +1073,9 @@ void rei_bar_menu_size(const struct rei_menu_state *st, int *w, int *h, int *row
 	for (int i = 0; i < st->n_rows; i++)
 		gaps += st->rows[i].gap_before;
 	*h = st->n_rows * MENU_ROW_H + gaps + 2 * bw;
-	*margin = shadow_margin(&st->menu);
+	int rm = shadow_margin(&st->row);   /* a hovered row's glow may reach past the menu's edge */
+	int mm = shadow_margin(&st->menu);
+	*margin = rm > mm ? rm : mm;
 }
 
 int rei_bar_menu_row_at(const struct rei_menu_state *st, double y)
@@ -902,33 +1109,46 @@ struct rei_pixbuf *rei_bar_menu_render(const struct rei_menu_state *st)
 	double bw = ceil(ms->border_width);
 
 	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
-	double y = m + bw;
-	for (int i = 0; i < st->n_rows; i++) {
-		if (st->rows[i].gap_before > 0) {
-			/* A group starts here: a thin line in the middle of the gap. */
-			double ly = y + st->rows[i].gap_before / 2.0;
-			set_rgba(cr, ms->border_color, 0.7);
-			cairo_rectangle(cr, m + bw + 6, ly - 0.5, lw - 2 * bw - 12, 1);
-			cairo_fill(cr);
-			y += st->rows[i].gap_before;
+	/* Two passes, so a hovered row's glow lies under every label, not over its neighbours'. */
+	for (int pass = 0; pass < 2; pass++) {
+		double y = m + bw;
+		for (int i = 0; i < st->n_rows; i++) {
+			if (st->rows[i].gap_before > 0) {
+				if (pass == 0) {   /* A group starts here: a thin line in the middle of the gap. */
+					double ly = y + st->rows[i].gap_before / 2.0;
+					set_rgba(cr, ms->border_color, 0.7);
+					cairo_rectangle(cr, m + bw + 6, ly - 0.5, lw - 2 * bw - 12, 1);
+					cairo_fill(cr);
+				}
+				y += st->rows[i].gap_before;
+			}
+			bool lit = i == st->hover || st->rows[i].emphasis;
+			if (pass == 0) {
+				if (lit) {
+					struct rei_style hover = *rs;
+					hover.shadow.opacity = 0;
+					draw_glow(cr, &hover, m + bw, y, lw - 2 * bw, row_h, 1.0);
+					draw_box(cr, &hover, m + bw, y, lw - 2 * bw, row_h, rs->active_color, 1.0);
+				}
+			} else {
+				int room = menu_icon_room(st, i);
+				if (room > 0)
+					draw_icon(cr, st->rows[i].icon, m + bw + MENU_PAD_X, y + (row_h - (room - 8)) / 2.0,
+						  room - 8, 1.0);
+				PangoLayout *l = make_layout(cr, font, st->rows[i].label);
+				pango_layout_set_width(l, (int)((lw - 2 * MENU_PAD_X - 2 * bw - room) * PANGO_SCALE));
+				pango_layout_set_ellipsize(l, PANGO_ELLIPSIZE_END);
+				int tw, th;
+				pango_layout_get_pixel_size(l, &tw, &th);
+				uint32_t text = lit ? rs->active_text_color
+						    : st->rows[i].minimized ? rs->inactive_text_color : rs->text_color;
+				set_color(cr, text);
+				cairo_move_to(cr, m + bw + MENU_PAD_X + room, y + (row_h - th) / 2.0);
+				pango_cairo_show_layout(cr, l);
+				g_object_unref(l);
+			}
+			y += row_h;
 		}
-		if (i == st->hover || st->rows[i].emphasis) {
-			struct rei_style hover = *rs;
-			hover.shadow.opacity = 0;
-			draw_box(cr, &hover, m + bw, y, lw - 2 * bw, row_h, rs->active_color, 1.0);
-		}
-		PangoLayout *l = make_layout(cr, font, st->rows[i].label);
-		pango_layout_set_width(l, (int)((lw - 2 * MENU_PAD_X - 2 * bw) * PANGO_SCALE));
-		pango_layout_set_ellipsize(l, PANGO_ELLIPSIZE_END);
-		int tw, th;
-		pango_layout_get_pixel_size(l, &tw, &th);
-		uint32_t text = (i == st->hover || st->rows[i].emphasis) ? rs->active_text_color
-					       : st->rows[i].minimized ? rs->inactive_text_color : rs->text_color;
-		set_color(cr, text);
-		cairo_move_to(cr, m + bw + MENU_PAD_X, y + (row_h - th) / 2.0);
-		pango_cairo_show_layout(cr, l);
-		g_object_unref(l);
-		y += row_h;
 	}
 	pango_font_description_free(font);
 	cairo_destroy(cr);
@@ -1027,8 +1247,25 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 			fill = rei_bar_mix(fill, sbs->text_color, 0.15);
 		draw_box(cr, sbs, cell.x + 2, cell.y + 2, cell.w - 4, cell.h - 4, fill, 1.0);
 		set_color(cr, st->start_open ? sbs->active_text_color : sbs->text_color);
+		int isz = st->start_icon ? (st->start_icon_size > 0 ? st->start_icon_size : 16) : 0;
+		if (isz > (int)fmin(cell.w, cell.h) - 6)
+			isz = (int)fmin(cell.w, cell.h) - 6;
 		if (!vertical) {
-			draw_centered(cr, font, st->start_label, cell.x + cell.w / 2.0, cell.y + cell.h / 2.0);
+			if (isz > 0) {   /* icon, then the word, together centred */
+				PangoLayout *l = make_layout(cr, font, st->start_label);
+				int tw, th;
+				pango_layout_get_pixel_size(l, &tw, &th);
+				double total = isz + 5 + tw;
+				double x0 = cell.x + (cell.w - total) / 2.0;
+				draw_icon(cr, st->start_icon, x0, cell.y + (cell.h - isz) / 2.0, isz, 1.0);
+				cairo_move_to(cr, x0 + isz + 5, cell.y + (cell.h - th) / 2.0);
+				pango_cairo_show_layout(cr, l);
+				g_object_unref(l);
+			} else {
+				draw_centered(cr, font, st->start_label, cell.x + cell.w / 2.0, cell.y + cell.h / 2.0);
+			}
+		} else if (isz > 0) {
+			draw_icon(cr, st->start_icon, cell.x + (cell.w - isz) / 2.0, cell.y + (cell.h - isz) / 2.0, isz, 1.0);
 		} else {
 			/* No room for the word on a narrow bar: the three-bar "menu" mark. */
 			double cx = cell.x + cell.w / 2.0, cy = cell.y + cell.h / 2.0;
@@ -1038,6 +1275,37 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 			}
 		}
 	}
+
+	/* The tiled/floating switch: a small square. A grid of panes when new windows tile; two
+	 * overlapping windows, lit, when they float. */
+	int mw = st->mode_w;
+	if (mw > 0) {
+		struct rei_rect cell = vertical ? (struct rei_rect){ 0, sw, lw, mw } : (struct rei_rect){ sw, 0, mw, lh };
+		double side = fmin(cell.w, cell.h) - 12;
+		double bx = cell.x + (cell.w - side) / 2.0, by = cell.y + (cell.h - side) / 2.0;
+		uint32_t fill = st->mode_float ? sbs->active_color : sbs->color;
+		if (st->mode_hover)
+			fill = rei_bar_mix(fill, sbs->text_color, 0.15);
+		draw_box(cr, sbs, bx, by, side, side, fill, 1.0);
+		set_color(cr, st->mode_float ? sbs->active_text_color : sbs->text_color);
+		double in = side * 0.22, u = side - 2 * in;
+		if (!st->mode_float) {   /* tiled: a 2x2 grid */
+			double g = 1.5, c = (u - g) / 2.0;
+			for (int a = 0; a < 2; a++)
+				for (int b = 0; b < 2; b++) {
+					cairo_rectangle(cr, bx + in + a * (c + g), by + in + b * (c + g), c, c);
+					cairo_fill(cr);
+				}
+		} else {   /* floating: two overlapping windows */
+			double w = u * 0.65;
+			cairo_set_line_width(cr, 1.5);
+			cairo_rectangle(cr, bx + in + 0.75, by + in + 0.75, w, w);
+			cairo_stroke(cr);
+			cairo_rectangle(cr, bx + in + u - w, by + in + u - w, w, w);
+			cairo_fill(cr);
+		}
+	}
+	sw += mw;
 
 	/* Workspace buttons, after it. */
 	struct rei_rect barr = vertical ? (struct rei_rect){ 0, sw, lw, lh - sw } : (struct rei_rect){ sw, 0, lw - sw, lh };
@@ -1071,6 +1339,24 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 	draw_tray(cr, font, st, &theme);
 	if (st->battery_present)
 		draw_battery(cr, font, st, &theme);
+
+	/* CPU and RAM, in one box left of the clock. */
+	if (st->sysinfo_on) {
+		double sx, sy, sw2, sh2;
+		sysinfo_place(cr, font, st, &sx, &sy, &sw2, &sh2);
+		const struct rei_style *ss = &theme.e[REI_ELEM_SYSINFO];
+		draw_box(cr, ss, sx, sy, sw2, sh2, ss->color, 1.0);
+		char text[64];
+		sysinfo_text(st, text, sizeof text);
+		set_color(cr, ss->text_color);
+		PangoLayout *l = make_layout(cr, font, text);
+		pango_layout_set_alignment(l, PANGO_ALIGN_CENTER);
+		int iw, ih;
+		pango_layout_get_pixel_size(l, &iw, &ih);
+		cairo_move_to(cr, sx + (sw2 - iw) / 2.0, sy + (sh2 - ih) / 2.0);
+		pango_cairo_show_layout(cr, l);
+		g_object_unref(l);
+	}
 
 	/* The volume, just before the clock. */
 	if (st->volume[0]) {
