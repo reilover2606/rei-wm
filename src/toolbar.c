@@ -15,6 +15,7 @@
 #include "icons.h"
 #include "popup.h"
 #include "confirm.h"
+#include "msgbuf.h"
 #include "volpop.h"
 #include "runprompt.h"
 #include "startmenu.h"
@@ -610,6 +611,7 @@ void rei_toolbar_finish(struct rei_server *s)
 		event_free(s->clock_event);
 		s->clock_event = NULL;
 	}
+	rei_msg_finish(s);
 	rei_volpop_finish(s);
 	rei_confirm_finish(s);
 	rei_prompt_finish(s);

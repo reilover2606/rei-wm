@@ -18,6 +18,7 @@
 #include "backend/backend.h"
 #include "popup.h"
 #include "confirm.h"
+#include "msgbuf.h"
 #include "runprompt.h"
 #include "volpop.h"
 #include "server.h"
@@ -173,7 +174,16 @@ static void set_keyboard_focus(struct rei_input *in, struct rei_surface *surface
 
 	in->keyboard_focus_destroy.notify = on_keyboard_focus_destroyed;
 	wl_signal_add(&surface->destroy_signal, &in->keyboard_focus_destroy);
-	rei_seat_keyboard_enter(in->server->seat, surface, in->pressed, in->n_pressed);
+	/* The keys the client is told are held when it gains focus must be keys it will also see released.
+	 * A key the compositor consumed (a binding's, the Run prompt's) has its release consumed too, so
+	 * listing it here made Xwayland think it was held for good: it auto-repeated it forever (stuck,
+	 * spamming keys, typically right after launching a program with a shortcut or from Run). */
+	uint32_t held[REI_MAX_PRESSED];
+	size_t n_held = 0;
+	for (size_t i = 0; i < in->n_pressed; i++)
+		if (!set_has(in->swallowed, in->n_swallowed, in->pressed[i]))
+			held[n_held++] = in->pressed[i];
+	rei_seat_keyboard_enter(in->server->seat, surface, held, n_held);
 
 	/* The clipboard follows keyboard focus between clients. */
 	struct wl_client *client = wl_resource_get_client(surface->resource);
@@ -221,6 +231,13 @@ void rei_input_key(struct rei_server *server, uint32_t time_ms, uint32_t code, b
 	if (pressed && code == 1 && rei_tray_menu_is_open(server)) {
 		set_add(in->swallowed, &in->n_swallowed, REI_MAX_PRESSED, code);
 		rei_tray_menu_close(server);
+		return;
+	}
+
+	/* Escape closes the message stack too. */
+	if (pressed && code == 1 && rei_msg_stack_open(server)) {
+		set_add(in->swallowed, &in->n_swallowed, REI_MAX_PRESSED, code);
+		rei_msg_stack_close(server);
 		return;
 	}
 
@@ -729,6 +746,12 @@ void rei_input_pointer_axis(struct rei_server *s, uint32_t time_ms, bool horizon
 	struct rei_input *in = s->input;
 	if (!in || in->move_view || in->resize_view || in->notch_press != REI_NOTCH_NONE || in->bar_press)
 		return;
+
+	/* The wheel over the message stack scrolls it. */
+	if (!horizontal && value != 0 && rei_msg_stack_at(s, s->cursor_x, s->cursor_y)) {
+		rei_msg_stack_scroll(s, value);
+		return;
+	}
 
 	/* The wheel over the volume popup changes the volume. */
 	if (!horizontal && value != 0 && rei_volpop_contains(s, s->cursor_x, s->cursor_y)) {

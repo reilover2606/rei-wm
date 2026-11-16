@@ -185,3 +185,9 @@ fractional_test = executable('test_fractional', 'test_fractional.c', xdg_shell_c
   dependencies: [wayland_client, m_dep],
 )
 test('fractional', fractional_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+
+msgbuf_test = executable('test_msgbuf', 'test_msgbuf.c',
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep, rei_core_dep],
+)
+test('msgbuf', msgbuf_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)

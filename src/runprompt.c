@@ -10,6 +10,7 @@
 #include "input/actions.h"
 #include "input/input.h"
 #include "input/xkb.h"
+#include "msgbuf.h"
 #include "server.h"
 #include "toolbar.h"
 #include "util/log.h"
@@ -218,7 +219,7 @@ static void run(struct rei_prompt *p)
 	rei_prompt_close(s);
 	if (copy[0]) {
 		rei_info("run prompt: %s", copy);
-		rei_spawn(s, copy);
+		rei_msg_run_captured(s, copy);   /* its output, if any, becomes a message */
 	}
 }
 

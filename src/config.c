@@ -259,6 +259,13 @@ struct rei_config *rei_config_defaults(void)
 	cfg->start_logout_command = rei_xstrdup("");
 	cfg->start_confirm_power = true;
 	cfg->start_run_font = rei_xstrdup("Sans 26");
+	cfg->messages_enabled = true;
+	cfg->messages_right = true;
+	cfg->messages_duration = 10.0;
+	cfg->messages_max_visible = 6;
+	cfg->messages_width = 480;
+	cfg->messages_history = 200;
+	cfg->messages_font = rei_xstrdup("Sans 12");
 	cfg->toolbar_tray_scope = REI_TRAY_SCOPE_WORKSPACE;
 	cfg->toolbar_tray_min_width = 50;
 	cfg->toolbar_font = rei_xstrdup("Sans 11");
@@ -395,6 +402,22 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 			cfg->start_confirm_power = cp->u.b;
 		if (cfg->start_label[0] == '\0')
 			fail(&r, "start_menu.label: must not be empty (use enabled = false to remove the button)");
+	}
+	const struct toml_table *ms = get_table(&r, root, "messages");
+	if (ms) {
+		const struct toml_value *en = get(&r, ms, "messages.", "enabled", TOML_BOOL);
+		if (en)
+			cfg->messages_enabled = en->u.b;
+		static const char *const sides[] = { "right", "left", NULL };
+		char *side = rei_xstrdup("right");
+		read_choice(&r, ms, "messages.", "position", &side, sides);
+		cfg->messages_right = strcmp(side, "left") != 0;
+		free(side);
+		read_double(&r, ms, "messages.", "duration", &cfg->messages_duration, 0.5, 600.0);
+		read_int(&r, ms, "messages.", "max_visible", &cfg->messages_max_visible, 1, 20);
+		read_int(&r, ms, "messages.", "width", &cfg->messages_width, 120, 2000);
+		read_int(&r, ms, "messages.", "history", &cfg->messages_history, 1, 5000);
+		read_string(&r, ms, "messages.", "font", &cfg->messages_font);
 	}
 	const struct toml_value *shorts = get(&r, root, "", "shortcut", TOML_ARRAY);
 	if (shorts) {
@@ -658,6 +681,7 @@ void rei_config_free(struct rei_config *cfg)
 	free(cfg->start_reboot_command);
 	free(cfg->start_logout_command);
 	free(cfg->start_run_font);
+	free(cfg->messages_font);
 	for (size_t i = 0; i < cfg->n_shortcuts; i++) {
 		free(cfg->shortcuts[i].name);
 		free(cfg->shortcuts[i].command);

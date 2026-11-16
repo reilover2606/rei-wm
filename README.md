@@ -291,3 +291,17 @@ foot, Qt 6 and others) is told the exact scale (`scale = 1.4` means 1.4, not 2) 
 pixels, so it is sharp; it says what logical size it occupies through the viewport. Programs that do not
 support them fall back to the whole-number scale (1.4 -> 2) and are scaled down, which is softer. The viewport's
 source rectangle (cropping) is not implemented; only its destination size is.
+
+## The message column
+
+An invisible column of text at the right edge of the screen (or the left: `[messages] position = "left"`).
+For now it shows what a command typed into the **Run** prompt prints (stdout and stderr; a command with
+no output pushes no message; escape sequences are stripped and long output is cut to 40 lines).
+
+- A new message is shown for `[messages] duration` seconds (default 10) and fades out near the end.
+- Each newer message pushes the older ones up and dims them one step, so the oldest on screen is nearly
+  invisible (`max_visible`, default 6).
+- **Mod+n** (the `messages` action) opens the whole history (`history`, default 200) at full strength on a
+  translucent backdrop; the mouse wheel scrolls it; Mod+n or Escape closes it.
+- `width` and `font` set the column; the look is the `[theme.messages]` element (`text_color`, the text's
+  halo through `shadow_*`, and `color`/`opacity` for the backdrop).
