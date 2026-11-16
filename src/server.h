@@ -167,6 +167,8 @@ void rei_server_screenshot(struct rei_server *server);
 /* Re-reads the wallpaper image and background colour from the config in effect. */
 void rei_server_reload_look(struct rei_server *server);
 
+/* Changes an output's scale while running (the scale of [[output]] in the config, applied on reload). */
+void rei_server_set_output_scale(struct rei_server *server, struct rei_output *output, double scale);
 struct rei_output *rei_server_add_output(struct rei_server *server,
 					 const struct rei_output_params *params);
 void rei_server_remove_output(struct rei_server *server, struct rei_output *output);

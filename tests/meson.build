@@ -84,6 +84,12 @@ if have_xwayland
   )
   test('xwayland', xwayland_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env,
     timeout: 180)
+  xwscale_test = executable('test_xwscale', 'test_xwscale.c', xdg_shell_client_h, xdg_shell_code,
+    include_directories: inc,
+    dependencies: [wayland_client, m_dep, xcb],
+  )
+  test('xwscale', xwscale_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env,
+    timeout: 120)
 endif
 
 reload_test = executable('test_reload', 'test_reload.c', xdg_shell_client_h, xdg_shell_code,

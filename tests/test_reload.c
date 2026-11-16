@@ -105,6 +105,17 @@ int main(int argc, char **argv)
 	kill(g_pid, SIGHUP);
 	wait_reloaded(before + 3);
 
+	/* 6. A changed output scale applies live: at scale 2 the output is 400x300 logical. */
+	write_config("scale = 2\n[layout]\ngap_outer = 10\ngap_inner = 4\n");
+	wait_reloaded(before + 4);
+	settle_all();
+	CHECK(log_has("output OUT: scale 1 -> 2"));
+	expect_size(&w, 380, 268, true, "twice the scale: half the logical size");
+	write_config("[layout]\ngap_outer = 10\ngap_inner = 4\n");
+	wait_reloaded(before + 5);
+	settle_all();
+	expect_size(&w, 780, 568, true, "back to scale 1");
+
 	inject_lines("key 125 1\nkey 42 1\nkey 18 1\nkey 18 0\nkey 42 0\nkey 125 0\n");
 	for (int t = 0;; t += 10) {
 		int status;

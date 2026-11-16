@@ -38,12 +38,25 @@ static void send_state(struct wl_resource *r, const struct rei_wl_output *o)
 {
 	int version = wl_resource_get_version(r);
 
+	/* Xwayland takes its X screen from the output's mode and its X pixels from the scale, so a scaled
+	 * output would make X programs enormous and put the pointer in the wrong place (X coordinates
+	 * would not be our logical coordinates). It is shown the output as the *logical* size at scale 1:
+	 * one X pixel is one logical pixel, and rei-wm scales that up like it does every window. */
+	bool xwayland = o->server->xwayland_client &&
+			wl_resource_get_client(r) == o->server->xwayland_client;
+	int32_t mode_w = o->width, mode_h = o->height, shown_scale = int_scale(o->scale);
+	if (xwayland) {
+		mode_w = (int32_t)lround(o->width / (o->scale > 0 ? o->scale : 1.0));
+		mode_h = (int32_t)lround(o->height / (o->scale > 0 ? o->scale : 1.0));
+		shown_scale = 1;
+	}
+
 	wl_output_send_geometry(r, o->x, o->y, 0, 0, WL_OUTPUT_SUBPIXEL_UNKNOWN,
 				"rei-wm", o->name, WL_OUTPUT_TRANSFORM_NORMAL);
 	wl_output_send_mode(r, WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED,
-			    o->width, o->height, o->refresh_mhz);
+			    mode_w, mode_h, o->refresh_mhz);
 	if (version >= WL_OUTPUT_SCALE_SINCE_VERSION)
-		wl_output_send_scale(r, int_scale(o->scale));
+		wl_output_send_scale(r, shown_scale);
 	if (version >= WL_OUTPUT_NAME_SINCE_VERSION) {
 		wl_output_send_name(r, o->name);
 		wl_output_send_description(r, o->name);

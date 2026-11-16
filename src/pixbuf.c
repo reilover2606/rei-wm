@@ -6,16 +6,15 @@
 #include "util/util.h"
 
 #define MAX_DIMENSION 32768
-#define MAX_BYTES ((size_t)1 << 30)
 
 static atomic_uint_fast64_t next_id = 1;
 
-struct rei_pixbuf *rei_pixbuf_create(int32_t width, int32_t height, bool opaque)
+static struct rei_pixbuf *create(int32_t width, int32_t height, bool opaque, bool clear)
 {
 	if (width <= 0 || height <= 0 || width > MAX_DIMENSION || height > MAX_DIMENSION)
 		return NULL;
 	size_t bytes = (size_t)width * (size_t)height * 4;
-	if (bytes > MAX_BYTES)
+	if (bytes > REI_PIXBUF_MAX_BYTES)
 		return NULL;
 
 	struct rei_pixbuf *p = malloc(sizeof *p + bytes);
@@ -26,8 +25,19 @@ struct rei_pixbuf *rei_pixbuf_create(int32_t width, int32_t height, bool opaque)
 	p->width = width;
 	p->height = height;
 	p->opaque = opaque;
-	memset(p->data, 0, bytes);
+	if (clear)
+		memset(p->data, 0, bytes);
 	return p;
+}
+
+struct rei_pixbuf *rei_pixbuf_create(int32_t width, int32_t height, bool opaque)
+{
+	return create(width, height, opaque, true);
+}
+
+struct rei_pixbuf *rei_pixbuf_create_uninit(int32_t width, int32_t height, bool opaque)
+{
+	return create(width, height, opaque, false);
 }
 
 struct rei_pixbuf *rei_pixbuf_ref(struct rei_pixbuf *p)

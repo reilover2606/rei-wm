@@ -800,14 +800,19 @@ static void on_drm_readable(evutil_socket_t fd, short what, void *arg)
 /* Outputs                                                                  */
 /* ------------------------------------------------------------------------ */
 
+/* The [[output]] table for a connector: the one with its name (eDP-1, HDMI-A-1, ...), else the first
+ * table that names no output, which then serves as the settings for every monitor not named. */
 static const struct rei_output_config *config_for(const struct rei_server *s, const char *name)
 {
+	const struct rei_output_config *unnamed = NULL;
 	for (size_t i = 0; i < s->config->n_outputs; i++) {
 		const struct rei_output_config *oc = &s->config->outputs[i];
 		if (oc->name && strcmp(oc->name, name) == 0)
 			return oc;
+		if (!oc->name && !unnamed)
+			unnamed = oc;
 	}
-	return NULL;
+	return unnamed;
 }
 
 static struct drm_output *output_for_connector(struct drm_backend *be, uint32_t connector_id)
@@ -874,6 +879,11 @@ static bool output_create(struct drm_backend *be, drmModeConnector *conn, size_t
 	wl_list_insert(be->outputs.prev, &o->link);
 
 	const struct rei_output_config *oc = config_for(server, o->name);
+	if (oc)
+		rei_info("drm: %s: using the [[output]] table %s%s (scale %g)", o->name, oc->name ? "named " : "without a name",
+			 oc->name ? oc->name : "", oc->scale);
+	else
+		rei_info("drm: %s: no [[output]] table names it (defaults: preferred mode, scale 1)", o->name);
 	struct rei_output_params p = {
 		.name = o->name,
 		.width = o->mode.hdisplay,
