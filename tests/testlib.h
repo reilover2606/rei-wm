@@ -259,6 +259,7 @@ static bool near_px(const struct ppm *img, int x, int y, int r, int g, int b, in
 /* ------------------------------------------------------------------------ */
 
 struct global_info {
+	uint32_t id;   /* the registry name, so a test can bind what testlib does not */
 	char name[48];
 	uint32_t version;
 };
@@ -347,6 +348,7 @@ static void reg_global(void *data, struct wl_registry *reg, uint32_t name, const
 	struct client *c = data;
 	CHECK(c->n_globals < 32);
 	snprintf(c->globals[c->n_globals].name, sizeof c->globals[0].name, "%s", iface);
+	c->globals[c->n_globals].id = name;
 	c->globals[c->n_globals++].version = version;
 
 	if (!strcmp(iface, "wl_compositor"))

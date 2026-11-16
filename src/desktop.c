@@ -9,6 +9,7 @@
 #include "toolbar.h"
 #include "tray.h"
 #include "server.h"
+#include "proto/fractional_scale.h"
 #include "util/log.h"
 #include "util/util.h"
 
@@ -233,6 +234,8 @@ static void arrange_ws(struct rei_workspace *ws)
 {
 	if (ws && ws->output && ws->output->workspace == ws)
 		arrange(ws->output);
+	if (ws && ws->output)
+		rei_fractional_scale_update_all(ws->output->server);   /* a window may have changed outputs */
 }
 
 /* ------------------------------------------------------------------------ */

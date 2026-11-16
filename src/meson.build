@@ -14,6 +14,8 @@ core_sources = files(
   'scene.c',
   'popup.c',
   'confirm.c',
+  'proto/viewporter.c',
+  'proto/fractional_scale.c',
   'volpop.c',
   'sessionbus.c',
   'watchdog.c',
@@ -77,7 +79,8 @@ stb = static_library('stb',
 )
 
 generated = [xdg_shell_client_h, xdg_shell_server_h, xdg_shell_code,
-  linux_dmabuf_server_h, linux_dmabuf_code, xwayland_shell_server_h, xwayland_shell_code]
+  linux_dmabuf_server_h, linux_dmabuf_code, xwayland_shell_server_h, xwayland_shell_code,
+  viewporter_server_h, viewporter_code, fractional_scale_server_h, fractional_scale_code]
 
 drm_deps = have_drm ? [libdrm, gbm, libseat, libinput, libudev] : []
 xcb_deps = have_xwayland ? [xcb] : []
@@ -95,7 +98,8 @@ rei_core_dep = declare_dependency(
   link_with: rei_core,
   include_directories: inc,
   dependencies: core_deps,
-  sources: [xdg_shell_client_h, xdg_shell_server_h, linux_dmabuf_server_h, xwayland_shell_server_h],
+  sources: [xdg_shell_client_h, xdg_shell_server_h, linux_dmabuf_server_h, xwayland_shell_server_h,
+    viewporter_server_h, fractional_scale_server_h],
 )
 
 rei_wm = executable('rei-wm', 'main.c',

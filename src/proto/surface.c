@@ -188,6 +188,13 @@ static void state_merge(struct rei_server *server, struct rei_surface_state *dst
 		dst->transform = src->transform;
 		dst->transform_set = true;
 	}
+	if (src->viewport_set) {
+		dst->dst_w = src->dst_w;
+		dst->dst_h = src->dst_h;
+		dst->src_w = src->src_w;
+		dst->src_h = src->src_h;
+		dst->viewport_set = true;
+	}
 	if (src->opaque_set) {
 		rei_rects_clear(&dst->opaque);
 		dst->opaque = src->opaque;
@@ -203,7 +210,7 @@ static void state_merge(struct rei_server *server, struct rei_surface_state *dst
 	wl_list_insert_list(dst->frames.prev, &src->frames);
 	wl_list_init(&src->frames);
 
-	src->content_set = src->scale_set = src->transform_set = false;
+	src->content_set = src->scale_set = src->transform_set = src->viewport_set = false;
 	src->opaque_set = src->input_set = false;
 }
 
@@ -254,8 +261,23 @@ static void apply_state(struct rei_surface *s, struct rei_surface_state *st)
 		s->transform = st->transform;
 		st->transform_set = false;
 	}
+	if (st->viewport_set) {
+		s->dst_w = st->dst_w;
+		s->dst_h = st->dst_h;
+		s->src_w = st->src_w;
+		s->src_h = st->src_h;
+		st->viewport_set = false;
+	}
 	int32_t cw, ch;
-	if (content_size(s->content, s->dmabuf, &cw, &ch)) {
+	if (content_size(s->content, s->dmabuf, &cw, &ch) && s->dst_w > 0 && s->dst_h > 0) {
+		/* wp_viewport: the client says what logical size the buffer is shown at (a fractional-scale
+		 * client draws 1.4x pixels and asks for the logical size here). */
+		s->width = s->dst_w;
+		s->height = s->dst_h;
+	} else if (content_size(s->content, s->dmabuf, &cw, &ch) && s->src_w > 0 && s->src_h > 0) {
+		s->width = s->src_w;
+		s->height = s->src_h;
+	} else if (content_size(s->content, s->dmabuf, &cw, &ch)) {
 		/* Rounded up: a buffer whose size is not a multiple of its scale (cursor images are often
 		 * 9x16 at scale 2) is tolerated, as other compositors do, not made a protocol error. */
 		s->width = (cw + s->scale - 1) / s->scale;
@@ -596,6 +618,7 @@ static void compositor_create_surface(struct wl_client *client,
 	s->server = server;
 	s->resource = res;
 	s->scale = 1;
+	s->dst_w = s->dst_h = s->src_w = s->src_h = -1;
 	s->input_default = true;
 	state_init(&s->pending);
 	state_init(&s->cached);

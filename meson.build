@@ -81,6 +81,16 @@ xwayland_shell_xml = files(protocols_dir / 'staging' / 'xwayland-shell' / 'xwayl
 xwayland_shell_server_h = scan_server_header.process(xwayland_shell_xml)
 xwayland_shell_code = scan_code.process(xwayland_shell_xml)
 
+viewporter_xml = files(protocols_dir / 'stable' / 'viewporter' / 'viewporter.xml')
+viewporter_server_h = scan_server_header.process(viewporter_xml)
+viewporter_client_h = scan_client_header.process(viewporter_xml)
+viewporter_code = scan_code.process(viewporter_xml)
+
+fractional_scale_xml = files(protocols_dir / 'staging' / 'fractional-scale' / 'fractional-scale-v1.xml')
+fractional_scale_server_h = scan_server_header.process(fractional_scale_xml)
+fractional_scale_client_h = scan_client_header.process(fractional_scale_xml)
+fractional_scale_code = scan_code.process(fractional_scale_xml)
+
 inc = include_directories('src')
 
 subdir('src')

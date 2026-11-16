@@ -58,6 +58,9 @@ struct rei_surface_state {
 	int32_t scale;
 	bool transform_set;
 	int32_t transform;
+	bool viewport_set;           /* wp_viewport: a new destination and/or source is pending */
+	int32_t dst_w, dst_h;        /* destination size; -1 = unset */
+	int32_t src_w, src_h;        /* source rectangle size in buffer pixels (rounded); -1 = unset */
 	bool opaque_set, input_set;
 	struct rei_rects opaque, input;
 	struct wl_list frames;  /* rei_frame_cb */
@@ -77,7 +80,10 @@ struct rei_surface {
 	struct rei_dmabuf *dmabuf;
 	struct rei_buffer_lease *lease;
 	int32_t scale, transform;
-	int32_t width, height;  /* Surface-local size = buffer size / scale. */
+	int32_t dst_w, dst_h;   /* wp_viewport destination; -1 when none */
+	int32_t src_w, src_h;   /* wp_viewport source size; -1 when none */
+	struct wl_resource *viewport;  /* The surface's wp_viewport, if any (at most one). */
+	int32_t width, height;  /* Surface-local size = buffer size / scale, or the viewport's destination. */
 	struct rei_rects opaque, input;
 	bool input_default;  /* No input region set: the whole surface takes input. */
 	struct wl_list frames;
