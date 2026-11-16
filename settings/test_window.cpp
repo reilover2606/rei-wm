@@ -337,7 +337,8 @@ int main(int argc, char **argv)
 		field<QDoubleSpinBox>(wt2, "theme.toolbar.text_glow_size")->setValue(6);
 		field<QDoubleSpinBox>(wt2, "theme.run_prompt.text_shine")->setValue(0.8);
 		field<QDoubleSpinBox>(wt2, "theme.tray_tile.text_blink")->setValue(1.5);
-		field<ColorButton>(wt2, "theme.toolbar.text_glow_color")->setColor("#ff8800");
+		/* (found as a plain widget: ColorButton has no Q_OBJECT, which newer Qt requires of findChild's type) */
+		static_cast<ColorButton *>(field<QWidget>(wt2, "theme.toolbar.text_glow_color"))->setColor("#ff8800");
 		field<QLineEdit>(wt2, "theme.window_text.apps")->setText("URxvt, foot");
 		field<QDoubleSpinBox>(wt2, "theme.window_text.glow_threshold")->setValue(0.5);
 		CHECK(wt2.dirty());
