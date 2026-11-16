@@ -181,6 +181,15 @@ static void test_floating_and_tiled(void)
 	img = wait_px(100, 100, 0, 0, 255, "a tiled X11 window fills its slot");
 	free(img.rgb);
 
+	/* Hovering an X11 window with focus-follows-mouse looks its view up from the surface; that used to
+	 * read the surface's role data as an xdg_surface and crash. The compositor must stay up. */
+	inject("motion_abs 400 300");
+	sleep_ms(300);
+	inject("motion_abs 100 100");   /* and back over the tiled window, which the next step uses */
+	sleep_ms(300);
+	CHECK(kill(g_pid, 0) == 0 && !log_has("rei-wm crashed"));
+	CHECK(active_window() == tl);
+
 	/* The notch's close button asks politely (WM_DELETE_WINDOW), as with native windows. */
 	g_got_delete = false;
 	inject("motion_abs 780 10");
@@ -274,6 +283,7 @@ int main(int argc, char **argv)
 
 	char config[700];
 	snprintf(config, sizeof config,
+		 "[general]\nfocus_follows_mouse = true\n"
 		 "[keybindings]\n\"Mod+e\" = \"exec echo $DISPLAY > %s/disp\"\n"
 		 "[toolbar]\nenabled = false\n"
 		 "[layout]\ngap_outer = 4\ngap_inner = 4\n"

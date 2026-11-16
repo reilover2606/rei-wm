@@ -965,7 +965,9 @@ struct rei_surface *rei_xdg_toplevel_surface(const struct rei_xdg_toplevel *tl)
 struct rei_view *rei_xdg_view_of(struct rei_surface *surface)
 {
 	struct rei_surface *root = rei_surface_root(surface);
-	if (!root->role_data)
+	/* role_data is an xdg_surface only for the xdg roles: another role (an X11 window's xwayland
+	 * surface, a cursor, ...) keeps something else there, and reading it as an xdg_surface crashed. */
+	if (!root->role_data || (root->role != REI_ROLE_XDG_TOPLEVEL && root->role != REI_ROLE_XDG_POPUP))
 		return NULL;
 	const struct rei_xdg_surface *xs = root->role_data;
 	if (root->role == REI_ROLE_XDG_POPUP)

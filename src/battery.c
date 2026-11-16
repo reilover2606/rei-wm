@@ -1,8 +1,13 @@
 #include "battery.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <event2/event.h>
+#include <fcntl.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <time.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -10,7 +15,7 @@
 #include "util/log.h"
 #include "util/util.h"
 
-#define POLL_SECONDS_DEFAULT 15
+#define POLL_SECONDS_DEFAULT 30
 
 /* REI_BATTERY_POLL_SECONDS shortens the interval, for tests. */
 static int poll_seconds(void)
@@ -132,30 +137,58 @@ bool rei_battery_read(const char *dir, struct rei_battery_info *info)
 
 /* ------------------------------------------------------------------------ */
 
+/*
+ * The batteries are read by a thread of their own. Reading sysfs power-supply files goes through
+ * the firmware (ACPI / the embedded controller) and on some laptops a read can block for seconds;
+ * done on the event thread that froze the whole compositor (the watchdog caught it inside
+ * rei_battery_read). The thread tells the event loop through a pipe when what it shows changed.
+ */
 struct rei_battery {
 	struct rei_server *server;
 	char dir[512];
-	struct event *timer;
-	struct rei_battery_info info;
+	struct event *wake;           /* the event loop's end of the pipe */
+	int pipe_fd[2];
+	pthread_t thread;
+	pthread_mutex_t lock;
+	pthread_cond_t cond;
+	bool stop;
+	struct rei_battery_info info;  /* guarded by `lock` */
 };
 
-static void poll(struct rei_battery *b)
+static void on_wake(evutil_socket_t fd, short what, void *arg)
 {
-	struct rei_battery_info now;
-	rei_battery_read(b->dir, &now);
-	if (memcmp(&now, &b->info, sizeof now) != 0) {
-		b->info = now;
-		rei_server_schedule_damage(b->server);  /* The toolbar redraws if what it shows changed. */
-	}
+	(void)what;
+	struct rei_battery *b = arg;
+	char buf[64];
+	while (read(fd, buf, sizeof buf) > 0)
+		;
+	rei_server_schedule_damage(b->server);  /* The toolbar redraws if what it shows changed. */
 }
 
-static void on_timer(evutil_socket_t fd, short what, void *arg)
+static void *battery_thread(void *arg)
 {
-	(void)fd; (void)what;
 	struct rei_battery *b = arg;
-	poll(b);
-	struct timeval tv = { .tv_sec = poll_seconds() };
-	evtimer_add(b->timer, &tv);
+	pthread_mutex_lock(&b->lock);
+	while (!b->stop) {
+		struct timespec until;
+		clock_gettime(CLOCK_REALTIME, &until);
+		until.tv_sec += poll_seconds();
+		while (!b->stop && pthread_cond_timedwait(&b->cond, &b->lock, &until) != ETIMEDOUT)
+			;
+		if (b->stop)
+			break;
+		pthread_mutex_unlock(&b->lock);
+		struct rei_battery_info now;
+		rei_battery_read(b->dir, &now);   /* may block; nothing is held */
+		pthread_mutex_lock(&b->lock);
+		if (memcmp(&now, &b->info, sizeof now) != 0) {
+			b->info = now;
+			ssize_t r = write(b->pipe_fd[1], "x", 1);
+			(void)r;
+		}
+	}
+	pthread_mutex_unlock(&b->lock);
+	return NULL;
 }
 
 void rei_battery_start(struct rei_server *server)
@@ -172,9 +205,25 @@ void rei_battery_start(struct rei_server *server)
 	b->server = server;
 	snprintf(b->dir, sizeof b->dir, "%s", dir && dir[0] ? dir : "/sys/class/power_supply");
 	b->info = probe;
-	b->timer = evtimer_new(server->base, on_timer, b);
-	struct timeval tv = { .tv_sec = poll_seconds() };
-	evtimer_add(b->timer, &tv);
+	if (pipe2(b->pipe_fd, O_CLOEXEC | O_NONBLOCK) != 0) {
+		free(b);
+		return;
+	}
+	pthread_mutex_init(&b->lock, NULL);
+	pthread_condattr_t attr;
+	pthread_condattr_init(&attr);
+	pthread_condattr_setclock(&attr, CLOCK_REALTIME);
+	pthread_cond_init(&b->cond, &attr);
+	pthread_condattr_destroy(&attr);
+	b->wake = event_new(server->base, b->pipe_fd[0], EV_READ | EV_PERSIST, on_wake, b);
+	event_add(b->wake, NULL);
+	if (pthread_create(&b->thread, NULL, battery_thread, b) != 0) {
+		event_free(b->wake);
+		close(b->pipe_fd[0]);
+		close(b->pipe_fd[1]);
+		free(b);
+		return;
+	}
 	server->battery = b;
 	rei_info("battery: %d found, %d%%%s", probe.count, probe.percent, probe.charging ? " (charging)" : "");
 }
@@ -185,13 +234,27 @@ void rei_battery_stop(struct rei_server *server)
 	if (!b)
 		return;
 	server->battery = NULL;
-	if (b->timer)
-		event_free(b->timer);
+	pthread_mutex_lock(&b->lock);
+	b->stop = true;
+	pthread_cond_signal(&b->cond);
+	pthread_mutex_unlock(&b->lock);
+	pthread_join(b->thread, NULL);   /* (a read stuck in the kernel would delay this; it cannot be helped) */
+	event_free(b->wake);
+	close(b->pipe_fd[0]);
+	close(b->pipe_fd[1]);
+	pthread_cond_destroy(&b->cond);
+	pthread_mutex_destroy(&b->lock);
 	free(b);
 }
 
 struct rei_battery_info rei_battery_state(const struct rei_server *server)
 {
 	struct rei_battery_info none = { 0 };
-	return server->battery ? server->battery->info : none;
+	struct rei_battery *b = server->battery;
+	if (!b)
+		return none;
+	pthread_mutex_lock(&b->lock);
+	struct rei_battery_info copy = b->info;
+	pthread_mutex_unlock(&b->lock);
+	return copy;
 }

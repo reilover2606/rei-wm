@@ -31,6 +31,22 @@ in 2023, for instance).
 | **Settings app** | | `-Dsettings=enabled` |
 | Qt 6 | `dev-qt/qtbase:6` with `USE="widgets gui"` | |
 
+### Programs that must be installed to run (not just to build)
+
+rei-wm starts and uses these, and carries on without them (with a log line) when they are missing:
+
+| Program | Package | What breaks without it |
+|---|---|---|
+| **Xwayland** | `x11-base/xwayland` | Every X11 program (urxvt, leafpad, xterm, GTK2 programs) fails with "cannot open display". rei-wm logs `xwayland: the Xwayland process exited ...`. |
+| seatd or elogind | `sys-auth/seatd` or `sys-auth/elogind` | no access to the display and input devices |
+| PipeWire | `media-video/pipewire` | no volume widget |
+| WirePlumber | `media-video/wireplumber` | PipeWire without sound devices: no volume widget |
+| pipewire-pulse | `media-video/pipewire` with `USE="sound-server"` | programs that speak PulseAudio (Firefox) have no sound |
+| a terminal | `gui-apps/foot` (the default `Mod+Return`) | nothing to type in |
+
+With `[audio] autostart = true` (the default) rei-wm starts `pipewire`, `wireplumber` and `pipewire-pulse`
+itself if they are installed and not already running.
+
 If a feature's libraries are missing, Meson silently builds without it (`auto`); pass
 `-D<feature>=enabled` to make that an error instead.
 

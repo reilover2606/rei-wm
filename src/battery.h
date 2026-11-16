@@ -27,7 +27,7 @@ struct rei_battery_info {
  */
 bool rei_battery_read(const char *dir, struct rei_battery_info *info);
 
-/* Starts polling (every 15 seconds) if [toolbar] battery is on and a battery exists. */
+/* Starts polling (every 30 seconds, on a thread of its own) if [toolbar] battery is on and a battery exists. */
 void rei_battery_start(struct rei_server *server);
 void rei_battery_stop(struct rei_server *server);
 /* What the last poll found; .present is false when there is no battery or the widget is off. */
