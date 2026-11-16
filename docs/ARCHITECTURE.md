@@ -423,7 +423,7 @@ keeps the schema general: a new element is a style entry plus a call to `draw_bo
 `present = 0` counts. Each contributes (charge, capacity) in energy units (`energy_*` in µWh;
 `charge_*` in µAh converted with the design voltage; a bare `capacity` percentage as a
 100-unit battery), and the percentage is the sum of charge over the sum of capacity. Charging is
-"any battery reports Charging". The server polls every 15 s (a timer; the sysfs has no change
+"any battery reports Charging". The server polls every 30 s (on a thread of its own, since a firmware read can block; the sysfs has no change
 notification worth depending on) and damages the scene only if the result changed; the toolbar
 state carries percent and charging, so the bar redraws exactly then. The icon is drawn by
 `draw_battery`, positioned left of the volume (or the clock), and the tray's range stops short of it.

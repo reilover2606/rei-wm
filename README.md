@@ -95,7 +95,7 @@ charging, red at 15% or less). It is found in `/sys/class/power_supply`: batteri
 `Battery` that belong to the machine are combined into one (total charge over total capacity, so
 two batteries of different sizes weigh correctly); a wireless mouse's or phone's battery is
 ignored. A desktop with no battery shows nothing. `[toolbar] battery = false` turns it off. It is
-re-read every 15 seconds. Colours and shape are the `battery` theme element.
+re-read every 30 seconds on a thread of its own. Colours and shape are the `battery` theme element.
 
 ## Settings
 

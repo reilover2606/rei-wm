@@ -16,6 +16,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "util/log.h"
+
 static atomic_llong g_beat_ms;
 static atomic_bool g_stop;
 static pthread_t g_thread;
@@ -116,10 +118,20 @@ static void *watch(void *arg)
 	sigset_t all;   /* only the event loop's thread and the others take signals */
 	sigfillset(&all);
 	pthread_sigmask(SIG_BLOCK, &all, NULL);
+	long long last_tick = now_ms();
 	while (!atomic_load(&g_stop)) {
 		struct timespec nap = { 0, 250 * 1000000L };
 		nanosleep(&nap, NULL);
-		if (now_ms() - atomic_load(&g_beat_ms) > (long long)g_limit_s * 1000)
+		long long now = now_ms();
+		/* If this thread itself was not scheduled for seconds, the whole machine stalled (a firmware
+		 * or GPU hiccup, suspend, ...): the event loop was frozen along with us, not hung. Give it a
+		 * fresh start instead of declaring it dead. */
+		if (now - last_tick > 2000) {
+			rei_warn("watchdog: the machine stalled for %lld ms (not rei-wm's doing); carrying on", now - last_tick);
+			atomic_store(&g_beat_ms, now);
+		}
+		last_tick = now;
+		if (now - atomic_load(&g_beat_ms) > (long long)g_limit_s * 1000)
 			report_and_exit();
 	}
 	return NULL;
@@ -127,7 +139,7 @@ static void *watch(void *arg)
 
 void rei_watchdog_start(struct event_base *base)
 {
-	g_limit_s = 6;
+	g_limit_s = 10;
 	const char *e = getenv("REI_WATCHDOG_SECONDS");
 	if (e && e[0])
 		g_limit_s = atoi(e);

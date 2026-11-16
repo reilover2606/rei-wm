@@ -103,7 +103,7 @@ then do whatever made it crash and send `rei-asan.log`. (It runs a little slower
 
 ## When the screen freezes
 
-The DRM backend runs a watchdog: if the event loop stops for 6 seconds (`REI_WATCHDOG_SECONDS`, 0 = off) it
+The DRM backend runs a watchdog: if the event loop stops for 10 seconds (`REI_WATCHDOG_SECONDS`, 0 = off) it
 prints every thread's state, the kernel function it is waiting in, and a backtrace of each thread to stderr,
 then exits so the console comes back. Run with `2> rei.log` and send the end of the log. If the screen freezes
 and *no* watchdog report appears, the whole machine (usually the GPU or kernel) stalled; then
