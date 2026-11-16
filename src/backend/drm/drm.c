@@ -470,7 +470,8 @@ static bool swapchain_create(struct drm_output *o, struct rei_gles *gles)
 
 	/* Try the best layout first and settle for the first that fully works. */
 	bool ok = false;
-	for (int attempt = 0; attempt < 3 && !ok; attempt++) {
+	const char *linear = getenv("REI_DRM_LINEAR");   /* A debugging knob: skip tiled/compressed layouts. */
+	for (int attempt = linear && linear[0] == '1' ? 2 : 0; attempt < 3 && !ok; attempt++) {
 		if (attempt == 0 && n_mods == 0)
 			continue;
 		ok = true;

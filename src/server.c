@@ -22,6 +22,7 @@
 #include "proto/xdg_shell.h"
 #include "audio.h"
 #include "battery.h"
+#include "watchdog.h"
 #include "sysinfo.h"
 #include "reload.h"
 #include "render_thread.h"
@@ -610,6 +611,10 @@ fail:
 
 int rei_server_run(struct rei_server *s)
 {
+	/* On a real display a hang freezes the whole screen: watch for one (see watchdog.h). */
+	const char *force_wd = getenv("REI_WATCHDOG_FORCE");   /* for trying it out on another backend */
+	if (strcmp(s->backend->impl->name, "drm") == 0 || (force_wd && force_wd[0] == '1'))
+		rei_watchdog_start(s->base);
 	int r = event_base_dispatch(s->base);
 	return (r < 0 || s->exit_code) ? 1 : 0;
 }
@@ -627,6 +632,7 @@ void rei_server_fail(struct rei_server *s)
 
 void rei_server_destroy(struct rei_server *s)
 {
+	rei_watchdog_stop();
 	if (!s)
 		return;
 	s->shutting_down = true;

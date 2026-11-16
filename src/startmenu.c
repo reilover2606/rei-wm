@@ -104,7 +104,7 @@ void rei_startmenu_open(struct rei_server *s, struct rei_output *o, struct rei_r
 	for (size_t i = 0; i < cfg->n_shortcuts && m->n < REI_MENU_MAX_ROWS - 4; i++) {
 		m->kind[m->n] = ROW_SHORTCUT;
 		m->shortcut[m->n] = (int)i;
-		snprintf(st.rows[m->n].label, sizeof st.rows[m->n].label, "%.90s", cfg->shortcuts[i].name);
+		rei_utf8_prefix(st.rows[m->n].label, cfg->shortcuts[i].name, 90);
 		m->n++;
 	}
 	m->kind[m->n] = ROW_RUN;

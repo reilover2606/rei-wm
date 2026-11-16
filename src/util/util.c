@@ -78,3 +78,29 @@ char *rei_xstrndup(const char *s, size_t n)
 	memcpy(out, s, n);
 	return out;
 }
+
+void rei_utf8_trim(char *s)
+{
+	size_t n = strlen(s);
+	if (n == 0)
+		return;
+	size_t i = n;
+	while (i > 0 && ((unsigned char)s[i - 1] & 0xC0) == 0x80)   /* continuation bytes */
+		i--;
+	if (i == 0)
+		return;
+	unsigned char lead = (unsigned char)s[i - 1];
+	size_t need = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+	if (need > 1 && n - (i - 1) < need)
+		s[i - 1] = '\0';   /* the last character is incomplete */
+}
+
+void rei_utf8_prefix(char *buf, const char *s, size_t max)
+{
+	size_t n = strlen(s);
+	if (n > max)
+		n = max;
+	memcpy(buf, s, n);
+	buf[n] = '\0';
+	rei_utf8_trim(buf);
+}
