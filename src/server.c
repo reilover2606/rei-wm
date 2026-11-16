@@ -22,6 +22,8 @@
 #include "proto/xdg_shell.h"
 #include "audio.h"
 #include "battery.h"
+#include "proto/fractional_scale.h"
+#include "proto/viewporter.h"
 #include "sessionbus.h"
 #include "watchdog.h"
 #include "sysinfo.h"
@@ -318,7 +320,8 @@ void rei_server_set_output_scale(struct rei_server *s, struct rei_output *o, dou
 	rei_info("output %s: scale %g -> %g", o->name, o->scale, scale);
 	o->scale = scale;
 	rei_outputs_layout(&s->outputs);   /* the logical size changed, so neighbours may move */
-	sync_output_geometry(s);           /* the renderer, wl_output, windows and the toolbar follow */
+	sync_output_geometry(s);
+	rei_fractional_scale_update_all(s);           /* the renderer, wl_output, windows and the toolbar follow */
 	rei_server_schedule_damage(s);
 }
 
@@ -548,7 +551,8 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	}
 
 	if (wl_display_init_shm(s->display) != 0 || !rei_surface_init(s) ||
-	    !rei_xdg_shell_init(s) || !rei_seat_init(s)) {
+	    !rei_xdg_shell_init(s) || !rei_seat_init(s) || !rei_viewporter_init(s) ||
+	    !rei_fractional_scale_init(s)) {
 		rei_error("cannot register Wayland globals");
 		goto fail;
 	}

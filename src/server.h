@@ -96,7 +96,8 @@ struct rei_server {
 	struct rei_popup *popup;
 	struct rei_prompt *prompt;
 	struct rei_confirm *confirm;
-	struct rei_volpop *volpop;     /* The Run prompt. */
+	struct rei_volpop *volpop;
+	struct wl_list fractional_scales;   /* rei_fractional (wp_fractional_scale_v1 objects) */     /* The Run prompt. */
 	struct rei_startmenu *startmenu;
 	bool start_hover;
 	bool float_new_set, float_new;   /* The toolbar's tiled/floating switch (else the config decides). */

@@ -283,3 +283,11 @@ applications, which are told to render at that scale (so text stays sharp; a fra
 
 A single window buffer may be at most 8192x8192 pixels; a larger one is refused instead of freezing the
 machine. Buffers of 32 MiB or more are noted in the log with the client's pid.
+
+### Fractional scale
+
+rei-wm implements `wp_fractional_scale_v1` and `wp_viewporter`. A program that supports them (Firefox, GTK 4,
+foot, Qt 6 and others) is told the exact scale (`scale = 1.4` means 1.4, not 2) and draws exactly that many
+pixels, so it is sharp; it says what logical size it occupies through the viewport. Programs that do not
+support them fall back to the whole-number scale (1.4 -> 2) and are scaled down, which is softer. The viewport's
+source rectangle (cropping) is not implemented; only its destination size is.

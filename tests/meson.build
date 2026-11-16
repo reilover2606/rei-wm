@@ -173,3 +173,10 @@ autostart_test = executable('test_autostart', 'test_autostart.c', xdg_shell_clie
   dependencies: [wayland_client, m_dep],
 )
 test('autostart', autostart_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+
+fractional_test = executable('test_fractional', 'test_fractional.c', xdg_shell_client_h, xdg_shell_code,
+  viewporter_client_h, viewporter_code, fractional_scale_client_h, fractional_scale_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('fractional', fractional_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
