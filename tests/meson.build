@@ -88,6 +88,11 @@ if have_xwayland
     include_directories: inc,
     dependencies: [wayland_client, m_dep, xcb],
   )
+  xwdeath_test = executable('test_xwdeath', 'test_xwdeath.c', xdg_shell_client_h, xdg_shell_code,
+    include_directories: inc,
+    dependencies: [wayland_client, m_dep, xcb],
+  )
+  test('xwdeath', xwdeath_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)
   test('xwscale', xwscale_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env,
     timeout: 120)
 endif

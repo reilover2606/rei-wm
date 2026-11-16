@@ -1055,7 +1055,27 @@ static void on_child(evutil_socket_t sig, short what, void *arg)
 	if (waitpid(x->pid, &status, WNOHANG) != x->pid)
 		return;
 	x->pid = -1;
-	teardown(x, "the Xwayland process exited");
+	char how[96];
+	if (WIFEXITED(status))
+		snprintf(how, sizeof how, "the Xwayland process exited with status %d", WEXITSTATUS(status));
+	else if (WIFSIGNALED(status))
+		snprintf(how, sizeof how, "the Xwayland process was killed by signal %d", WTERMSIG(status));
+	else
+		snprintf(how, sizeof how, "the Xwayland process ended");
+	if (!x->running) {
+		/* It never got as far as telling us it was ready: say so (this used to be silent, leaving a
+		 * dead socket that made every X program fail with "cannot open display"). */
+		rei_warn("xwayland: %s before it was ready; X11 programs will not work. Look just above "
+			 "in this log for what Xwayland itself printed.", how);
+		if (x->ready_event) {
+			event_free(x->ready_event);
+			x->ready_event = NULL;
+		}
+		close_fd(&x->ready_fd);
+		release_display(x);   /* removes the dead socket and lock, so DISPLAY is no longer handed out */
+		return;
+	}
+	teardown(x, how);
 }
 
 void rei_xwayland_start(struct rei_server *server)
