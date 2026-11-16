@@ -19,6 +19,7 @@
 #include "popup.h"
 #include "confirm.h"
 #include "runprompt.h"
+#include "volpop.h"
 #include "server.h"
 #include "toolbar.h"
 #include "util/log.h"
@@ -154,6 +155,8 @@ static void on_keyboard_focus_destroyed(struct wl_listener *l, void *data)
 
 static void set_keyboard_focus(struct rei_input *in, struct rei_surface *surface)
 {
+	if (surface && surface->dying)
+		surface = NULL;
 	if (in->keyboard_focus == surface)
 		return;
 
@@ -218,6 +221,13 @@ void rei_input_key(struct rei_server *server, uint32_t time_ms, uint32_t code, b
 	if (pressed && code == 1 && rei_tray_menu_is_open(server)) {
 		set_add(in->swallowed, &in->n_swallowed, REI_MAX_PRESSED, code);
 		rei_tray_menu_close(server);
+		return;
+	}
+
+	/* Escape closes the volume popup too. */
+	if (pressed && code == 1 && rei_volpop_is_open(server)) {
+		set_add(in->swallowed, &in->n_swallowed, REI_MAX_PRESSED, code);
+		rei_volpop_close(server);
 		return;
 	}
 
@@ -298,6 +308,8 @@ static void on_grab_destroyed(struct wl_listener *l, void *data)
 
 static void set_pointer_focus(struct rei_input *in, struct rei_surface *surface, double sx, double sy)
 {
+	if (surface && surface->dying)
+		surface = NULL;
 	if (in->pointer_focus == surface)
 		return;
 	if (in->pointer_focus) {
@@ -492,6 +504,19 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 		return;
 	}
 
+	if (pressed && rei_volpop_is_open(s)) {
+		/* In the popup: the slider or the speaker button. Anywhere else: just close it. The press is
+		 * the compositor's either way, and its release is swallowed like a toolbar press's. */
+		if (!rei_volpop_press(s, s->cursor_x, s->cursor_y))
+			rei_volpop_close(s);
+		in->bar_press = true;
+		in->bar_press_ws = 0;
+		in->bar_press_volume = false;
+		in->bar_press_tray = -1;
+		rei_server_schedule_flush(s);
+		return;
+	}
+
 	if (pressed && rei_tray_menu_is_open(s)) {
 		/* The window list takes the press (picking a row, or just closing). The release is
 		 * swallowed like a toolbar press's, so no client sees half a click. */
@@ -604,7 +629,7 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 
 		if (!target)
 			rei_wm_focus_output_at(s, s->cursor_x, s->cursor_y);
-		if (target) {
+		if (target && !target->dying) {
 			struct rei_view *view = rei_wm_view_for_surface(s, target);
 			if (view)
 				rei_wm_focus_view(view);
@@ -644,9 +669,11 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 			in->bar_press_ws = 0;
 			in->bar_press_output = NULL;
 
-			/* The volume text: a click toggles mute. */
+			rei_volpop_release(s);   /* ends a slider drag */
+
+			/* The volume text: a click opens the volume popup (slider and mute button). */
 			if (bar_clicked && volume_press && rei_toolbar_volume_at(s, s->cursor_x, s->cursor_y))
-				rei_audio_toggle_mute(s);
+				rei_toolbar_volume_click(s);
 
 			/* A tray tile: clicked if released on the same one. */
 			if (bar_clicked && tray_press >= 0) {
@@ -702,6 +729,13 @@ void rei_input_pointer_axis(struct rei_server *s, uint32_t time_ms, bool horizon
 	struct rei_input *in = s->input;
 	if (!in || in->move_view || in->resize_view || in->notch_press != REI_NOTCH_NONE || in->bar_press)
 		return;
+
+	/* The wheel over the volume popup changes the volume. */
+	if (!horizontal && value != 0 && rei_volpop_contains(s, s->cursor_x, s->cursor_y)) {
+		rei_audio_change_volume(s, value > 0 ? -s->config->volume_step : s->config->volume_step);
+		rei_server_schedule_damage(s);
+		return;
+	}
 
 	/* The wheel over a toolbar steps through that output's workspaces. */
 	struct rei_output *bar_output;

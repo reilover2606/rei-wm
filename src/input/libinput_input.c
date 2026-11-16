@@ -11,6 +11,7 @@
 
 #include "input/input.h"
 #include "proto/seat.h"
+#include "input/xkb.h"
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
@@ -27,6 +28,7 @@ struct rei_libinput {
 	void *ops_data;
 	char *seat;
 	int n_keyboards, n_pointers;
+	unsigned leds;   /* the lock LEDs last sent to the keyboards */
 	struct libinput_device *devices[64];  /* Referenced, so settings can be re-applied. */
 	int n_devices;
 };
@@ -119,6 +121,22 @@ static void layout_bounds(struct rei_server *s, double *x, double *y, double *w,
 	*h = y1 - y0;
 }
 
+/* Lights the keyboards' Caps/Num/Scroll Lock LEDs to match the compositor's keyboard state. The
+ * kernel does not do this for us: whoever reads the keyboard owns the LEDs. */
+static void sync_leds(struct rei_libinput *li, bool force)
+{
+	struct rei_server *s = li->server;
+	if (!s->input)
+		return;
+	unsigned want = rei_xkb_leds(s->input->xkb);
+	if (!force && want == li->leds)
+		return;
+	li->leds = want;
+	for (int i = 0; i < li->n_devices; i++)
+		if (libinput_device_has_capability(li->devices[i], LIBINPUT_DEVICE_CAP_KEYBOARD))
+			libinput_device_led_update(li->devices[i], (enum libinput_led)want);
+}
+
 static void handle_event(struct rei_libinput *li, struct libinput_event *ev)
 {
 	struct rei_server *s = li->server;
@@ -126,6 +144,7 @@ static void handle_event(struct rei_libinput *li, struct libinput_event *ev)
 	switch (libinput_event_get_type(ev)) {
 	case LIBINPUT_EVENT_DEVICE_ADDED:
 		configure_device(li, libinput_event_get_device(ev));
+		sync_leds(li, true);   /* a new keyboard starts with the current lock state */
 		break;
 	case LIBINPUT_EVENT_DEVICE_REMOVED: {
 		struct libinput_device *dev = libinput_event_get_device(ev);
@@ -149,6 +168,7 @@ static void handle_event(struct rei_libinput *li, struct libinput_event *ev)
 		rei_input_key(s, (uint32_t)(libinput_event_keyboard_get_time_usec(k) / 1000),
 			      libinput_event_keyboard_get_key(k),
 			      libinput_event_keyboard_get_key_state(k) == LIBINPUT_KEY_STATE_PRESSED);
+		sync_leds(li, false);
 		break;
 	}
 	case LIBINPUT_EVENT_POINTER_MOTION: {

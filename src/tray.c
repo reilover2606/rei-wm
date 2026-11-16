@@ -10,6 +10,7 @@
 #include "icons.h"
 #include "confirm.h"
 #include "popup.h"
+#include "volpop.h"
 #include "proto/xdg_shell.h"
 #include "server.h"
 #include "util/log.h"
@@ -442,6 +443,7 @@ int rei_tray_drag_index(const struct rei_server *s, const struct rei_output *o, 
 void rei_tray_pointer_moved(struct rei_server *s, double x, double y)
 {
 	rei_confirm_motion(s, x, y);
+	rei_volpop_motion(s, x, y);
 	bool over_start = rei_toolbar_start_at(s, x, y);
 	bool over_mode = rei_toolbar_mode_at(s, x, y);
 	if (over_mode != s->mode_hover) {

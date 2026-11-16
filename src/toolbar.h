@@ -221,6 +221,24 @@ struct rei_confirm_state {
 void rei_bar_confirm_buttons(struct rei_rect out[2]);
 struct rei_pixbuf *rei_bar_confirm_render(const struct rei_confirm_state *state, int *margin);
 
+/* ---- The volume popup's picture ---- */
+
+#define REI_VPOP_W 290
+#define REI_VPOP_H 58
+
+struct rei_volpop_state {
+	int percent, max;
+	bool muted;
+	int hover;   /* 0 none, 1 the speaker button, 2 the slider */
+	int scale;
+	char font[96];
+	struct rei_style box, row;
+};
+
+/* The speaker button's and the slider track's rectangles in the box (logical, box-relative). */
+void rei_bar_volpop_layout(struct rei_rect *button, struct rei_rect *track);
+struct rei_pixbuf *rei_bar_volpop_render(const struct rei_volpop_state *state, int *margin);
+
 /* A tooltip: `text` in a box styled by `style`. Returns the picture, which includes the box's
  * shadow; the box itself is box_w x box_h with `margin` pixels of picture around it. */
 struct rei_pixbuf *rei_bar_tooltip_render(const char *text, const char *font, const struct rei_style *style,
@@ -285,6 +303,8 @@ int rei_toolbar_overflow_windows(struct rei_server *server, struct rei_output *o
 				 const struct rei_workspace *workspace);
 
 /* Whether (x, y) is on the Start button of an output's toolbar. */
+/* A click on the volume widget: opens (or closes) the volume popup beside it. */
+void rei_toolbar_volume_click(struct rei_server *server);
 bool rei_toolbar_mode_at(struct rei_server *server, double x, double y);
 void rei_toolbar_mode_click(struct rei_server *server);
 bool rei_toolbar_start_at(struct rei_server *server, double x, double y);
