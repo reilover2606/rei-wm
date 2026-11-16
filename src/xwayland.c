@@ -85,6 +85,7 @@ struct rei_xwayland {
 
 	xcb_connection_t *conn;
 	xcb_screen_t *screen;
+	xcb_pixmap_t root_pixmap;   /* The wallpaper as an X pixmap, published as _XROOTPMAP_ID (0: none). */
 	xcb_window_t wm_window;
 	struct atoms atoms;
 	struct wl_list windows;   /* rei_xwindow */
@@ -1005,6 +1006,86 @@ static void load_xresources(struct rei_xwayland *x)
 	rei_info("xwayland: loading X resources from %s (xrdb -merge)", path);
 }
 
+/*
+ * Publishes the wallpaper the way a desktop background setter (feh, nitrogen, hsetroot) does: an X pixmap
+ * the size of the screen, named by the root window's _XROOTPMAP_ID property. Programs with "pseudo
+ * transparency" (urxvt's `URxvt.transparent: true` with `shading`/`blurRadius`, Eterm, aterm) copy the part of it
+ * behind their window as their background. Real transparency (a 32-bit visual) needs none of this.
+ */
+static void update_root_pixmap(struct rei_xwayland *x)
+{
+	if (!x->conn || !x->running)
+		return;
+	xcb_get_geometry_reply_t *g = xcb_get_geometry_reply(x->conn, xcb_get_geometry(x->conn, x->screen->root), NULL);
+	if (!g)
+		return;
+	int W = g->width, H = g->height;
+	free(g);
+	if (W <= 0 || H <= 0 || (size_t)W * (size_t)H > ((size_t)64 << 20) / 4)
+		return;
+	uint32_t *buf = malloc((size_t)W * (size_t)H * 4);
+	if (!buf)
+		return;
+	uint32_t bg = x->server->config->background_rgb & 0xffffff;
+	for (size_t i = 0; i < (size_t)W * (size_t)H; i++)
+		buf[i] = bg;
+	struct rei_output *o;
+	wl_list_for_each(o, &x->server->outputs, link) {
+		int32_t lw, lh;
+		rei_output_logical_size(o, &lw, &lh);
+		if (!o->wallpaper || lw <= 0 || lh <= 0)
+			continue;
+		const uint32_t *src = (const uint32_t *)o->wallpaper->data;   /* B,G,R,A: the X pixel layout */
+		int pw = o->wallpaper->width, ph = o->wallpaper->height;
+		for (int y = 0; y < lh; y++) {
+			int dy = o->y + y;
+			if (dy < 0 || dy >= H)
+				continue;
+			int sy = (int)((int64_t)y * ph / lh);
+			for (int xx = 0; xx < lw; xx++) {
+				int dx = o->x + xx;
+				if (dx < 0 || dx >= W)
+					continue;
+				buf[(size_t)dy * (size_t)W + (size_t)dx] = src[(size_t)sy * (size_t)pw + (size_t)((int64_t)xx * pw / lw)] & 0xffffff;
+			}
+		}
+	}
+
+	if (x->root_pixmap)
+		xcb_free_pixmap(x->conn, x->root_pixmap);
+	x->root_pixmap = xcb_generate_id(x->conn);
+	xcb_create_pixmap(x->conn, x->screen->root_depth, x->root_pixmap, x->screen->root, (uint16_t)W, (uint16_t)H);
+	xcb_gcontext_t gc = xcb_generate_id(x->conn);
+	xcb_create_gc(x->conn, gc, x->root_pixmap, 0, NULL);
+	/* In slices that fit one request. */
+	uint32_t max_words = xcb_get_maximum_request_length(x->conn);
+	int rows = (int)(((size_t)max_words * 4 - 64) / ((size_t)W * 4));
+	if (rows < 1)
+		rows = 1;
+	for (int y = 0; y < H; y += rows) {
+		int n = H - y < rows ? H - y : rows;
+		xcb_put_image(x->conn, XCB_IMAGE_FORMAT_Z_PIXMAP, x->root_pixmap, gc, (uint16_t)W, (uint16_t)n, 0,
+			      (int16_t)y, 0, x->screen->root_depth, (uint32_t)((size_t)W * (size_t)n * 4),
+			      (const uint8_t *)(buf + (size_t)y * (size_t)W));
+	}
+	xcb_free_gc(x->conn, gc);
+	free(buf);
+
+	xcb_intern_atom_cookie_t c1 = xcb_intern_atom(x->conn, 0, 13, "_XROOTPMAP_ID");
+	xcb_intern_atom_cookie_t c2 = xcb_intern_atom(x->conn, 0, 16, "ESETROOT_PMAP_ID");
+	xcb_atom_t a1 = intern_reply(x->conn, c1), a2 = intern_reply(x->conn, c2);
+	xcb_change_property(x->conn, XCB_PROP_MODE_REPLACE, x->screen->root, a1, XCB_ATOM_PIXMAP, 32, 1, &x->root_pixmap);
+	xcb_change_property(x->conn, XCB_PROP_MODE_REPLACE, x->screen->root, a2, XCB_ATOM_PIXMAP, 32, 1, &x->root_pixmap);
+	xcb_flush(x->conn);
+	rei_info("xwayland: published the wallpaper as _XROOTPMAP_ID (%dx%d)", W, H);
+}
+
+void rei_xwayland_wallpaper_changed(struct rei_server *server)
+{
+	if (server->xwayland)
+		update_root_pixmap(server->xwayland);
+}
+
 static void become_window_manager(struct rei_xwayland *x)
 {
 	x->conn = xcb_connect_to_fd(x->wm_fd, NULL);
@@ -1064,6 +1145,7 @@ static void become_window_manager(struct rei_xwayland *x)
 	x->running = true;
 	rei_info("xwayland: ready on DISPLAY=%s", x->display_name);
 	load_xresources(x);
+	update_root_pixmap(x);
 	on_xcb_readable(-1, 0, x);  /* Anything that arrived while we were setting up. */
 }
 

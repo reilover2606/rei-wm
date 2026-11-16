@@ -29,6 +29,8 @@ void rei_xwayland_start(struct rei_server *server);
 void rei_xwayland_stop(struct rei_server *server);
 
 /* "DISPLAY" value for programs we launch (":1"), or NULL while it is not running. */
+/* The wallpaper or the output layout changed: republish the root pixmap (_XROOTPMAP_ID). */
+void rei_xwayland_wallpaper_changed(struct rei_server *server);
 const char *rei_xwayland_display_name(const struct rei_server *server);
 
 /* ---- The xwayland-shell protocol global (src/proto/xwayland_shell.c) ---- */

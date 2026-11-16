@@ -320,3 +320,9 @@ URxvt.background: [80]#000000
 
 (`[80]` is the opacity in percent.) The older "pseudo-transparency" (`URxvt.transparent: true`, `shading`), which
 copies the root window's wallpaper, cannot work: a rootless Xwayland has no root pixmap to copy.
+
+**Pseudo-transparency does work too.** rei-wm publishes the wallpaper (or the background colour) as the X root
+pixmap (`_XROOTPMAP_ID`, as `feh` or `nitrogen` would), so `URxvt.transparent: true` with `shading` and
+`blurRadius` shows the wallpaper behind the window, as it does in a plain X session. It shows only the
+wallpaper, never other windows (that is what pseudo-transparency is); for a see-through window use the 32-bit
+visual and `[80]#000000` above. The pixmap is refreshed when the wallpaper or an output's scale changes.
