@@ -10,6 +10,7 @@
 class QLabel;
 class QTableWidget;
 class QWidget;
+class ThemeEditor;
 
 /*
  * The settings window. Every simple option is a "field": a widget bound to a
@@ -37,7 +38,7 @@ private slots:
 	void markDirty();
 
 private:
-	enum Type { Bool, Int, Double, String, Choice, Color, Path, Font };
+	enum Type { Bool, Int, Double, String, Choice, Color, Path, Font, Dir };
 	struct Field {
 		QString section, key;
 		Type type;
@@ -61,6 +62,10 @@ private:
 	QWidget *buildKeysTab();
 	QWidget *buildOutputsTab();
 	QWidget *buildStartMenuTab();
+	QWidget *buildAudioTab();
+	QWidget *buildMessagesTab();
+	QWidget *buildThemeTab();
+	TomlDoc buildDoc() const;   /* The document as it would be saved now. */
 
 	void loadKeys();
 	void loadOutputs();
@@ -71,11 +76,12 @@ private:
 	QString findCompositor() const;
 	bool validate(const QString &text, QString *error);
 
-	QString path_, binary_;
+	QString path_, binary_;   /* (binary_ is also used by the theme editor) */
 	TomlDoc doc_;
 	QVector<Field> fields_;
 	QTableWidget *keys_ = nullptr, *outputs_ = nullptr, *shortcuts_ = nullptr;
 	QLabel *status_ = nullptr;
+	ThemeEditor *theme_ = nullptr;
 	QMap<QString, QString> loadedKeys_;
 	QList<QVariantMap> loadedOutputs_, loadedShortcuts_;
 	bool loading_ = false;

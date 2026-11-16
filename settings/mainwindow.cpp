@@ -1,5 +1,8 @@
 #include "mainwindow.h"
 
+#include "colorbutton.h"
+#include "themeeditor.h"
+
 #include <QApplication>
 #include <QCheckBox>
 #include <QColorDialog>
@@ -27,38 +30,6 @@
 #include <QVBoxLayout>
 #include <functional>
 
-namespace {
-
-/* A colour swatch button that shows and edits "#rrggbb". */
-class ColorButton : public QPushButton {
-public:
-	explicit ColorButton(QWidget *parent = nullptr) : QPushButton(parent)
-	{
-		connect(this, &QPushButton::clicked, this, [this] {
-			QColor c = QColorDialog::getColor(color_, this, "Choose a colour");
-			if (c.isValid()) {
-				setColor(c.name());
-				if (onChange)
-					onChange();
-			}
-		});
-	}
-	std::function<void()> onChange;
-	QString color() const { return color_.name(); }
-	void setColor(const QString &name)
-	{
-		color_ = QColor(name);
-		if (!color_.isValid())
-			color_ = QColor("#000000");
-		setText(color_.name());
-		setStyleSheet(QString("background-color: %1; color: %2;")
-				      .arg(color_.name(), color_.lightness() > 128 ? "black" : "white"));
-	}
-private:
-	QColor color_ = QColor("#000000");
-};
-
-}  // namespace
 
 MainWindow::MainWindow(const QString &configPath, const QString &compositorBinary, QWidget *parent)
 	: QMainWindow(parent), path_(configPath), binary_(compositorBinary)
@@ -78,6 +49,9 @@ MainWindow::MainWindow(const QString &configPath, const QString &compositorBinar
 	tabs->addTab(buildStartMenuTab(), tr("Start menu"));
 	tabs->addTab(buildKeysTab(), tr("Keybindings"));
 	tabs->addTab(buildOutputsTab(), tr("Monitors"));
+	tabs->addTab(buildAudioTab(), tr("Audio"));
+	tabs->addTab(buildMessagesTab(), tr("Messages"));
+	tabs->addTab(buildThemeTab(), tr("Theme"));
 	outer->addWidget(tabs);
 
 	auto *bottom = new QHBoxLayout;
@@ -150,6 +124,7 @@ QWidget *MainWindow::addField(QFormLayout *form, const QString &label, const QSt
 		break;
 	}
 	case Path:
+	case Dir:
 	case Font:
 	case String: {
 		auto *holder = new QWidget;
@@ -167,6 +142,14 @@ QWidget *MainWindow::addField(QFormLayout *form, const QString &label, const QSt
 									 tr("Images (*.png *.jpg *.jpeg *.bmp *.tga)"));
 				if (!f.isEmpty())
 					e->setText(f);
+			});
+		} else if (type == Dir) {
+			auto *b = new QPushButton(tr("Browse…"));
+			h->addWidget(b);
+			connect(b, &QPushButton::clicked, this, [this, e] {
+				QString d = QFileDialog::getExistingDirectory(this, tr("Choose a folder"), e->text());
+				if (!d.isEmpty())
+					e->setText(d);
 			});
 		} else if (type == Font) {
 			auto *b = new QPushButton(tr("Choose…"));
@@ -232,9 +215,18 @@ QWidget *MainWindow::buildGeneralTab()
 		 0, 0, 1, tr("Needs a restart of rei-wm to change."));
 	addField(f, tr("Composition key (“Mod”)"), "general", "composition_key", Choice, "super",
 		 { "super", "alt", "ctrl", "shift" });
-	addField(f, tr("Focus follows the mouse"), "general", "focus_follows_mouse", Bool, false);
+	addField(f, tr("Focus follows the mouse"), "general", "focus_follows_mouse", Bool, true, {}, 0, 0, 1,
+		 tr("Hovering a window focuses it; leaving every window focuses nothing. Off: click to focus."));
 	addField(f, tr("Run Xwayland (X11 programs)"), "general", "xwayland", Bool, true,
 		 {}, 0, 0, 1, tr("Needs a restart of rei-wm to change."));
+	addField(f, tr("X resources file"), "general", "xresources", String, "~/.Xresources", {}, 0, 0, 1,
+		 tr("Loaded into Xwayland with xrdb when it starts (colours, fonts and transparency of urxvt, xterm…). "
+		    "Empty turns it off."));
+	addField(f, tr("Session bus for launched programs"), "general", "session_bus", Choice, "inherit",
+		 { "inherit", "private" }, 0, 0, 1,
+		 tr("\"private\" gives programs started from rei-wm their own D-Bus session bus, so single-instance GTK "
+		    "programs do not open in another desktop of yours (it has no portals, notifications or keyring). "
+		    "Needs a restart."));
 	addField(f, tr("Volume control (PipeWire)"), "audio", "enabled", Bool, true, {}, 0, 0, 1,
 		 tr("The toolbar's volume text and the media keys. Needs a restart to change."));
 	addField(f, tr("Volume step (percent)"), "audio", "volume_step", Int, 5, {}, 1, 100);
@@ -287,6 +279,8 @@ QWidget *MainWindow::buildToolbarTab()
 	addField(f, tr("Show the battery"), "toolbar", "battery", Bool, true, {}, 0, 0, 1,
 		 tr("An icon and percentage before the volume and clock. Appears only if the machine has a battery; "
 		    "several batteries are combined."));
+	addField(f, tr("Show CPU and RAM use"), "toolbar", "sysinfo", Bool, true, {}, 0, 0, 1,
+		 tr("One box left of the clock: the busy share of all cores and memory used/total, every two seconds."));
 	addField(f, tr("Tray lists"), "toolbar", "tray_scope", Choice, "workspace", { "workspace", "output" }, 0, 0, 1,
 		 tr("This monitor's current workspace, or all of its workspaces. With \"workspace\", the 33rd window "
 		    "in a full tray opens on the next workspace."));
@@ -320,6 +314,61 @@ static QTableWidget *makeTable(const QStringList &headers)
 	t->horizontalHeader()->setStretchLastSection(true);
 	t->setSelectionBehavior(QAbstractItemView::SelectRows);
 	return t;
+}
+
+QWidget *MainWindow::buildAudioTab()
+{
+	auto *w = new QWidget;
+	auto *f = new QFormLayout(w);
+	addField(f, tr("Volume widget and media keys (PipeWire)"), "audio", "enabled", Bool, true, {}, 0, 0, 1,
+		 tr("The toolbar's volume text (click it for the slider) and the volume media keys. Needs a restart to change."));
+	addField(f, tr("Start the sound system automatically"), "audio", "autostart", Bool, true, {}, 0, 0, 1,
+		 tr("Starts pipewire, wireplumber and pipewire-pulse if they are installed and not already running, "
+		    "and stops what it started when rei-wm exits."));
+	addField(f, tr("Volume step (percent)"), "audio", "volume_step", Int, 5, {}, 1, 100, 1,
+		 tr("Per key press or wheel notch."));
+	addField(f, tr("Maximum volume (percent)"), "audio", "max_volume", Int, 100, {}, 10, 150, 1,
+		 tr("Above 100 amplifies and may distort. The volume slider spans 0 to this."));
+	return w;
+}
+
+QWidget *MainWindow::buildMessagesTab()
+{
+	auto *w = new QWidget;
+	auto *v = new QVBoxLayout(w);
+	auto *hint = new QLabel(tr("An invisible column of text at the edge of the screen. For now it shows what a command typed into "
+				   "the Run prompt prints. A new message fades out after its time; each newer one pushes the "
+				   "older ones up and dims them a step. Mod+n (the “messages” action) shows the whole history."));
+	hint->setWordWrap(true);
+	v->addWidget(hint);
+	auto *f = new QFormLayout;
+	addField(f, tr("Show messages"), "messages", "enabled", Bool, true);
+	addField(f, tr("Side of the screen"), "messages", "position", Choice, "right", { "right", "left" });
+	addField(f, tr("Time on screen (seconds)"), "messages", "duration", Double, 10.0, {}, 1, 600, 1,
+		 tr("It fades during the last second and a half."));
+	addField(f, tr("Messages shown at once"), "messages", "max_visible", Int, 6, {}, 1, 20);
+	addField(f, tr("Column width (px)"), "messages", "width", Int, 480, {}, 120, 2000);
+	addField(f, tr("Messages kept for the history"), "messages", "history", Int, 200, {}, 1, 5000);
+	addField(f, tr("Font"), "messages", "font", Font, "Sans 12");
+	v->addLayout(f);
+	v->addStretch(1);
+	return w;
+}
+
+QWidget *MainWindow::buildThemeTab()
+{
+	auto *w = new QWidget;
+	auto *v = new QVBoxLayout(w);
+	auto *f = new QFormLayout;
+	addField(f, tr("Flavor icons folder"), "theme", "flavor_icons", Dir, "", {}, 0, 0, 1,
+		 tr("A folder of square PNGs, at most 64x64. When set, every iconable element (tray tiles, the Start "
+		    "button, Start menu rows) gets a random icon from it. Empty: off."));
+	v->addLayout(f);
+	theme_ = new ThemeEditor(findCompositor(), [this] { return buildDoc().text(); });
+	theme_->setObjectName("theme_editor");
+	connect(theme_, &ThemeEditor::edited, this, &MainWindow::markDirty);
+	v->addWidget(theme_, 1);
+	return w;
 }
 
 QWidget *MainWindow::buildStartMenuTab()
@@ -589,6 +638,11 @@ bool MainWindow::load(QString *error)
 		setFieldValue(f2, v);
 	}
 	loadKeys();
+	{
+		QString themeErr;
+		if (!theme_->load(doc_.text(), &themeErr))
+			status_->setText(themeErr);
+	}
 	loadShortcuts();
 	loadedShortcuts_ = shortcutTable();
 	loadOutputs();
@@ -687,7 +741,7 @@ bool MainWindow::validate(const QString &text, QString *error)
 	return true;
 }
 
-bool MainWindow::save(QString *error)
+TomlDoc MainWindow::buildDoc() const
 {
 	TomlDoc doc = doc_;
 
@@ -720,6 +774,17 @@ bool MainWindow::save(QString *error)
 		doc.setTables("output", outs);
 	}
 
+	if (theme_)
+		theme_->apply(doc);
+	return doc;
+}
+
+bool MainWindow::save(QString *error)
+{
+	TomlDoc doc = buildDoc();
+	QList<QVariantMap> shorts = shortcutTable();
+	QList<QVariantMap> outs = outputTable();
+
 	QString text = doc.text();
 	QString why;
 	if (!validate(text, &why)) {
@@ -748,6 +813,7 @@ bool MainWindow::save(QString *error)
 	loadedKeys_ = keyTable();
 	loadedOutputs_ = outs;
 	loadedShortcuts_ = shorts;
+	theme_->markSaved();
 	loading_ = false;
 	dirty_ = false;
 	status_->setText(tr("Saved. A running rei-wm applies most changes immediately; "

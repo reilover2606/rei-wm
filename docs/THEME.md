@@ -69,3 +69,12 @@ Elements and properties are added in `src/theme.h` (the `rei_style` and `rei_ele
 `tray_tile`, `start_button` and `menu_row` are *iconable*. Their style also takes `icon` (true/false) and
 `icon_size` (0-64 pixels; 0 fits the element). `[theme] flavor_icons = "dir"` gives each of them a random icon
 from that directory of PNGs; files that are not square or are larger than 64x64 are rejected (logged).
+
+## The theme editor
+
+The settings app's **Theme** tab edits every value above for every element, with a preview that rei-wm itself
+draws (`rei-wm --theme-preview out.png`: the toolbar with its Start button, tray, CPU/RAM box, battery and volume;
+a Start menu with a hovered row; a tooltip; the volume popup; the Run prompt; a dialog; the message column and its
+backdrop). The values shown are the effective theme (`rei-wm --print-theme`): the built-in look with your
+`[theme.*]` tables applied. Saving writes only what you changed, into `[theme.<element>]` tables, and leaves the
+rest of the file alone. The flavor icons folder is `[theme] flavor_icons`.
