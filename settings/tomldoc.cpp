@@ -211,6 +211,29 @@ void TomlDoc::remove(const QString &section, const QString &key)
 	}
 }
 
+void TomlDoc::pruneEmpty(const QString &section)
+{
+	for (int i = 0; i < info_.size(); i++) {
+		if (info_[i].kind != Line::Table || info_[i].section != section)
+			continue;
+		/* The block runs to the next header. Anything but blank lines in it (a key, a comment someone
+		 * wrote there) means the header stays. */
+		int end = i + 1;
+		while (end < info_.size() && info_[end].kind != Line::Table && info_[end].kind != Line::ArrayTable) {
+			if (!lines_[end].trimmed().isEmpty())
+				return;
+			end++;
+		}
+		for (int k = end - 1; k >= i; k--)
+			lines_.removeAt(k);   /* the header and the blank lines after it; the one before stays as a separator */
+		while (!lines_.isEmpty() && i >= lines_.size() && lines_.last().trimmed().isEmpty() &&
+		       lines_.size() > 1 && lines_[lines_.size() - 2].trimmed().isEmpty())
+			lines_.removeLast();   /* never leave two blank lines at the end */
+		scan();
+		return;
+	}
+}
+
 QList<QVariantMap> TomlDoc::tables(const QString &name) const
 {
 	QList<QVariantMap> out;

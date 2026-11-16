@@ -22,6 +22,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QSettings>
 #include <QSpinBox>
 #include <QStandardPaths>
 #include <QTableWidget>
@@ -290,9 +291,8 @@ QWidget *MainWindow::buildToolbarTab()
 		 tr("A Pango font description, e.g. “Sans 11”."));
 	addField(f, tr("Clock format"), "toolbar", "clock_format", String, "%H:%M:%S", {}, 0, 0, 1,
 		 tr("strftime format; empty hides the clock."));
-	addField(f, tr("Background"), "toolbar", "background", Color, "#161c26");
-	addField(f, tr("Text"), "toolbar", "foreground", Color, "#d6dde8");
-	addField(f, tr("Highlight"), "toolbar", "highlight", Color, "#3c6ebe");
+	auto *colorsNote = new QLabel(tr("The toolbar's three base colours are on the Theme tab."));
+	f->addRow(colorsNote);
 	return w;
 }
 
@@ -360,6 +360,15 @@ QWidget *MainWindow::buildThemeTab()
 	auto *w = new QWidget;
 	auto *v = new QVBoxLayout(w);
 	auto *f = new QFormLayout;
+	/* The three colours every element's built-in look is derived from. Changing one moves every value
+	 * below that you have not set by hand. */
+	QWidget *base[3] = {
+		addField(f, tr("Base background"), "toolbar", "background", Color, "#161c26", {}, 0, 0, 1,
+			 tr("The toolbar's background; menus, tiles and boxes are derived from it.")),
+		addField(f, tr("Base text"), "toolbar", "foreground", Color, "#d6dde8"),
+		addField(f, tr("Base highlight"), "toolbar", "highlight", Color, "#3c6ebe", {}, 0, 0, 1,
+			 tr("The accent: the focused workspace, active tiles and hovered rows.")),
+	};
 	addField(f, tr("Flavor icons folder"), "theme", "flavor_icons", Dir, "", {}, 0, 0, 1,
 		 tr("A folder of square PNGs, at most 64x64. When set, every iconable element (tray tiles, the Start "
 		    "button, Start menu rows) gets a random icon from it. Empty: off."));
@@ -367,6 +376,22 @@ QWidget *MainWindow::buildThemeTab()
 	theme_ = new ThemeEditor(findCompositor(), [this] { return buildDoc().text(); });
 	theme_->setObjectName("theme_editor");
 	connect(theme_, &ThemeEditor::edited, this, &MainWindow::markDirty);
+	connect(theme_, &ThemeEditor::compositorChosen, this, [this](const QString &path) {
+		QSettings("rei-wm", "settings").setValue("compositor", path);   /* remembered for next time */
+		binary_ = path;
+		theme_->setBinary(path);
+		QString e;
+		if (theme_->load(doc_.text(), &e))
+			status_->setText(tr("Using %1 for the theme editor.").arg(path));
+	});
+	for (QWidget *b : base) {   /* the built-in look follows these */
+		auto *cb = static_cast<ColorButton *>(b);
+		cb->onChange = [this] {
+			markDirty();
+			if (!loading_)
+				theme_->baseColorsChanged();
+		};
+	}
 	v->addWidget(theme_, 1);
 	return w;
 }
@@ -603,9 +628,16 @@ QString MainWindow::findCompositor() const
 	QString env = qEnvironmentVariable("REI_WM_BIN");
 	if (!env.isEmpty())
 		return env;
+	QString chosen = QSettings("rei-wm", "settings").value("compositor").toString();   /* "Locate rei-wm…" */
+	if (!chosen.isEmpty() && QFile::exists(chosen))
+		return chosen;
 	QString sibling = QCoreApplication::applicationDirPath() + "/rei-wm";
 	if (QFile::exists(sibling))
 		return sibling;
+	/* In a meson build tree the settings app is in settings/ and the compositor in src/. */
+	QString built = QCoreApplication::applicationDirPath() + "/../src/rei-wm";
+	if (QFile::exists(built))
+		return QFileInfo(built).canonicalFilePath();
 	return QStandardPaths::findExecutable("rei-wm");
 }
 

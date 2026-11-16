@@ -16,6 +16,8 @@ struct rei_config;
  *       the message column and its stack backdrop) with the real renderer and writes a PNG. No display is needed.
  */
 void rei_theme_print(const struct rei_config *config);
+/* The built-in look for the config's toolbar colours, ignoring its [theme.*] tables. */
+void rei_theme_print_defaults(const struct rei_config *config);
 int rei_theme_preview(const struct rei_config *config, const char *png_path);
 
 #endif

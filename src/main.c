@@ -29,6 +29,7 @@ static void usage(FILE *out)
 "      --check-config   validate the config and exit\n"
 "      --print-default-config  write the default config file text to stdout\n"
 "      --print-theme    print the effective theme (element.property=value) and exit\n"
+"      --print-theme-defaults  print the built-in theme for the config's toolbar colours and exit\n"
 "      --theme-preview PNG   draw one of each themed element to PNG and exit\n"
 "      --drm-info       list the displays, modes and planes the DRM backend would see\n"
 "  -h, --help           show this help\n"
@@ -82,6 +83,7 @@ int main(int argc, char **argv)
 		{ "drm-info", no_argument, NULL, 1001 },
 		{ "print-default-config", no_argument, NULL, 1002 },
 		{ "print-theme", no_argument, NULL, 1003 },
+		{ "print-theme-defaults", no_argument, NULL, 1005 },
 		{ "theme-preview", required_argument, NULL, 1004 },
 		{ "help", no_argument, NULL, 'h' },
 		{ "version", no_argument, NULL, 'V' },
@@ -92,6 +94,7 @@ int main(int argc, char **argv)
 	struct rei_server_options opts = { 0 };
 	bool verbose = false, check_only = false, print_theme = false;
 	const char *preview_png = NULL;
+	bool print_defaults = false;
 
 	rei_log_set_thread_name("main");
 	install_crash_handler();
@@ -121,6 +124,7 @@ int main(int argc, char **argv)
 		case 1000: check_only = true; break;
 		case 1002: fputs(rei_config_default_text(), stdout); return 0;
 		case 1003: print_theme = true; break;
+		case 1005: print_defaults = true; break;
 		case 1004: preview_png = optarg; break;
 		case 1001:
 #ifdef REI_HAVE_DRM
@@ -162,10 +166,12 @@ int main(int argc, char **argv)
 		fprintf(stderr, "rei-wm: config error: %s\n", err);
 		return 1;
 	}
-	if (print_theme || preview_png) {
+	if (print_theme || print_defaults || preview_png) {
 		int rc = 0;
 		if (print_theme)
 			rei_theme_print(config);
+		if (print_defaults)
+			rei_theme_print_defaults(config);
 		if (preview_png)
 			rc = rei_theme_preview(config, preview_png);
 		rei_config_free(config);
