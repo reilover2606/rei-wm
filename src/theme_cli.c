@@ -8,10 +8,10 @@
 #include "toolbar.h"
 #include "util/util.h"
 
-void rei_theme_print(const struct rei_config *cfg)
+static void print_theme(const struct rei_theme *theme)
 {
 	for (int e = 0; e < REI_ELEM_COUNT; e++) {
-		const struct rei_style *s = &cfg->theme.e[e];
+		const struct rei_style *s = &theme->e[e];
 		const char *n = rei_element_name((enum rei_element)e);
 		printf("%s.color=#%06x\n", n, s->color);
 		printf("%s.active_color=#%06x\n", n, s->active_color);
@@ -37,6 +37,18 @@ void rei_theme_print(const struct rei_config *cfg)
 			printf("%s.icon_size=%g\n", n, s->icon_size);
 		}
 	}
+}
+
+void rei_theme_print(const struct rei_config *cfg)
+{
+	print_theme(&cfg->theme);
+}
+
+void rei_theme_print_defaults(const struct rei_config *cfg)
+{
+	struct rei_theme t;
+	rei_theme_defaults(&t, cfg->toolbar_background, cfg->toolbar_foreground, cfg->toolbar_highlight);
+	print_theme(&t);
 }
 
 /* ------------------------------------------------------------------------ */

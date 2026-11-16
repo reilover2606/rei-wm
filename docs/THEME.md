@@ -78,3 +78,10 @@ a Start menu with a hovered row; a tooltip; the volume popup; the Run prompt; a 
 backdrop). The values shown are the effective theme (`rei-wm --print-theme`): the built-in look with your
 `[theme.*]` tables applied. Saving writes only what you changed, into `[theme.<element>]` tables, and leaves the
 rest of the file alone. The flavor icons folder is `[theme] flavor_icons`.
+
+Every value has a ↺ button that returns it to the built-in value (`rei-wm --print-theme-defaults`), each element
+has "Reset this element", and the list has "Reset everything". Resetting a value *removes* its line from the
+config (an emptied `[theme.<element>]` table goes too) instead of writing the default, so the element keeps
+following the toolbar colours. The three base colours (`[toolbar] background`, `foreground`, `highlight`, which
+every built-in look is derived from) are at the top of the Theme tab; changing one moves every value you have
+not set by hand, and the preview follows.

@@ -39,6 +39,19 @@ int main()
 	TomlDoc d = TomlDoc::parse(sample);
 	CHECK_EQ(d.text(), sample);  /* Parsing and printing changes nothing. */
 
+	/* An emptied [section] can be pruned (header and the blank line before it); one with content stays. */
+	{
+		TomlDoc p = TomlDoc::parse(QStringLiteral("[a]\nx = 1\n\n[theme.t]\nr = 2\n\n[b]\ny = 3\n"));
+		p.remove("theme.t", "r");
+		p.pruneEmpty("theme.t");
+		CHECK_EQ(p.text(), QStringLiteral("[a]\nx = 1\n\n[b]\ny = 3\n"));
+		p.pruneEmpty("a");   /* it still has a key */
+		CHECK_EQ(p.text(), QStringLiteral("[a]\nx = 1\n\n[b]\ny = 3\n"));
+		TomlDoc q = TomlDoc::parse(QStringLiteral("[a]\nx = 1\n\n[t]\n# kept: a comment lives here\n"));
+		q.pruneEmpty("t");
+		CHECK_EQ(q.text(), QStringLiteral("[a]\nx = 1\n\n[t]\n# kept: a comment lives here\n"));
+	}
+
 	/* String escapes are decoded in one pass: an escaped backslash followed by n is a backslash and an n,
 	 * not a newline (printf '%s\n' commands depend on it). */
 	{

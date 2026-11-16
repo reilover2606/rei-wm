@@ -29,6 +29,8 @@ public:
 	QVariant get(const QString &section, const QString &key) const;
 	void set(const QString &section, const QString &key, const QVariant &value);
 	void remove(const QString &section, const QString &key);
+	/* Removes a [section] header that no longer holds anything (with the blank line before it). */
+	void pruneEmpty(const QString &section);
 	QStringList keys(const QString &section) const;
 
 	/* [[name]] tables, in file order; each is key -> value. */

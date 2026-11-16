@@ -9,6 +9,7 @@
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
@@ -19,6 +20,9 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include <QToolButton>
+
+#include "colorbutton.h"
 #include "mainwindow.h"
 #include "themeeditor.h"
 
@@ -294,6 +298,85 @@ int main(int argc, char **argv)
 		field<QWidget>(wt2, "theme.flavor_icons")->findChild<QLineEdit *>("edit")->setText("/tmp/icons");
 		CHECK(wt2.save(&err));
 		CHECK(slurp(path).contains("flavor_icons = \"/tmp/icons\"\n"));
+	}
+
+	/* Reset buttons, and base colours the built-in look follows. */
+	{
+		QString rpath = dir.path() + "/reset.toml";
+		{
+			QFile f(rpath);
+			CHECK(f.open(QIODevice::WriteOnly));
+			f.write("[toolbar]\nenabled = true\n\n"
+				"[theme.tray_tile]\nradius = 9\nshape = \"pill\"\n\n"
+				"[theme.dialog]\nradius = 20\n");
+		}
+		MainWindow wr(rpath, wm);
+		auto *radius = field<QDoubleSpinBox>(wr, "theme.tray_tile.radius");
+		CHECK(radius->value() == 9);
+		auto *resetRadius = wr.findChild<QToolButton *>("reset.tray_tile.radius");
+		CHECK(resetRadius && resetRadius->isEnabled());                       /* it differs from the built-in 4 */
+		auto *untouched = wr.findChild<QToolButton *>("reset.tray_tile.opacity");
+		CHECK(untouched && !untouched->isEnabled());                          /* already the built-in value */
+
+		/* Resetting an overridden value removes the override from the file (it does not pin the default). */
+		resetRadius->click();
+		CHECK(radius->value() == 4);
+		CHECK(!resetRadius->isEnabled());
+		CHECK(wr.dirty());
+		CHECK(wr.save(&err));
+		QString r1 = slurp(rpath);
+		CHECK(!r1.contains("radius = 9"));
+		CHECK(r1.contains("[theme.tray_tile]\nshape = \"pill\"\n"));          /* the other override stays */
+
+		/* Resetting a whole element drops its table altogether. */
+		wr.findChild<QPushButton *>("reset_element.dialog")->click();
+		CHECK(field<QDoubleSpinBox>(wr, "theme.dialog.radius")->value() == 12);
+		CHECK(wr.save(&err));
+		QString r2 = slurp(rpath);
+		CHECK(!r2.contains("[theme.dialog]"));
+		CHECK(r2.contains("[theme.tray_tile]") && r2.contains("[toolbar]\nenabled = true\n"));
+
+		/* Reset everything. */
+		wr.findChild<QPushButton *>("theme_reset_all")->click();
+		CHECK(field<QComboBox>(wr, "theme.tray_tile.shape")->currentText() == "rounded");
+		CHECK(wr.save(&err));
+		CHECK(!slurp(rpath).contains("[theme."));
+
+		/* The three base colours live on the Theme tab; the built-in look follows them. */
+		MainWindow wb(rpath, wm);
+		auto *bg = static_cast<ColorButton *>(field<QWidget>(wb, "toolbar.background"));
+		QString oldColor = field<QWidget>(wb, "theme.menu.color")->property("text").toString();
+		auto *menuColor = static_cast<ColorButton *>(field<QWidget>(wb, "theme.menu.color"));
+		oldColor = menuColor->color();
+		bg->setColor("#402010");
+		bg->onChange();
+		CHECK(menuColor->color() != oldColor);                                 /* followed the new background */
+		CHECK(wb.dirty());
+		/* A value set by hand does not follow. */
+		field<QDoubleSpinBox>(wb, "theme.menu.radius")->setValue(7);
+		bg->setColor("#103040");
+		bg->onChange();
+		CHECK(field<QDoubleSpinBox>(wb, "theme.menu.radius")->value() == 7);
+		CHECK(wb.save(&err));
+		QString r3 = slurp(rpath);
+		CHECK(r3.contains("background = \"#103040\""));
+		CHECK(r3.contains("[theme.menu]\nradius = 7.0\n"));
+		CHECK(!r3.contains("[theme.menu]\ncolor"));                           /* followed values are not pinned */
+		MainWindow wb2(rpath, wm);
+		CHECK(field<QDoubleSpinBox>(wb2, "theme.menu.radius")->value() == 7);
+		CHECK(static_cast<ColorButton *>(field<QWidget>(wb2, "theme.menu.color"))->color() == menuColor->color());
+	}
+
+	/* If rei-wm cannot be asked, the Theme tab says so and offers to locate it, instead of silently
+	 * graying out. (A working one hides the notice.) */
+	{
+		MainWindow wbad(path, "/nonexistent/rei-wm");
+		auto *box = wbad.findChild<QWidget *>("theme_notice_box");
+		CHECK(box && !box->isHidden());
+		CHECK(!wbad.findChild<QLabel *>("theme_notice")->text().isEmpty());
+		CHECK(wbad.findChild<QPushButton *>("theme_locate") != nullptr);
+		MainWindow wgood(path, wm);
+		CHECK(wgood.findChild<QWidget *>("theme_notice_box")->isHidden());
 	}
 
 	/* A missing file: the window starts from rei-wm's default config. */

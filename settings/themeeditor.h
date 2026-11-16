@@ -14,6 +14,7 @@ class QListWidget;
 class QProcess;
 class QStackedWidget;
 class QTimer;
+class QToolButton;
 
 /*
  * The theme editor: every value the theme controls, for every element, with a preview.
@@ -39,26 +40,43 @@ public:
 	void apply(TomlDoc &doc) const;
 	/* After a save: what is shown is now the baseline. */
 	void markSaved();
+	/* The toolbar's base colours changed: the built-in look follows them, so every value the user has not
+	 * set by hand follows too (the "reset" targets are refreshed as well). */
+	void baseColorsChanged();
+	/* Returns every value of every element to the built-in look. */
+	void resetAll();
 	bool changed() const;
 
 	/* Draws the preview now (waits for it). For tests. */
 	bool refreshPreviewNow(QString *error = nullptr);
 	QSize previewSize() const;
 
+	/* Points the editor at another rei-wm (after the user located it). */
+	void setBinary(const QString &path);
+
 signals:
 	void edited();
+	void compositorChosen(const QString &path);   /* the user picked a rei-wm; reload to use it */
 
 private:
 	struct Prop {
 		QString name;
 		QWidget *widget = nullptr;
+		QToolButton *reset = nullptr;   /* returns it to the built-in value */
 		QString kind;        /* "color", "number", "shape", "bool" */
-		QString loaded;      /* The effective value as text, at load. */
+		QString loaded;      /* The effective value as text, at load: what the file says now. */
+		QString defaultV;    /* The built-in value (for the current toolbar colours). */
+		bool touched = false;   /* The user changed it by hand. */
 	};
 
 	void buildPage(const QString &element, bool iconable);
 	QString valueOf(const Prop &p) const;
 	void setValue(Prop &p, const QString &text);
+	void touch(const QString &element, const QString &name);   /* an editor changed */
+	void updateReset(Prop &p);
+	void resetElement(const QString &element);
+	typedef QMap<QString, QMap<QString, QString>> Values;   /* element -> property -> text */
+	bool fetch(const QString &flag, const QString &configText, Values *out, QString *error) const;
 	void schedulePreview();
 	void startPreview();
 
@@ -66,7 +84,8 @@ private:
 	std::function<QString()> text_;
 	QListWidget *list_ = nullptr;
 	QStackedWidget *pages_ = nullptr;
-	QLabel *preview_ = nullptr, *note_ = nullptr;
+	QLabel *preview_ = nullptr, *note_ = nullptr, *notice_ = nullptr;
+	QWidget *noticeBox_ = nullptr, *body_ = nullptr;   /* body_: everything that needs rei-wm */
 	QTimer *timer_ = nullptr;
 	QProcess *process_ = nullptr;
 	QMap<QString, QMap<QString, Prop>> props_;   /* element -> property -> editor */

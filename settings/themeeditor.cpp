@@ -5,6 +5,7 @@
 #include <QComboBox>
 #include <QDir>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -12,6 +13,8 @@
 #include <QListWidget>
 #include <QPixmap>
 #include <QProcess>
+#include <QPushButton>
+#include <QToolButton>
 #include <QScrollArea>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -103,16 +106,49 @@ ThemeEditor::ThemeEditor(const QString &compositorBinary, std::function<QString(
 {
 	auto *outer = new QVBoxLayout(this);
 	outer->setContentsMargins(0, 0, 0, 0);
+	/* Shown (instead of a silently grayed-out editor) when rei-wm cannot be asked for the theme. */
+	noticeBox_ = new QWidget;
+	noticeBox_->setObjectName("theme_notice_box");
+	auto *noticeLayout = new QHBoxLayout(noticeBox_);
+	noticeLayout->setContentsMargins(6, 6, 6, 6);
+	notice_ = new QLabel;
+	notice_->setObjectName("theme_notice");
+	notice_->setWordWrap(true);
+	notice_->setStyleSheet("color: #a02020;");
+	noticeLayout->addWidget(notice_, 1);
+	auto *locate = new QPushButton(tr("Locate rei-wm…"));
+	locate->setObjectName("theme_locate");
+	connect(locate, &QPushButton::clicked, this, [this] {
+		QString f = QFileDialog::getOpenFileName(this, tr("Choose the rei-wm program"), QString());
+		if (!f.isEmpty()) {
+			binary_ = f;
+			emit compositorChosen(f);
+		}
+	});
+	noticeLayout->addWidget(locate);
+	noticeBox_->hide();
+	outer->addWidget(noticeBox_);
+
 	auto *split = new QSplitter(Qt::Vertical);
+	body_ = split;
 	outer->addWidget(split, 1);
 
 	auto *top = new QWidget;
 	auto *topLayout = new QHBoxLayout(top);
 	topLayout->setContentsMargins(0, 0, 0, 0);
+	auto *left = new QWidget;
+	auto *leftLayout = new QVBoxLayout(left);
+	leftLayout->setContentsMargins(0, 0, 0, 0);
 	list_ = new QListWidget;
 	list_->setObjectName("theme_elements");
-	list_->setMaximumWidth(190);
-	topLayout->addWidget(list_);
+	leftLayout->addWidget(list_, 1);
+	auto *resetAllButton = new QPushButton(tr("Reset everything"));
+	resetAllButton->setObjectName("theme_reset_all");
+	resetAllButton->setToolTip(tr("Returns every element to the built-in look (for the toolbar colours above)."));
+	connect(resetAllButton, &QPushButton::clicked, this, &ThemeEditor::resetAll);
+	leftLayout->addWidget(resetAllButton);
+	left->setMaximumWidth(190);
+	topLayout->addWidget(left);
 	pages_ = new QStackedWidget;
 	topLayout->addWidget(pages_, 1);
 	split->addWidget(top);
@@ -174,6 +210,10 @@ void ThemeEditor::buildPage(const QString &element, bool iconable)
 	auto *what = new QLabel(tr(info->what));
 	what->setWordWrap(true);
 	v->addWidget(what);
+	auto *resetElem = new QPushButton(tr("Reset this element to the built-in look"));
+	resetElem->setObjectName("reset_element." + element);
+	connect(resetElem, &QPushButton::clicked, this, [this, element] { resetElement(element); });
+	v->addWidget(resetElem, 0, Qt::AlignLeft);
 
 	auto group = [&](const QString &title, const PropInfo *list, size_t n) {
 		auto *box = new QGroupBox(title);
@@ -186,24 +226,43 @@ void ThemeEditor::buildPage(const QString &element, bool iconable)
 			QWidget *w = nullptr;
 			if (p.kind == "color") {
 				auto *b = new ColorButton;
-				b->onChange = [this] { if (!loading_) { emit edited(); schedulePreview(); } };
+				const QString nm = pi.name;
+				b->onChange = [this, element, nm] { touch(element, nm); };
 				w = b;
 			} else if (p.kind == "shape") {
 				auto *c = new QComboBox;
 				c->addItems({ "square", "rounded", "pill", "bevel" });
-				connect(c, &QComboBox::currentTextChanged, this, [this] { if (!loading_) { emit edited(); schedulePreview(); } });
+				const QString nm = pi.name;
+				connect(c, &QComboBox::currentTextChanged, this, [this, element, nm] { touch(element, nm); });
 				w = c;
 			} else {
 				auto *s = new QDoubleSpinBox;
 				s->setRange(pi.lo, pi.hi);
 				s->setSingleStep(pi.step);
 				s->setDecimals(pi.decimals);
-				connect(s, &QDoubleSpinBox::valueChanged, this, [this] { if (!loading_) { emit edited(); schedulePreview(); } });
+				const QString nm = pi.name;
+				connect(s, &QDoubleSpinBox::valueChanged, this, [this, element, nm] { touch(element, nm); });
 				w = s;
 			}
+			const QString nm = pi.name;
 			w->setObjectName("theme." + element + "." + pi.name);
-			form->addRow(tr(pi.label), w);
+			auto *rowWidget = new QWidget;
+			auto *rowLayout = new QHBoxLayout(rowWidget);
+			rowLayout->setContentsMargins(0, 0, 0, 0);
+			rowLayout->addWidget(w, 1);
+			auto *reset = new QToolButton;
+			reset->setText(QStringLiteral("↺"));
+			reset->setObjectName("reset." + element + "." + pi.name);
+			reset->setAutoRaise(true);
+			connect(reset, &QToolButton::clicked, this, [this, element, nm] {
+				Prop &pr = props_[element][nm];
+				setValue(pr, pr.defaultV);
+				touch(element, nm);
+			});
+			rowLayout->addWidget(reset);
+			form->addRow(tr(pi.label), rowWidget);
 			p.widget = w;
+			p.reset = reset;
 			props_[element][p.name] = p;
 		}
 		v->addWidget(box);
@@ -220,10 +279,24 @@ void ThemeEditor::buildPage(const QString &element, bool iconable)
 		on.name = "icon";
 		on.kind = "bool";
 		auto *c = new QCheckBox;
-		connect(c, &QCheckBox::toggled, this, [this] { if (!loading_) { emit edited(); schedulePreview(); } });
+		connect(c, &QCheckBox::toggled, this, [this, element] { touch(element, "icon"); });
 		c->setObjectName("theme." + element + ".icon");
 		on.widget = c;
-		form->addRow(tr("Show an icon"), c);
+		auto *iconReset = new QToolButton;
+		iconReset->setText(QStringLiteral("↺"));
+		iconReset->setAutoRaise(true);
+		iconReset->setObjectName("reset." + element + ".icon");
+		connect(iconReset, &QToolButton::clicked, this, [this, element] {
+			setValue(props_[element]["icon"], props_[element]["icon"].defaultV);
+			touch(element, "icon");
+		});
+		on.reset = iconReset;
+		auto *iconRow = new QWidget;
+		auto *iconRowLayout = new QHBoxLayout(iconRow);
+		iconRowLayout->setContentsMargins(0, 0, 0, 0);
+		iconRowLayout->addWidget(c, 1);
+		iconRowLayout->addWidget(iconReset);
+		form->addRow(tr("Show an icon"), iconRow);
 		props_[element]["icon"] = on;
 		Prop sz;
 		sz.name = "icon_size";
@@ -231,11 +304,25 @@ void ThemeEditor::buildPage(const QString &element, bool iconable)
 		auto *s = new QDoubleSpinBox;
 		s->setRange(0, 64);
 		s->setDecimals(0);
-		connect(s, &QDoubleSpinBox::valueChanged, this, [this] { if (!loading_) { emit edited(); schedulePreview(); } });
+		connect(s, &QDoubleSpinBox::valueChanged, this, [this, element] { touch(element, "icon_size"); });
 		s->setObjectName("theme." + element + ".icon_size");
 		s->setToolTip(tr("Pixels, at most 64; 0 fits the element."));
 		sz.widget = s;
-		form->addRow(tr("Icon size (px, 0 = fit)"), s);
+		auto *sizeReset = new QToolButton;
+		sizeReset->setText(QStringLiteral("↺"));
+		sizeReset->setAutoRaise(true);
+		sizeReset->setObjectName("reset." + element + ".icon_size");
+		connect(sizeReset, &QToolButton::clicked, this, [this, element] {
+			setValue(props_[element]["icon_size"], props_[element]["icon_size"].defaultV);
+			touch(element, "icon_size");
+		});
+		sz.reset = sizeReset;
+		auto *sizeRow = new QWidget;
+		auto *sizeRowLayout = new QHBoxLayout(sizeRow);
+		sizeRowLayout->setContentsMargins(0, 0, 0, 0);
+		sizeRowLayout->addWidget(s, 1);
+		sizeRowLayout->addWidget(sizeReset);
+		form->addRow(tr("Icon size (px, 0 = fit)"), sizeRow);
 		props_[element]["icon_size"] = sz;
 		v->addWidget(box);
 	}
@@ -271,17 +358,60 @@ void ThemeEditor::setValue(Prop &p, const QString &text)
 		static_cast<QCheckBox *>(p.widget)->setChecked(text == "true");
 	else
 		static_cast<QDoubleSpinBox *>(p.widget)->setValue(text.toDouble());
-	p.loaded = valueOf(p);   /* what the widget normalised it to */
 }
 
-bool ThemeEditor::load(const QString &configText, QString *error)
+/* An editor changed (by hand or through a reset): note it, refresh the reset button, redraw the preview. */
+void ThemeEditor::touch(const QString &element, const QString &name)
 {
-	setEnabled(false);
-	if (binary_.isEmpty()) {
-		if (error)
-			*error = tr("rei-wm was not found, so the theme cannot be edited.");
-		return false;
+	if (loading_)
+		return;
+	Prop &p = props_[element][name];
+	p.touched = true;
+	updateReset(p);
+	emit edited();
+	schedulePreview();
+}
+
+void ThemeEditor::updateReset(Prop &p)
+{
+	if (!p.reset)
+		return;
+	bool differs = valueOf(p) != p.defaultV;
+	p.reset->setEnabled(differs);
+	p.reset->setToolTip(differs ? tr("Reset to the built-in value (%1)").arg(p.defaultV)
+				    : tr("Already the built-in value"));
+}
+
+void ThemeEditor::resetElement(const QString &element)
+{
+	loading_ = true;   /* one preview and one notice for the lot */
+	for (auto p = props_[element].begin(); p != props_[element].end(); ++p) {
+		setValue(*p, p->defaultV);
+		p->touched = true;
+		updateReset(*p);
 	}
+	loading_ = false;
+	emit edited();
+	schedulePreview();
+}
+
+void ThemeEditor::resetAll()
+{
+	loading_ = true;
+	for (auto e = props_.begin(); e != props_.end(); ++e)
+		for (auto p = e->begin(); p != e->end(); ++p) {
+			setValue(*p, p->defaultV);
+			p->touched = true;
+			updateReset(*p);
+		}
+	loading_ = false;
+	emit edited();
+	schedulePreview();
+}
+
+/* Runs rei-wm with a flag that prints theme values for `configText`. */
+bool ThemeEditor::fetch(const QString &flag, const QString &configText, Values *out, QString *error) const
+{
 	QTemporaryFile tmp(QDir::tempPath() + "/rei-theme-XXXXXX.toml");
 	if (!tmp.open() || tmp.write(configText.toUtf8()) < 0) {
 		if (error)
@@ -290,26 +420,68 @@ bool ThemeEditor::load(const QString &configText, QString *error)
 	}
 	tmp.flush();
 	QProcess p;
-	p.start(binary_, { "--print-theme", "--config", tmp.fileName() });
+	p.start(binary_, { flag, "--config", tmp.fileName() });
 	if (!p.waitForFinished(10000) || p.exitCode() != 0) {
 		if (error)
 			*error = tr("rei-wm could not describe the theme (%1)")
 					 .arg(QString::fromUtf8(p.readAllStandardError()).trimmed());
 		return false;
 	}
-	loading_ = true;
 	const QStringList lines = QString::fromUtf8(p.readAllStandardOutput()).split('\n', Qt::SkipEmptyParts);
 	for (const QString &line : lines) {
 		int eq = line.indexOf('=');
 		int dot = line.indexOf('.');
 		if (eq < 0 || dot < 0 || dot > eq)
 			continue;
-		QString element = line.left(dot), prop = line.mid(dot + 1, eq - dot - 1), value = line.mid(eq + 1);
-		if (props_.contains(element) && props_[element].contains(prop))
-			setValue(props_[element][prop], value);
+		(*out)[line.left(dot)][line.mid(dot + 1, eq - dot - 1)] = line.mid(eq + 1);
 	}
+	return true;
+}
+
+void ThemeEditor::setBinary(const QString &path)
+{
+	binary_ = path;
+}
+
+bool ThemeEditor::load(const QString &configText, QString *error)
+{
+	body_->setEnabled(false);
+	QString why;
+	Values effective, defaults;
+	if (binary_.isEmpty()) {
+		why = tr("The theme editor needs the rei-wm program to tell it the theme and to draw the preview, "
+			 "and it was not found next to this program, in ../src, in $REI_WM_BIN or on PATH.");
+	} else if (!fetch("--print-theme", configText, &effective, &why) ||
+		   !fetch("--print-theme-defaults", configText, &defaults, &why)) {
+		why += tr("\n(Using %1. If that rei-wm is older than this settings program, rebuild or reinstall it.)")
+			       .arg(binary_);
+	}
+	if (!why.isEmpty()) {
+		notice_->setText(why);
+		noticeBox_->show();
+		if (error)
+			*error = why;
+		return false;
+	}
+	noticeBox_->hide();
+	loading_ = true;
+	for (auto e = props_.begin(); e != props_.end(); ++e)
+		for (auto p = e->begin(); p != e->end(); ++p) {
+			if (effective.contains(e.key()) && effective[e.key()].contains(p->name))
+				setValue(*p, effective[e.key()][p->name]);
+			p->loaded = valueOf(*p);   /* what the widget normalised it to */
+			p->defaultV = p->loaded;
+			if (defaults.contains(e.key()) && defaults[e.key()].contains(p->name)) {
+				Prop tmp = *p;   /* normalise the default the same way */
+				setValue(tmp, defaults[e.key()][p->name]);
+				p->defaultV = valueOf(tmp);
+				setValue(*p, effective[e.key()][p->name]);
+			}
+			p->touched = false;
+			updateReset(*p);
+		}
 	loading_ = false;
-	setEnabled(true);
+	body_->setEnabled(true);
 	schedulePreview();
 	return true;
 }
@@ -330,6 +502,13 @@ void ThemeEditor::apply(TomlDoc &doc) const
 			QString now = valueOf(*p);
 			if (now == p->loaded)
 				continue;   /* untouched: the file keeps its own line (or the built-in look) */
+			if (now == p->defaultV) {
+				/* Back to the built-in value: drop the override instead of pinning the value, so the
+				 * element keeps following the toolbar colours. */
+				doc.remove("theme." + e.key(), p->name);
+				doc.pruneEmpty("theme." + e.key());
+				continue;
+			}
 			QVariant v;
 			if (p->kind == "number")
 				v = now.toDouble();
@@ -345,13 +524,42 @@ void ThemeEditor::apply(TomlDoc &doc) const
 void ThemeEditor::markSaved()
 {
 	for (auto e = props_.begin(); e != props_.end(); ++e)
-		for (auto p = e->begin(); p != e->end(); ++p)
+		for (auto p = e->begin(); p != e->end(); ++p) {
 			p->loaded = valueOf(*p);
+			p->touched = false;
+		}
+}
+
+void ThemeEditor::baseColorsChanged()
+{
+	Values defaults;
+	if (binary_.isEmpty() || !fetch("--print-theme-defaults", text_(), &defaults, nullptr))
+		return;
+	loading_ = true;
+	for (auto e = props_.begin(); e != props_.end(); ++e)
+		for (auto p = e->begin(); p != e->end(); ++p) {
+			if (!defaults.contains(e.key()) || !defaults[e.key()].contains(p->name))
+				continue;
+			QString current = valueOf(*p);
+			Prop probe = *p;
+			setValue(probe, defaults[e.key()][p->name]);   /* (sets the shared widget; put it back below) */
+			QString fresh = valueOf(probe);
+			setValue(*p, current);
+			bool follows = !p->touched && p->loaded == p->defaultV && current == p->defaultV;
+			p->defaultV = fresh;
+			if (follows) {   /* the built-in look moved, and this value was the built-in look: it moves too */
+				setValue(*p, fresh);
+				p->loaded = fresh;
+			}
+			updateReset(*p);
+		}
+	loading_ = false;
+	schedulePreview();
 }
 
 void ThemeEditor::schedulePreview()
 {
-	if (isEnabled() || loading_)
+	if (body_->isEnabled() || loading_)
 		timer_->start();
 }
 
