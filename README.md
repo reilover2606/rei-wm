@@ -242,3 +242,12 @@ from that directory (stable for a given element during a session, so icons don't
 that are **square (1:1) and at most 64x64** are used; anything else is skipped with a warning in the log.
 Transparency is respected. Per element, `[theme.tray_tile]`, `[theme.start_button]` or `[theme.menu_row]`
 accept `icon = false` (no icon) and `icon_size` (pixels, up to 64; 0 fits the element).
+
+## GTK apps opening in another desktop
+
+If you run rei-wm from a TTY while another desktop of the same user is still running, a single-instance
+GTK/GNOME program (GNOME Settings, for example) may find the *other* desktop's copy over the shared D-Bus
+session bus and open its window there. `[general] session_bus = "private"` makes rei-wm start its own session
+bus for the programs it launches, so they open in rei-wm. The catch: that bus has none of the other desktop's
+services (portals, notifications, keyring). The default, `"inherit"`, changes nothing. (Firefox and most
+Wayland programs are unaffected; they do not use the bus to find an existing instance.)

@@ -38,6 +38,7 @@ struct rei_config {
 	char *composition_key;  /* "super", "alt", "ctrl" or "shift". */
 
 	bool xwayland;             /* Run Xwayland so X11 programs work. */
+	bool session_bus_private;  /* [general] session_bus = "private": launched programs get their own D-Bus session bus. */
 	bool focus_follows_mouse;  /* Moving the pointer onto a window focuses it. */
 
 	/* [layout] */

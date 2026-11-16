@@ -23,6 +23,7 @@ struct rei_xwayland;
 struct rei_audio;
 struct rei_battery;
 struct rei_sysinfo;
+struct rei_sessionbus;
 struct rei_tray_ui;
 struct rei_popup;
 struct rei_prompt;
@@ -90,6 +91,7 @@ struct rei_server {
 	struct rei_audio *audio;
 	struct rei_battery *battery;
 	struct rei_sysinfo *sysinfo;
+	struct rei_sessionbus *sessionbus;
 	struct rei_tray_ui *tray_ui;
 	struct rei_popup *popup;
 	struct rei_prompt *prompt;

@@ -163,15 +163,17 @@ int main(int argc, char **argv)
 
 	char config[1900];
 	snprintf(config, sizeof config,
+		 "[general]\nfocus_follows_mouse = false\nsession_bus = \"private\"\n"
 		 "[toolbar]\nenabled = true\nthickness = 28\n"
 		 "[start_menu]\nshutdown_command = \"touch %s/shutdown\"\nreboot_command = \"touch %s/reboot\"\n"
 		 "run_font = \"Sans 20\"\n"
 		 "[[shortcut]]\nname = \"Alpha\"\ncommand = \"touch %s/alpha\"\n"
 		 "[[shortcut]]\nname = \"Beta\"\ncommand = \"touch %s/beta\"\n"
+		 "[[shortcut]]\nname = \"Bus\"\ncommand = \"echo \\\"$DBUS_SESSION_BUS_ADDRESS\\\" > %s/bus\"\n"
 		 "[theme]\nflavor_icons = \"%s\"\n"
 		 "[theme.run_prompt]\ncolor = \"#e0a000\"\nopacity = 1.0\nshadow_opacity = 0.0\nborder_width = 0\n"
 		 "[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n",
-		 g_marks, g_marks, g_marks, g_marks, flavor, OUT_W, OUT_H);
+		 g_marks, g_marks, g_marks, g_marks, g_marks, flavor, OUT_W, OUT_H);
 	start_compositor(argv[1], config, true);
 
 	struct client c;
@@ -208,10 +210,26 @@ int main(int argc, char **argv)
 	click_at(x, y);
 	CHECK(wait_exists("beta"));
 
+	/* session_bus = "private": launched programs get a bus of their own. */
+	click_at(20, 14);
+	y = row_y(2, &x);
+	click_at(x, y);
+	CHECK(wait_exists("bus"));
+	{
+		char path[260], *got;
+		snprintf(path, sizeof path, "%s/bus", g_marks);
+		got = slurp(path);
+		CHECK(got && strncmp(got, "unix:", 5) == 0);
+		const char *inherited = getenv("DBUS_SESSION_BUS_ADDRESS");
+		CHECK(!inherited || strstr(got, inherited) == NULL);
+		CHECK(log_has("session bus: private bus for launched programs"));
+		free(got);
+	}
+
 	/* Power rows ask in a dialog. Cancel is highlighted at first, so Enter alone is safe. */
 	int dlg_confirm_x = 511, dlg_cancel_x = 367, dlg_y = 342;
 	click_at(20, 14);
-	y = row_y(4, &x);
+	y = row_y(5, &x);
 	click_at(x, y);
 	CHECK(log_count("confirm: Shut down?") == 1);
 	type("28");                                  /* Enter */
@@ -220,27 +238,27 @@ int main(int argc, char **argv)
 	CHECK(log_has("confirm: cancelled"));
 
 	click_at(20, 14);
-	y = row_y(4, &x);
+	y = row_y(5, &x);
 	click_at(x, y);
 	type("1");                                   /* Escape */
 	CHECK(log_count("confirm: cancelled") == 2);
 
 	click_at(20, 14);
-	y = row_y(4, &x);
+	y = row_y(5, &x);
 	click_at(x, y);
 	click_at(dlg_cancel_x, dlg_y);               /* the Cancel button */
 	CHECK(log_count("confirm: cancelled") == 3);
 	CHECK(!exists("shutdown"));
 
 	click_at(20, 14);
-	y = row_y(4, &x);
+	y = row_y(5, &x);
 	click_at(x, y);
 	type("15");                                  /* Tab: highlights the confirm button */
 	type("28");                                  /* Enter */
 	CHECK(wait_exists("shutdown"));
 
 	click_at(20, 14);
-	y = row_y(5, &x);
+	y = row_y(6, &x);
 	click_at(x, y);
 	CHECK(log_count("confirm: Restart?") == 1);
 	click_at(dlg_confirm_x, dlg_y);              /* the Restart button */
@@ -249,7 +267,7 @@ int main(int argc, char **argv)
 	/* Run opens the prompt: a box in the middle that blinks. */
 	struct ppm base = screenshot();
 	click_at(20, 14);
-	y = row_y(2, &x);
+	y = row_y(3, &x);
 	click_at(x, y);
 	CHECK(log_has("run prompt: open"));
 	struct ppm p1 = screenshot();
@@ -402,12 +420,12 @@ int main(int argc, char **argv)
 		settle_all();
 		shot("2-start-menu");
 	}
-	y = row_y(4, &x);
+	y = row_y(5, &x);
 	click_at(x, y);
 	shot("3-confirm-dialog");
 	type("1");
 	click_at(20, 14);
-	y = row_y(2, &x);
+	y = row_y(3, &x);
 	click_at(x, y);
 	type("33 23 19 18 33 24 45 57 24 49 33");   /* "firefox ofe" */
 	shot("4-run-prompt");
