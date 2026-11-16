@@ -11,6 +11,11 @@ struct event_base;
  * and the log says why.
  */
 void rei_watchdog_start(struct event_base *base);
+/* Around a call the event loop makes on purpose and that may legitimately take a long time (switching
+ * VTs goes through logind, which can take many seconds when the other session is slow to take over):
+ * the watchdog does not count that as a hang. Calls nest. */
+void rei_watchdog_suspend(void);
+void rei_watchdog_resume(void);
 void rei_watchdog_stop(void);
 
 #endif

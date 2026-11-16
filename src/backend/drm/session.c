@@ -11,6 +11,7 @@
 
 #include "util/log.h"
 #include "util/util.h"
+#include "watchdog.h"
 
 struct rei_session {
 	struct libseat *seat;
@@ -148,7 +149,15 @@ void rei_session_close(struct rei_session *s, int device_id, int fd)
 
 bool rei_session_switch_vt(struct rei_session *s, unsigned vt)
 {
-	if (libseat_switch_session(s->seat, (int)vt) < 0) {
+	/* This is a synchronous call to logind that returns only once the other session has taken over, which
+	 * can take well over ten seconds if that session is slow. The watchdog used to take that for a hang
+	 * and exit rei-wm in the middle of the switch. */
+	rei_watchdog_suspend();
+	int rc = libseat_switch_session(s->seat, (int)vt);
+	int saved = errno;
+	rei_watchdog_resume();
+	if (rc < 0) {
+		errno = saved;
 		rei_warn("session: cannot switch to VT %u: %s", vt, strerror(errno));
 		return false;
 	}

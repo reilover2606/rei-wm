@@ -196,3 +196,9 @@ msgbuf_test = executable('test_msgbuf', 'test_msgbuf.c',
   dependencies: [wayland_client, m_dep, rei_core_dep],
 )
 test('msgbuf', msgbuf_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+
+watchdog_test = executable('test_watchdog', 'test_watchdog.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('watchdog', watchdog_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)

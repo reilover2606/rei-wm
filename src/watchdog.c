@@ -20,6 +20,7 @@
 
 static atomic_llong g_beat_ms;
 static atomic_bool g_stop;
+static atomic_int g_suspended;   /* >0: the event loop is knowingly in a call that may take a while */
 static pthread_t g_thread;
 static bool g_running;
 static struct event *g_timer;
@@ -37,6 +38,15 @@ static long long now_ms(void)
 static void on_selftest(evutil_socket_t fd, short what, void *arg)
 {
 	(void)fd; (void)what; (void)arg;
+	const char *mode = getenv("REI_WATCHDOG_SELFTEST");
+	if (mode && !strcmp(mode, "suspended")) {
+		/* The same stall, but declared as an allowed wait (like a VT switch): the watchdog must leave it alone. */
+		rei_watchdog_suspend();
+		struct timespec nap = { 4, 0 };
+		nanosleep(&nap, NULL);
+		rei_watchdog_resume();
+		return;
+	}
 	for (volatile unsigned long i = 0;; i++)
 		;
 }
@@ -131,6 +141,10 @@ static void *watch(void *arg)
 			atomic_store(&g_beat_ms, now);
 		}
 		last_tick = now;
+		if (atomic_load(&g_suspended) > 0) {   /* a call that is allowed to wait: not a hang */
+			atomic_store(&g_beat_ms, now);
+			continue;
+		}
 		if (now - atomic_load(&g_beat_ms) > (long long)g_limit_s * 1000)
 			report_and_exit();
 	}
@@ -156,13 +170,24 @@ void rei_watchdog_start(struct event_base *base)
 	struct timeval tv = { 0, 500000 };
 	event_add(g_timer, &tv);
 	const char *st = getenv("REI_WATCHDOG_SELFTEST");
-	if (st && st[0] == '1') {
+	if (st && (st[0] == '1' || !strcmp(st, "suspended"))) {
 		struct timeval later = { 2, 0 };
 		evtimer_add(evtimer_new(base, on_selftest, NULL), &later);
 	}
 	atomic_store(&g_stop, false);
 	if (pthread_create(&g_thread, NULL, watch, NULL) == 0)
 		g_running = true;
+}
+
+void rei_watchdog_suspend(void)
+{
+	atomic_fetch_add(&g_suspended, 1);
+}
+
+void rei_watchdog_resume(void)
+{
+	atomic_store(&g_beat_ms, now_ms());   /* the loop gets a fresh start */
+	atomic_fetch_sub(&g_suspended, 1);
 }
 
 void rei_watchdog_stop(void)
