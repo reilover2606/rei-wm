@@ -70,8 +70,14 @@ bool rei_reload_config(struct rei_server *s, char *err, size_t errlen)
 		const struct rei_output_config *oc = &cfg->outputs[i];
 		struct rei_output *o;
 		wl_list_for_each(o, &s->outputs, link)
-			if (oc->name && !strcmp(oc->name, o->name))
-				rei_server_set_output_scale(s, o, oc->scale);
+			if (!oc->name || !strcmp(oc->name, o->name)) {
+				/* a named table wins over an unnamed one */
+				bool named_exists = false;
+				for (size_t j = 0; j < cfg->n_outputs; j++)
+					named_exists |= cfg->outputs[j].name && !strcmp(cfg->outputs[j].name, o->name);
+				if (oc->name || !named_exists)
+					rei_server_set_output_scale(s, o, oc->scale);
+			}
 	}
 	rei_flavor_icons_configure(cfg->flavor_icons);
 	s->float_new_set = false;   /* The file's new_windows applies again. */
