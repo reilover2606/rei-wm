@@ -23,6 +23,13 @@ struct rei_pixbuf {
 	uint8_t data[];  /* width * height * 4 bytes, tightly packed. */
 };
 
+/* The most a single surface may be: 8192x8192 pixels' worth (256 MiB). A bigger one is refused rather
+ * than allowed to stall the whole compositor (and the machine) while it is allocated and copied. */
+#define REI_PIXBUF_MAX_BYTES ((size_t)256 << 20)
+
+/* Like rei_pixbuf_create, but the pixels are NOT cleared: the caller must write all of them. */
+struct rei_pixbuf *rei_pixbuf_create_uninit(int32_t width, int32_t height, bool opaque);
+
 /* Zero-filled (fully transparent). Returns NULL if the size is unreasonable. */
 struct rei_pixbuf *rei_pixbuf_create(int32_t width, int32_t height, bool opaque);
 struct rei_pixbuf *rei_pixbuf_ref(struct rei_pixbuf *p);

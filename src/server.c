@@ -311,6 +311,17 @@ static void sync_output_geometry(struct rei_server *s)
 	rei_server_schedule_flush(s);
 }
 
+void rei_server_set_output_scale(struct rei_server *s, struct rei_output *o, double scale)
+{
+	if (scale <= 0 || o->scale == scale)
+		return;
+	rei_info("output %s: scale %g -> %g", o->name, o->scale, scale);
+	o->scale = scale;
+	rei_outputs_layout(&s->outputs);   /* the logical size changed, so neighbours may move */
+	sync_output_geometry(s);           /* the renderer, wl_output, windows and the toolbar follow */
+	rei_server_schedule_damage(s);
+}
+
 struct rei_output *rei_server_add_output(struct rei_server *s,
 					 const struct rei_output_params *p)
 {

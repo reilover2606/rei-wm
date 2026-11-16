@@ -272,3 +272,14 @@ socket; Firefox and many others need it). Whatever rei-wm started is stopped whe
 already running (for example from another desktop session of yours) is left alone. Set
 `[audio] autostart = false` to manage them yourself; the environment variable `REI_AUDIO_AUTOSTART=0|1`
 overrides the file. Programs not installed are skipped with a warning in the log.
+
+## Output scale
+
+`[[output]] scale = 2` makes everything on that output twice as large: the toolbar and menus, and
+applications, which are told to render at that scale (so text stays sharp; a fractional scale such as
+1.5 renders at 2x and is scaled down). Changing `scale` in the config (or in the settings app) now
+**applies on reload**, with no restart. Mode, position and enabled still need a restart. X11 programs
+(via Xwayland) are not scaled: they keep their pixel size.
+
+A single window buffer may be at most 8192x8192 pixels; a larger one is refused instead of freezing the
+machine. Buffers of 32 MiB or more are noted in the log with the client's pid.

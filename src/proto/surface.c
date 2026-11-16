@@ -360,7 +360,13 @@ static bool latch_buffer(struct rei_surface *s)
 		return false;
 	}
 
-	struct rei_pixbuf *pix = rei_pixbuf_create(w, h, format == WL_SHM_FORMAT_XRGB8888);
+	if ((size_t)w * (size_t)h * 4 >= ((size_t)32 << 20)) {   /* 32 MiB and up: worth knowing about */
+		pid_t pid = 0;
+		wl_client_get_credentials(wl_resource_get_client(s->resource), &pid, NULL, NULL);
+		rei_info("client pid %d attached a large %dx%d buffer (%zu MiB)", (int)pid, w, h,
+			 (size_t)w * (size_t)h * 4 >> 20);
+	}
+	struct rei_pixbuf *pix = rei_pixbuf_create_uninit(w, h, format == WL_SHM_FORMAT_XRGB8888);   /* every pixel is copied below */
 	if (!pix) {
 		wl_resource_post_error(s->resource, WL_DISPLAY_ERROR_NO_MEMORY,
 				       "cannot allocate %dx%d surface", w, h);

@@ -55,7 +55,7 @@ bool rei_reload_config(struct rei_server *s, char *err, size_t errlen)
 	if (strcmp(old->backend, cfg->backend))
 		rei_warn("config: [general] backend changed; restart rei-wm to use it");
 	if (outputs_differ(old, cfg))
-		rei_warn("config: [[output]] changed; restart rei-wm to apply it");
+		rei_warn("config: [[output]] changed (scale applies now; anything else needs a restart)");
 	bool look_changed = strcmp(old->wallpaper_mode, cfg->wallpaper_mode) ||
 			    strcmp(old->wallpaper_path ? old->wallpaper_path : "",
 				   cfg->wallpaper_path ? cfg->wallpaper_path : "") ||
@@ -65,6 +65,14 @@ bool rei_reload_config(struct rei_server *s, char *err, size_t errlen)
 	s->old_configs = rei_xrealloc(s->old_configs, (s->n_old_configs + 1) * sizeof *s->old_configs);
 	s->old_configs[s->n_old_configs++] = cfg;  /* Freed at exit with the others. */
 	s->config = cfg;
+	/* A changed scale is applied to the running outputs; modes and positions still need a restart. */
+	for (size_t i = 0; i < cfg->n_outputs; i++) {
+		const struct rei_output_config *oc = &cfg->outputs[i];
+		struct rei_output *o;
+		wl_list_for_each(o, &s->outputs, link)
+			if (oc->name && !strcmp(oc->name, o->name))
+				rei_server_set_output_scale(s, o, oc->scale);
+	}
 	rei_flavor_icons_configure(cfg->flavor_icons);
 	s->float_new_set = false;   /* The file's new_windows applies again. */
 	rei_input_commit_reload(s, &in);
