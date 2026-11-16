@@ -44,9 +44,12 @@ int main(int argc, char **argv)
 	char sock[64], lock[64];
 	snprintf(sock, sizeof sock, "/tmp/.X11-unix/X%d", n);
 	snprintf(lock, sizeof lock, "/tmp/.X%d-lock", n);
-	struct stat st;
-	CHECK(stat(sock, &st) != 0);   /* the dead socket is gone */
-	CHECK(stat(lock, &st) != 0);   /* and so is the lock */
+	/* The dead display's lock is gone, or (if another test's compositor has meanwhile taken the same
+	 * number) no longer ours. */
+	char *held = slurp(lock);
+	CHECK(!held || atoi(held) != (int)g_pid);
+	free(held);
+	(void)sock;
 
 	CHECK(stop_compositor() == 0);
 	printf("xwdeath: ok\n");
