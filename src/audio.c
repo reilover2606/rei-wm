@@ -11,6 +11,7 @@
 #include <spa/pod/parser.h>
 #include <spa/utils/json.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -258,8 +259,32 @@ static void on_loop_readable(evutil_socket_t fd, short what, void *arg)
 	pw_loop_iterate(a->loop, 0);
 }
 
+/* Whether a PipeWire daemon's socket exists. Creating a PipeWire context is heavy (it reads the
+ * configuration and sets up a data loop), so when nothing is listening we must not keep creating
+ * one every few seconds: that churn was caught spinning inside libpipewire (pw_strv_parse) and froze
+ * the whole compositor. Checking for the socket first is a single cheap access(). */
+static bool pw_socket_exists(void)
+{
+	const char *remote = getenv("PIPEWIRE_REMOTE");
+	const char *name = remote && remote[0] ? remote : "pipewire-0";
+	char path[512];
+	if (name[0] == '/') {
+		snprintf(path, sizeof path, "%s", name);
+	} else {
+		const char *dir = getenv("PIPEWIRE_RUNTIME_DIR");
+		if (!dir || !dir[0])
+			dir = getenv("XDG_RUNTIME_DIR");
+		if (!dir || !dir[0])
+			return true;   /* cannot tell: let PipeWire try */
+		snprintf(path, sizeof path, "%s/%s", dir, name);
+	}
+	return access(path, F_OK) == 0;
+}
+
 static bool connect_pw(struct rei_audio *a)
 {
+	if (!pw_socket_exists())
+		return false;
 	a->context = pw_context_new(a->loop, NULL, 0);
 	if (!a->context)
 		return false;

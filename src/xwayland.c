@@ -825,7 +825,10 @@ bool rei_xwayland_pick_unmanaged(struct rei_server *server, double px, double py
 const char *rei_xwayland_display_name(const struct rei_server *server)
 {
 	const struct rei_xwayland *x = server->xwayland;
-	return x && x->running ? x->display_name : NULL;
+	/* From the moment the sockets are claimed, not only once Xwayland reports ready: Xwayland starts
+	 * on demand, when the first X program connects. Without DISPLAY that program would never
+	 * connect here and would fall back to :0, the display of whatever desktop is also running. */
+	return x && x->display >= 0 && x->display_name[0] ? x->display_name : NULL;
 }
 
 static void close_fd(int *fd)
