@@ -259,36 +259,55 @@ static void on_loop_readable(evutil_socket_t fd, short what, void *arg)
 	pw_loop_iterate(a->loop, 0);
 }
 
-/* Whether a PipeWire daemon's socket exists. Creating a PipeWire context is heavy (it reads the
- * configuration and sets up a data loop), so when nothing is listening we must not keep creating
- * one every few seconds: that churn was caught spinning inside libpipewire (pw_strv_parse) and froze
- * the whole compositor. Checking for the socket first is a single cheap access(). */
-static bool pw_socket_exists(void)
+/* Finds a PipeWire daemon's socket. libpipewire looks in $PIPEWIRE_RUNTIME_DIR, else
+ * $XDG_RUNTIME_DIR, but rei-wm may be started from a console whose XDG_RUNTIME_DIR is not where the
+ * user's PipeWire (started by their other desktop session) put it, so /run/user/<uid> is tried too.
+ * Returns true and the full path when one exists. Also: creating a PipeWire context is heavy, and
+ * doing it every few seconds with no daemon was caught spinning inside libpipewire (pw_strv_parse),
+ * freezing the compositor, so we only try when a socket is really there. */
+static bool find_pw_socket(char *out, size_t n, bool log_tried)
 {
 	const char *remote = getenv("PIPEWIRE_REMOTE");
 	const char *name = remote && remote[0] ? remote : "pipewire-0";
-	char path[512];
 	if (name[0] == '/') {
-		snprintf(path, sizeof path, "%s", name);
-	} else {
-		const char *dir = getenv("PIPEWIRE_RUNTIME_DIR");
-		if (!dir || !dir[0])
-			dir = getenv("XDG_RUNTIME_DIR");
-		if (!dir || !dir[0])
-			return true;   /* cannot tell: let PipeWire try */
-		snprintf(path, sizeof path, "%s/%s", dir, name);
+		snprintf(out, n, "%s", name);
+		return access(out, F_OK) == 0;
 	}
-	return access(path, F_OK) == 0;
+	char fallback[64];
+	snprintf(fallback, sizeof fallback, "/run/user/%u", (unsigned)getuid());
+	const char *dirs[] = { getenv("PIPEWIRE_RUNTIME_DIR"), getenv("XDG_RUNTIME_DIR"), fallback };
+	char tried[1300] = "";
+	for (size_t i = 0; i < sizeof dirs / sizeof dirs[0]; i++) {
+		if (!dirs[i] || !dirs[i][0])
+			continue;
+		snprintf(out, n, "%s/%s", dirs[i], name);
+		if (access(out, F_OK) == 0)
+			return true;
+		size_t used = strlen(tried);
+		snprintf(tried + used, sizeof tried - used, "%s%s", used ? ", " : "", out);
+	}
+	if (log_tried)
+		rei_info("audio: no PipeWire socket found (looked for %s)", tried[0] ? tried : name);
+	out[0] = '\0';
+	return false;
 }
 
 static bool connect_pw(struct rei_audio *a)
 {
-	if (!pw_socket_exists())
+	static bool logged;
+	char sock[600];
+	if (!find_pw_socket(sock, sizeof sock, !logged)) {
+		logged = true;   /* say it once, not every retry */
 		return false;
+	}
 	a->context = pw_context_new(a->loop, NULL, 0);
 	if (!a->context)
 		return false;
-	a->core = pw_context_connect(a->context, NULL, 0);
+	/* Name the socket explicitly: it may not be where libpipewire would look. */
+	struct pw_properties *props = pw_properties_new(PW_KEY_REMOTE_NAME, sock, NULL);
+	a->core = pw_context_connect(a->context, props, 0);   /* takes the properties */
+	if (a->core)
+		rei_info("audio: PipeWire socket %s", sock);
 	if (!a->core) {
 		pw_context_destroy(a->context);
 		a->context = NULL;
