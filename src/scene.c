@@ -7,6 +7,7 @@
 #include "toolbar.h"
 #include "popup.h"
 #include "confirm.h"
+#include "volpop.h"
 #include "runprompt.h"
 #include "tray.h"
 #include "xwayland.h"
@@ -40,6 +41,7 @@ struct rei_scene_snapshot *rei_scene_build(struct rei_server *s, uint64_t serial
 	rei_popup_emit(s, snap);
 	rei_prompt_emit(s, snap);
 	rei_confirm_emit(s, snap);
+	rei_volpop_emit(s, snap);
 	rei_tray_emit(s, snap);
 
 	const struct rei_cursor_image *cur = rei_cursor_default();

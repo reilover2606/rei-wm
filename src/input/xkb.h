@@ -36,6 +36,8 @@ void rei_xkb_destroy(struct rei_xkb *xkb);
 
 /* Feeds a key event (evdev keycode) to the state. Returns true if the
  * modifier or layout state changed and clients must be told. */
+/* The lock LEDs that should be lit: bit 0 Num Lock, bit 1 Caps Lock, bit 2 Scroll Lock (libinput's order). */
+unsigned rei_xkb_leds(const struct rei_xkb *xkb);
 bool rei_xkb_update_key(struct rei_xkb *xkb, uint32_t evdev_code, bool pressed);
 
 /* Effective REI_MOD_* bits. */

@@ -99,12 +99,18 @@ static void node_param(void *data, int seq, uint32_t id, uint32_t index, uint32_
 	if (id != SPA_PARAM_Props || !param)
 		return;
 
-	bool mute = false;
+	struct spa_pod *mute_pod = NULL;
 	struct spa_pod *vols = NULL;
 	if (spa_pod_parse_object(param, SPA_TYPE_OBJECT_Props, NULL,
-				 SPA_PROP_mute, SPA_POD_OPT_Bool(&mute),
+				 SPA_PROP_mute, SPA_POD_OPT_Pod(&mute_pod),
 				 SPA_PROP_channelVolumes, SPA_POD_OPT_Pod(&vols)) < 0)
 		return;
+	bool mute = s->muted;
+	/* Only a Props update that carries mute says anything about it; one without must not unmute us. */
+	if (mute_pod && spa_pod_is_bool(mute_pod))
+		spa_pod_get_bool(mute_pod, &mute);
+	if (mute != s->muted)
+		rei_info("audio: '%s' is now %s", s->name, mute ? "muted" : "unmuted");
 	s->muted = mute;
 	if (vols && spa_pod_is_array(vols)) {
 		uint32_t n = 0;
@@ -587,6 +593,7 @@ bool rei_audio_toggle_mute(struct rei_server *server)
 	struct sink *s = a ? current_sink(a) : NULL;
 	if (!s || !s->have_props)
 		return false;
+	rei_info("audio: toggling mute on '%s' (now %s)", s->name, s->muted ? "muted" : "unmuted");
 	set_props(s, false, 0, true, !s->muted);
 	s->muted = !s->muted;
 	changed(a);

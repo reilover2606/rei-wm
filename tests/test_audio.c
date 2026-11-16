@@ -198,15 +198,59 @@ int main(int argc, char **argv)
 	expect_volume(100, true, "mute for the picture");
 	sleep_ms(300);
 	struct ppm muted = screenshot();
-	int differing = 0;
-	for (int x = 600; x < 800; x++)
+	int differing = 0, minx = 800, maxx = 0;
+	for (int x = 600; x < 715; x++)
 		for (int y = 0; y < 28; y++)
-			differing += !near_px(&muted, x, y, with.rgb[(y * with.w + x) * 3],
-					      with.rgb[(y * with.w + x) * 3 + 1],
-					      with.rgb[(y * with.w + x) * 3 + 2], 0);
+			if (!near_px(&muted, x, y, with.rgb[(y * with.w + x) * 3],
+				     with.rgb[(y * with.w + x) * 3 + 1],
+				     with.rgb[(y * with.w + x) * 3 + 2], 0)) {
+				differing++;
+				minx = x < minx ? x : minx;
+				maxx = x > maxx ? x : maxx;
+			}
 	CHECK(differing > 20);  /* "100%" became "muted", in a dimmer colour */
 	free(with.rgb);
 	free(muted.rgb);
+
+	/* Clicking the widget opens the volume popup: a slider and a mute button. */
+	{
+		int wx = (minx + maxx) / 2, wy = 14;   /* the middle of what changed when it said "muted" */
+		char mv[128];
+		snprintf(mv, sizeof mv, "motion_abs %d %d\nbutton 272 1\nbutton 272 0\n", wx, wy);
+		inject_lines(mv);
+		sleep_ms(300);
+		CHECK(log_has("volume popup: x="));
+		char *log = slurp(g_log);
+		const char *at = strstr(log, "volume popup: x=");
+		int bx, by, bw, bh;
+		CHECK(at && sscanf(at, "volume popup: x=%d y=%d w=%d h=%d", &bx, &by, &bw, &bh) == 4);
+		free(log);
+		if (getenv("REI_SHOT_DIR")) {   /* for looking at, not for checking */
+			struct ppm pic = screenshot();
+			free(pic.rgb);
+			char cmd[400];
+			snprintf(cmd, sizeof cmd, "cp %s %s/volume-popup.ppm", g_shot, getenv("REI_SHOT_DIR"));
+			CHECK(system(cmd) == 0);
+		}
+		/* The slider track runs from x+62 to x+w-78: its middle is 50%. */
+		int mid = bx + 62 + (bw - 140) / 2, ty = by + bh / 2;
+		snprintf(mv, sizeof mv, "motion_abs %d %d\nbutton 272 1\nbutton 272 0\n", mid, ty);
+		inject_lines(mv);
+		expect_volume(50, true, "a click in the middle of the slider sets 50% (still muted)");
+		/* The speaker button, at the left of the popup, un-mutes. */
+		snprintf(mv, sizeof mv, "motion_abs %d %d\nbutton 272 1\nbutton 272 0\n", bx + 12 + 17, by + bh / 2);
+		inject_lines(mv);
+		expect_volume(50, false, "the speaker button un-mutes");
+		/* Dragging the slider follows the pointer. */
+		snprintf(mv, sizeof mv, "motion_abs %d %d\nbutton 272 1\nmotion_abs %d %d\nmotion_abs %d %d\nbutton 272 0\n",
+			 bx + 62 + 10, ty, bx + 62 + (bw - 140) * 8 / 10, ty, bx + 62 + (bw - 140) * 3 / 10, ty);
+		inject_lines(mv);
+		expect_volume(30, false, "dragging ends at the pointer: 30%");
+		/* A press outside closes it (and does nothing else). */
+		inject_lines("motion_abs 300 400\nbutton 272 1\nbutton 272 0\n");
+		sleep_ms(200);
+		expect_volume(30, false, "the outside press changed nothing");
+	}
 
 	inject_lines("key 125 1\nkey 42 1\nkey 18 1\nkey 18 0\nkey 42 0\nkey 125 0\n");
 	for (int t = 0;; t += 10) {

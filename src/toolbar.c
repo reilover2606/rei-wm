@@ -15,6 +15,7 @@
 #include "icons.h"
 #include "popup.h"
 #include "confirm.h"
+#include "volpop.h"
 #include "runprompt.h"
 #include "startmenu.h"
 #include "tray.h"
@@ -308,6 +309,25 @@ bool rei_toolbar_start_at(struct rei_server *s, double x, double y)
 	return along < sw;
 }
 
+void rei_toolbar_volume_click(struct rei_server *s)
+{
+	if (rei_volpop_is_open(s)) {
+		rei_volpop_close(s);
+		return;
+	}
+	struct rei_output *o = rei_toolbar_output_at(s, s->cursor_x, s->cursor_y);
+	if (!o)
+		return;
+	struct rei_bar_state st;
+	build_state(s, o, &st);
+	struct rei_rect v;
+	if (!rei_bar_volume_rect(&st, &v))
+		return;
+	struct rei_rect bar = bar_rect(s, o);
+	struct rei_rect anchor = { bar.x + v.x, bar.y + v.y, v.w, v.h };
+	rei_volpop_open(s, o, bar, s->config->toolbar_position, anchor);
+}
+
 bool rei_toolbar_mode_at(struct rei_server *s, double x, double y)
 {
 	struct rei_output *o = rei_toolbar_output_at(s, x, y);
@@ -590,6 +610,7 @@ void rei_toolbar_finish(struct rei_server *s)
 		event_free(s->clock_event);
 		s->clock_event = NULL;
 	}
+	rei_volpop_finish(s);
 	rei_confirm_finish(s);
 	rei_prompt_finish(s);
 	rei_startmenu_finish(s);

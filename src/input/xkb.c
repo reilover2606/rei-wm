@@ -106,6 +106,18 @@ void rei_xkb_destroy(struct rei_xkb *x)
 	free(x);
 }
 
+unsigned rei_xkb_leds(const struct rei_xkb *x)
+{
+	unsigned leds = 0;
+	if (xkb_state_led_name_is_active(x->state, XKB_LED_NAME_NUM) > 0)
+		leds |= 1;
+	if (xkb_state_led_name_is_active(x->state, XKB_LED_NAME_CAPS) > 0)
+		leds |= 2;
+	if (xkb_state_led_name_is_active(x->state, XKB_LED_NAME_SCROLL) > 0)
+		leds |= 4;
+	return leds;
+}
+
 bool rei_xkb_update_key(struct rei_xkb *x, uint32_t code, bool pressed)
 {
 	/* evdev keycodes are offset by 8 in xkb. */

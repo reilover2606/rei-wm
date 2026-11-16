@@ -251,3 +251,14 @@ session bus and open its window there. `[general] session_bus = "private"` makes
 bus for the programs it launches, so they open in rei-wm. The catch: that bus has none of the other desktop's
 services (portals, notifications, keyring). The default, `"inherit"`, changes nothing. (Firefox and most
 Wayland programs are unaffected; they do not use the bus to find an existing instance.)
+
+## Volume popup and keyboard LEDs
+
+- Click the volume text in the toolbar: a small panel opens with a **speaker button** (click: mute) and a
+  **slider** (click or drag to set the volume; the mouse wheel works over it too). It follows the volume
+  live, so the media keys move the slider. Click elsewhere or press Escape to close it. The slider spans
+  0 to `[audio] max_volume`.
+- **Caps/Num/Scroll Lock LEDs** are now lit by rei-wm (on the DRM backend, whoever reads the keyboard
+  owns its LEDs). The *mute* key's LED is different: the kernel lights it from the sound card's own
+  mute switch, so it follows only if PipeWire applies the mute to the hardware. The log shows
+  `audio: toggling mute on ...` and `audio: '...' is now muted/unmuted` to tell whether PipeWire accepted it.

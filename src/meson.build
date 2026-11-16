@@ -14,6 +14,7 @@ core_sources = files(
   'scene.c',
   'popup.c',
   'confirm.c',
+  'volpop.c',
   'sessionbus.c',
   'watchdog.c',
   'sysinfo.c',

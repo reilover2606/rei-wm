@@ -952,6 +952,103 @@ struct rei_pixbuf *rei_bar_prompt_render(const struct rei_prompt_state *st, int 
 	return pb;
 }
 
+/* ---- The volume popup ---- */
+
+void rei_bar_volpop_layout(struct rei_rect *button, struct rei_rect *track)
+{
+	*button = (struct rei_rect){ 12, (REI_VPOP_H - 34) / 2, 34, 34 };
+	*track = (struct rei_rect){ 62, REI_VPOP_H / 2 - 3, REI_VPOP_W - 62 - 78, 6 };
+}
+
+/* A speaker: a small box and a cone, then sound waves, or a cross when muted. */
+static void draw_speaker(cairo_t *cr, double cx, double cy, bool muted)
+{
+	cairo_move_to(cr, cx - 9, cy - 3);
+	cairo_line_to(cr, cx - 4, cy - 3);
+	cairo_line_to(cr, cx + 1, cy - 8);
+	cairo_line_to(cr, cx + 1, cy + 8);
+	cairo_line_to(cr, cx - 4, cy + 3);
+	cairo_line_to(cr, cx - 9, cy + 3);
+	cairo_close_path(cr);
+	cairo_fill(cr);
+	cairo_set_line_width(cr, 1.8);
+	if (!muted) {
+		cairo_arc(cr, cx + 1, cy, 5, -0.9, 0.9);
+		cairo_stroke(cr);
+		cairo_arc(cr, cx + 1, cy, 9, -0.9, 0.9);
+		cairo_stroke(cr);
+	} else {
+		cairo_move_to(cr, cx + 5, cy - 4);
+		cairo_line_to(cr, cx + 12, cy + 4);
+		cairo_move_to(cr, cx + 12, cy - 4);
+		cairo_line_to(cr, cx + 5, cy + 4);
+		cairo_stroke(cr);
+	}
+}
+
+struct rei_pixbuf *rei_bar_volpop_render(const struct rei_volpop_state *st, int *margin_out)
+{
+	int m = shadow_margin(&st->box);
+	*margin_out = m;
+	int scale = st->scale < 1 ? 1 : st->scale;
+	int pw = (REI_VPOP_W + 2 * m) * scale, ph = (REI_VPOP_H + 2 * m) * scale;
+	struct rei_pixbuf *pb = rei_pixbuf_create(pw, ph, false);
+	if (!pb)
+		return NULL;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw, ph);
+	cairo_t *cr = cairo_create(surface);
+	cairo_scale(cr, scale, scale);
+	draw_box(cr, &st->box, m, m, REI_VPOP_W, REI_VPOP_H, st->box.color, 1.0);
+
+	struct rei_rect button, track;
+	rei_bar_volpop_layout(&button, &track);
+	const struct rei_style *rs = &st->row;
+	uint32_t fg = rs->text_color;
+
+	/* The speaker button. */
+	if (st->hover == 1) {
+		struct rei_style hov = *rs;
+		hov.shadow.opacity = 0;
+		hov.glow.size = 0;
+		draw_box(cr, &hov, m + button.x, m + button.y, button.w, button.h, rs->active_color, 1.0);
+	}
+	set_color(cr, st->muted ? rs->inactive_text_color : fg);
+	draw_speaker(cr, m + button.x + button.w / 2.0, m + button.y + button.h / 2.0, st->muted);
+
+	/* The slider: a track, the filled part up to the volume, and a knob. */
+	double f = st->max > 0 ? (double)st->percent / st->max : 0;
+	f = f < 0 ? 0 : f > 1 ? 1 : f;
+	double tx = m + track.x, ty = m + track.y, tw = track.w, th = track.h;
+	set_rgba(cr, rei_bar_mix(st->box.color, fg, 0.22), 1.0);
+	rounded_rect(cr, tx, ty, tw, th, th / 2);
+	cairo_fill(cr);
+	set_rgba(cr, st->muted ? rs->inactive_text_color : rs->active_color, 1.0);
+	rounded_rect(cr, tx, ty, fmax(th, tw * f), th, th / 2);
+	cairo_fill(cr);
+	double kx = tx + tw * f;
+	set_rgba(cr, st->muted ? rs->inactive_text_color : fg, 1.0);
+	cairo_arc(cr, kx, ty + th / 2, st->hover == 2 ? 9 : 8, 0, 6.2831853);
+	cairo_fill(cr);
+
+	/* The percentage. */
+	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
+	char text[16];
+	snprintf(text, sizeof text, "%d%%", st->percent);   /* dimmed when muted; the speaker shows the cross */
+	set_color(cr, st->muted ? rs->inactive_text_color : fg);
+	draw_centered(cr, font, text, m + REI_VPOP_W - 33, m + REI_VPOP_H / 2.0);
+	pango_font_description_free(font);
+
+	cairo_destroy(cr);
+	cairo_surface_flush(surface);
+	const uint8_t *src = cairo_image_surface_get_data(surface);
+	int stride = cairo_image_surface_get_stride(surface);
+	for (int y = 0; y < pb->height; y++)
+		memcpy(pb->data + (size_t)y * (size_t)pb->width * 4, src + (size_t)y * (size_t)stride,
+		       (size_t)pb->width * 4);
+	cairo_surface_destroy(surface);
+	return pb;
+}
+
 /* ---- The confirmation dialog ---- */
 
 void rei_bar_confirm_buttons(struct rei_rect out[2])
