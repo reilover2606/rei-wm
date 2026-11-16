@@ -52,6 +52,11 @@ struct rei_scene_snapshot {
 
 	/* What in it changes by itself, so the event thread knows when to have it drawn again: the blink periods
 	 * in use (seconds), and whether a shader that reads the clock is in it (redrawn continuously). */
+	/* Everything before drawable `blur_from` is drawn, then blurred by `blur_radius` logical pixels and darkened
+	 * by `blur_dim`, and what follows is drawn over it sharp (the message stack view). 0 radius: no blur. */
+	size_t blur_from;
+	float blur_radius, blur_dim;
+
 	float blink[REI_SNAPSHOT_MAX_BLINK];
 	int n_blink;
 	bool animated;

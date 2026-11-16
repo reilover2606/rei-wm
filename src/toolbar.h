@@ -221,6 +221,25 @@ struct rei_confirm_state {
 void rei_bar_confirm_buttons(struct rei_rect out[2]);
 struct rei_pixbuf *rei_bar_confirm_render(const struct rei_confirm_state *state, int *margin);
 
+/* ---- The music controls' picture (MPD) ---- */
+
+#define REI_MPDP_W 360
+#define REI_MPDP_H 100
+
+struct rei_mpd_panel_state {
+	char label[300];   /* "Now playing: Artist - Title", or why there is nothing to control */
+	bool running;      /* MPD answered: play, pause and skip; otherwise one "Start MPD" button */
+	int mode;          /* 0 stopped, 1 playing, 2 paused */
+	int hover;         /* the button under the pointer, or -1 */
+	int scale;
+	char font[96];
+	struct rei_style box, button;
+};
+
+/* The buttons' rectangles in the box (logical, relative to it): play, pause, skip; or just "Start MPD". Returns how many. */
+int rei_bar_mpd_buttons(bool running, struct rei_rect out[3]);
+struct rei_pixbuf *rei_bar_mpd_render(const struct rei_mpd_panel_state *state, int *margin);
+
 /* ---- The volume popup's picture ---- */
 
 #define REI_VPOP_W 290

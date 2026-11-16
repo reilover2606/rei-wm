@@ -64,6 +64,7 @@ private:
 	QWidget *buildStartMenuTab();
 	QWidget *buildAudioTab();
 	QWidget *buildMessagesTab();
+	QWidget *buildMusicTab();
 	QWidget *buildThemeTab();
 	QWidget *buildCursorTab();
 	void updateCursorPreview();

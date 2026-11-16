@@ -11,6 +11,8 @@
 #include <unistd.h>
 
 #include "input/actions.h"
+#include "input/input.h"
+#include "mpd.h"
 #include "output.h"
 #include "server.h"
 #include "toolbar.h"
@@ -61,6 +63,14 @@ struct rei_messages {
 	int panel_w, panel_h, panel_scale;
 	const void *panel_cfg;
 	struct wl_list captures;
+
+	/* The music controls in the stack view (see mpd.h). */
+	struct rei_pixbuf *mpd_pix;
+	struct rei_mpd_panel_state mpd_drawn;
+	const void *mpd_cfg;
+	int mpd_margin;
+	struct rei_rect mpd_box;   /* as last drawn, global coordinates */
+	int mpd_hover;
 };
 
 static int64_t now_ms(void)
@@ -75,6 +85,7 @@ static struct rei_messages *state_of(struct rei_server *s)
 	if (!s->messages) {
 		s->messages = rei_xcalloc(1, sizeof *s->messages);
 		wl_list_init(&s->messages->captures);
+		s->messages->mpd_hover = -1;
 	}
 	return s->messages;
 }
@@ -319,6 +330,78 @@ static void ensure_picture(struct rei_server *s, struct msg *msg, int scale)
 	msg->pix_cfg = cfg;
 }
 
+/* ---- The music controls ---- */
+
+static void mpd_state_for(struct rei_server *s, struct rei_mpd_panel_state *st, int scale, int hover)
+{
+	const struct rei_config *cfg = s->config;
+	struct rei_mpd_info info;
+	rei_mpd_info_get(s, &info);
+	memset(st, 0, sizeof *st);
+	st->running = info.connected;
+	st->mode = info.state == REI_MPD_PLAYING ? 1 : info.state == REI_MPD_PAUSED ? 2 : 0;
+	if (!info.connected)
+		snprintf(st->label, sizeof st->label, "MPD is not running");
+	else if (!info.title[0])
+		snprintf(st->label, sizeof st->label, "Now playing: nothing");
+	else
+		snprintf(st->label, sizeof st->label, "Now playing: %s%s", info.title,
+			 info.state == REI_MPD_PAUSED ? " (paused)" : "");
+	st->hover = hover;
+	st->scale = scale;
+	snprintf(st->font, sizeof st->font, "%s", cfg->messages_font);
+	st->box = cfg->theme.e[REI_ELEM_MPD];
+	st->button = cfg->theme.e[REI_ELEM_START_BUTTON];
+}
+
+static void emit_mpd(struct rei_server *s, struct rei_scene_snapshot *snap, struct rei_rect usable, int scale,
+		     const struct rei_rect *avoid)
+{
+	struct rei_messages *m = s->messages;
+	const struct rei_config *cfg = s->config;
+	if (!cfg->mpd_enabled)
+		return;
+	struct rei_mpd_panel_state st;
+	mpd_state_for(s, &st, scale, m->mpd_hover);
+	if (!m->mpd_pix || m->mpd_cfg != cfg || memcmp(&st, &m->mpd_drawn, sizeof st) != 0) {
+		rei_pixbuf_unref(m->mpd_pix);
+		m->mpd_pix = rei_bar_mpd_render(&st, &m->mpd_margin);
+		m->mpd_drawn = st;
+		m->mpd_cfg = cfg;
+	}
+	/* Bottom centre, pushed aside only as far as it takes not to sit on the message column. */
+	int x = usable.x + (usable.w - REI_MPDP_W) / 2, y = usable.y + usable.h - MARGIN - REI_MPDP_H;
+	if (avoid && x < avoid->x + avoid->w && x + REI_MPDP_W > avoid->x) {
+		int left = avoid->x - GAP * 2 - REI_MPDP_W, right = avoid->x + avoid->w + GAP * 2;
+		if (avoid->x + avoid->w / 2 > usable.x + usable.w / 2)   /* the column is on the right: go left */
+			x = left >= usable.x ? left : x;
+		else
+			x = right + REI_MPDP_W <= usable.x + usable.w ? right : x;
+	}
+	m->mpd_box = (struct rei_rect){ x, y, REI_MPDP_W, REI_MPDP_H };
+	if (m->mpd_pix)
+		rei_snapshot_add(snap, m->mpd_pix, (float)(x - m->mpd_margin), (float)(y - m->mpd_margin),
+				 (float)(REI_MPDP_W + 2 * m->mpd_margin), (float)(REI_MPDP_H + 2 * m->mpd_margin), false);
+}
+
+/* The button at (x, y) of the controls: its index (see rei_bar_mpd_buttons), or -1. */
+static int mpd_button_at(const struct rei_server *s, double x, double y)
+{
+	const struct rei_messages *m = s->messages;
+	if (!m || !s->config->mpd_enabled || m->mpd_box.w == 0)
+		return -1;
+	struct rei_mpd_info info;
+	rei_mpd_info_get(s, &info);
+	struct rei_rect b[3];
+	int n = rei_bar_mpd_buttons(info.connected, b);
+	for (int i = 0; i < n; i++) {
+		double bx = m->mpd_box.x + b[i].x, by = m->mpd_box.y + b[i].y;
+		if (x >= bx && y >= by && x < bx + b[i].w && y < by + b[i].h)
+			return i;
+	}
+	return -1;
+}
+
 /* Is any message still within its time? */
 static bool any_live(struct rei_server *s, int64_t now)
 {
@@ -357,7 +440,7 @@ void rei_msg_emit(struct rei_server *s, struct rei_scene_snapshot *snap)
 {
 	struct rei_messages *m = s->messages;
 	const struct rei_config *cfg = s->config;
-	if (!m || m->n == 0 || !cfg->messages_enabled)
+	if (!m || !cfg->messages_enabled || (m->n == 0 && !m->stack_open))
 		return;
 	const struct rei_output *o = target_output(s);
 	if (!o)
@@ -369,10 +452,17 @@ void rei_msg_emit(struct rei_server *s, struct rei_scene_snapshot *snap)
 	float bottom = (float)(usable.y + usable.h - MARGIN);
 
 	if (m->stack_open) {
+		/* Everything under this layer is blurred (see the snapshot), and nothing reaches it: the input
+		 * goes to the stack view and the music controls only. */
+		snap->blur_from = snap->n_items;
+		snap->blur_radius = (float)cfg->messages_blur_radius;
+		snap->blur_dim = (float)cfg->messages_blur_dim;
 		/* Everything, at full strength, in a column with a backdrop; newest at the bottom. */
 		int pw = col_w + 2 * PANEL_PAD, ph = usable.h - 2 * MARGIN;
-		if (ph < 80)
+		if (ph < 80) {
+			emit_mpd(s, snap, usable, scale, NULL);
 			return;
+		}
 		float px = cfg->messages_right ? (float)(usable.x + usable.w - MARGIN - pw) : (float)(usable.x + MARGIN);
 		float py = (float)(usable.y + MARGIN);
 		m->panel = (struct rei_rect){ (int)px, (int)py, pw, ph };
@@ -404,6 +494,9 @@ void rei_msg_emit(struct rei_server *s, struct rei_scene_snapshot *snap)
 			emit_one(snap, msg, px + PANEL_PAD, y, 1.0f);
 			y -= GAP;
 		}
+		/* The music controls last, so they are over the column if the screen is too narrow for both. */
+		struct rei_rect column = { (int)px, (int)py, pw, ph };
+		emit_mpd(s, snap, usable, scale, &column);
 		return;
 	}
 
@@ -455,8 +548,10 @@ void rei_msg_toggle_stack(struct rei_server *s)
 	struct rei_messages *m = state_of(s);
 	m->stack_open = !m->stack_open;
 	m->scroll = 0;
+	m->mpd_hover = -1;
 	if (m->stack_open)
 		tick_start(s);
+	rei_input_refocus(s);   /* the pointer leaves whatever window it was over, or returns to it */
 	rei_server_schedule_damage(s);
 }
 
@@ -469,6 +564,8 @@ void rei_msg_stack_close(struct rei_server *s)
 {
 	if (s->messages && s->messages->stack_open) {
 		s->messages->stack_open = false;
+		s->messages->mpd_hover = -1;
+		rei_input_refocus(s);
 		rei_server_schedule_damage(s);
 	}
 }
@@ -479,6 +576,48 @@ bool rei_msg_stack_at(const struct rei_server *s, double x, double y)
 		return false;
 	const struct rei_rect *p = &s->messages->panel;
 	return x >= p->x && y >= p->y && x < p->x + p->w && y < p->y + p->h;
+}
+
+void rei_msg_stack_motion(struct rei_server *s, double x, double y)
+{
+	struct rei_messages *m = s->messages;
+	if (!m || !m->stack_open)
+		return;
+	int h = mpd_button_at(s, x, y);
+	if (h != m->mpd_hover) {
+		m->mpd_hover = h;
+		rei_server_schedule_damage(s);
+	}
+}
+
+int rei_msg_stack_hover(const struct rei_server *s)
+{
+	return s->messages && s->messages->stack_open ? s->messages->mpd_hover : -1;
+}
+
+void rei_msg_stack_press(struct rei_server *s, double x, double y)
+{
+	struct rei_messages *m = s->messages;
+	if (!m || !m->stack_open)
+		return;
+	int b = mpd_button_at(s, x, y);
+	if (b >= 0) {
+		struct rei_mpd_info info;
+		rei_mpd_info_get(s, &info);
+		if (!info.connected)
+			rei_mpd_launch(s);
+		else if (b == 0)
+			rei_mpd_play(s);
+		else if (b == 1)
+			rei_mpd_pause(s);
+		else
+			rei_mpd_next(s);
+		return;
+	}
+	bool on_controls = m->mpd_box.w > 0 && s->config->mpd_enabled && x >= m->mpd_box.x - 8 &&
+			   y >= m->mpd_box.y - 8 && x < m->mpd_box.x + m->mpd_box.w + 8 && y < m->mpd_box.y + m->mpd_box.h + 8;
+	if (!on_controls && !rei_msg_stack_at(s, x, y))
+		rei_msg_stack_close(s);   /* a click on the blurred background puts it away */
 }
 
 void rei_msg_stack_scroll(struct rei_server *s, double value)
@@ -508,6 +647,7 @@ void rei_msg_finish(struct rei_server *s)
 		msg_free(&m->items[i]);
 	free(m->items);
 	rei_pixbuf_unref(m->panel_pix);
+	rei_pixbuf_unref(m->mpd_pix);
 	free(m);
 	s->messages = NULL;
 }

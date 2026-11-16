@@ -42,6 +42,16 @@ struct fx_cache {
 	bool used;
 };
 
+/* What blurring the screen needs: a copy of it, and two quarter-size targets to ping-pong between. */
+struct blur_state {
+	GLuint program;
+	GLint u_rect, u_view, u_flip, u_vscale, u_tex, u_step, u_lod;
+	GLuint src_tex;
+	int32_t src_w, src_h;
+	GLuint tex[2], fbo[2];
+	int32_t w, h;   /* the small targets' size */
+};
+
 struct rei_gles_buffer {
 	GLuint fbo, rbo;
 	int32_t width, height;
@@ -66,6 +76,7 @@ struct rei_gles {
 	struct fx_cache *fxc;
 	size_t n_fxc, cap_fxc;
 	GLuint cur_fbo;   /* the frame being drawn */
+	struct blur_state blur;
 	GLuint vao;
 
 	GLuint fbo, rbo;  /* The renderer's own target. */
@@ -358,6 +369,12 @@ void rei_gles_destroy(struct rei_gles *g)
 			glDeleteTextures(1, &g->fxc[i].tex);
 			glDeleteFramebuffers(1, &g->fxc[i].fbo);
 		}
+		if (g->blur.program) {
+			glDeleteProgram(g->blur.program);
+			glDeleteTextures(1, &g->blur.src_tex);
+			glDeleteTextures(2, g->blur.tex);
+			glDeleteFramebuffers(2, g->blur.fbo);
+		}
 		if (g->vao)
 			glDeleteVertexArrays(1, &g->vao);
 		if (g->fbo)
@@ -622,6 +639,126 @@ static GLuint texture_for_dmabuf(struct rei_gles *g, const struct rei_dmabuf *d)
 	return e->tex;
 }
 
+/* ---- Blurring what has been drawn (the message stack view puts a blurred, darkened screen under itself) ---- */
+
+static const char *blur_fragment_src =
+	"#version 300 es\n"
+	"precision highp float;\n"
+	"in vec2 v_uv;\n"
+	"uniform sampler2D u_tex;\n"
+	"uniform vec2 u_step;\n"   /* the distance between taps, in texture coordinates */
+	"uniform float u_lod;\n"   /* which size of the mipmapped copy to read (2: a quarter, properly averaged) */
+	"out vec4 o_color;\n"
+	"void main() {\n"
+	"  vec4 c = textureLod(u_tex, v_uv, u_lod) * 0.2270270270;\n"
+	"  c += (textureLod(u_tex, v_uv + u_step, u_lod) + textureLod(u_tex, v_uv - u_step, u_lod)) * 0.1945945946;\n"
+	"  c += (textureLod(u_tex, v_uv + 2.0 * u_step, u_lod) + textureLod(u_tex, v_uv - 2.0 * u_step, u_lod)) * 0.1216216216;\n"
+	"  c += (textureLod(u_tex, v_uv + 3.0 * u_step, u_lod) + textureLod(u_tex, v_uv - 3.0 * u_step, u_lod)) * 0.0540540541;\n"
+	"  c += (textureLod(u_tex, v_uv + 4.0 * u_step, u_lod) + textureLod(u_tex, v_uv - 4.0 * u_step, u_lod)) * 0.0162162162;\n"
+	"  o_color = c;\n"
+	"}\n";
+
+static bool blur_ready(struct rei_gles *g, int32_t w, int32_t h)
+{
+	struct blur_state *b = &g->blur;
+	if (!b->program) {
+		b->program = link_program(blur_fragment_src);
+		if (!b->program)
+			return false;
+		b->u_rect = glGetUniformLocation(b->program, "u_rect");
+		b->u_view = glGetUniformLocation(b->program, "u_view");
+		b->u_flip = glGetUniformLocation(b->program, "u_flip");
+		b->u_vscale = glGetUniformLocation(b->program, "u_vscale");
+		b->u_tex = glGetUniformLocation(b->program, "u_tex");
+		b->u_step = glGetUniformLocation(b->program, "u_step");
+		b->u_lod = glGetUniformLocation(b->program, "u_lod");
+		glGenTextures(1, &b->src_tex);
+		glGenTextures(2, b->tex);
+		glGenFramebuffers(2, b->fbo);
+	}
+	if (b->src_w != w || b->src_h != h) {
+		glBindTexture(GL_TEXTURE_2D, b->src_tex);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		b->src_w = w;
+		b->src_h = h;
+		b->w = w / 4 > 0 ? w / 4 : 1;
+		b->h = h / 4 > 0 ? h / 4 : 1;
+		for (int i = 0; i < 2; i++) {
+			glBindTexture(GL_TEXTURE_2D, b->tex[i]);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, b->w, b->h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glBindFramebuffer(GL_FRAMEBUFFER, b->fbo[i]);
+			glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, b->tex[i], 0);
+			if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+				rei_error("gles: cannot create the blur targets");
+				b->src_w = b->src_h = 0;
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+/* One separable pass: `src` into target `dst` (0: the small target index), taps `step` apart (texture units). */
+static void blur_pass(struct rei_gles *g, GLuint src, int dst, float sx, float sy, float lod)
+{
+	struct blur_state *b = &g->blur;
+	glUniform1f(b->u_lod, lod);
+	glBindFramebuffer(GL_FRAMEBUFFER, b->fbo[dst]);
+	glViewport(0, 0, b->w, b->h);
+	glBindTexture(GL_TEXTURE_2D, src);
+	glUniform2f(b->u_view, (float)b->w, (float)b->h);
+	glUniform4f(b->u_rect, 0, 0, (float)b->w, (float)b->h);
+	glUniform2f(b->u_step, sx, sy);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
+
+/* Blurs what is in the frame so far by `radius` pixels and darkens it. */
+static void blur_frame(struct rei_gles *g, const struct rei_gles_target *t, float radius, float dim)
+{
+	if (!blur_ready(g, t->width, t->height))
+		return;
+	struct blur_state *b = &g->blur;
+	glDisable(GL_SCISSOR_TEST);
+	glDisable(GL_BLEND);
+	/* A copy of the frame. */
+	glBindFramebuffer(GL_FRAMEBUFFER, g->cur_fbo);
+	glBindTexture(GL_TEXTURE_2D, b->src_tex);
+	glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, t->width, t->height);
+	glGenerateMipmap(GL_TEXTURE_2D);   /* level 2 is the frame at a quarter size, averaged (not sampled) */
+
+	glUseProgram(b->program);
+	glUniform1i(b->u_tex, 0);
+	glUniform1f(b->u_flip, 0.0f);
+	glUniform1f(b->u_vscale, 1.0f);
+	/* Two rounds of a horizontal and a vertical pass at a quarter of the size, the taps `radius / 16` small
+	 * texels (`radius / 4` pixels) apart, so the nine taps reach about `radius` pixels either way. */
+	float r = radius > 1 ? radius : 1;
+	blur_pass(g, b->src_tex, 0, (r / 16.0f) / (float)b->w, 0, 2.0f);
+	blur_pass(g, b->tex[0], 1, 0, (r / 16.0f) / (float)b->h, 0.0f);
+	blur_pass(g, b->tex[1], 0, (r / 16.0f) / (float)b->w, 0, 0.0f);
+	blur_pass(g, b->tex[0], 1, 0, (r / 16.0f) / (float)b->h, 0.0f);
+
+	/* Back onto the frame, enlarged, darkened. */
+	glBindFramebuffer(GL_FRAMEBUFFER, g->cur_fbo);
+	glViewport(0, 0, t->width, t->height);
+	glUseProgram(g->program);
+	glBindTexture(GL_TEXTURE_2D, b->tex[1]);
+	glUniform4f(g->u_rect, 0, 0, (float)t->width, (float)t->height);
+	glUniform1f(g->u_opaque, 1.0f);
+	glUniform1f(g->u_flip, 0.0f);
+	glUniform1f(g->u_vscale, 1.0f);
+	glUniform1f(g->u_alpha, 1.0f - dim);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
+
 /* Frees textures whose buffers left the scene. */
 static void evict_unused(struct rei_gles *g)
 {
@@ -866,8 +1003,25 @@ bool rei_gles_draw_into(struct rei_gles *g, const struct rei_scene_snapshot *sna
 	glUniform2f(g->u_view, (float)t->width, (float)t->height);
 	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
-	for (size_t i = 0; i < snap->n_items; i++)
+	for (size_t i = 0; i < snap->n_items; i++) {
+		if (i == snap->blur_from && snap->blur_radius > 0) {
+			blur_frame(g, t, snap->blur_radius * (float)t->scale, snap->blur_dim);
+			glUseProgram(g->program);
+			glBindVertexArray(g->vao);
+			glActiveTexture(GL_TEXTURE0);
+			glUniform1i(g->u_tex, 0);
+			glUniform2f(g->u_view, (float)t->width, (float)t->height);
+			glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+			glEnable(GL_BLEND);
+		}
 		draw_one(g, &snap->items[i], t);
+	}
+	if (snap->blur_radius > 0 && snap->blur_from >= snap->n_items) {   /* nothing on top of it (an empty view) */
+		blur_frame(g, t, snap->blur_radius * (float)t->scale, snap->blur_dim);
+		glUseProgram(g->program);
+		glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+		glEnable(GL_BLEND);
+	}
 
 	/* The software cursor goes last, on outputs that have no hardware one. */
 	if (t->draw_cursor && snap->cursor.pix) {

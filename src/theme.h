@@ -86,6 +86,7 @@ enum rei_element {
 	REI_ELEM_SYSINFO,           /* the CPU/RAM box: color, text_color, shape, border */
 	REI_ELEM_DIALOG,            /* confirmation dialogs: the box (buttons use start_button) */
 	REI_ELEM_BATTERY,           /* the battery icon: color (level), active_color (charging), inactive_color (low) */
+	REI_ELEM_MPD,               /* the music controls in the message stack view (their buttons use start_button) */
 	REI_ELEM_WINDOW_TEXT,       /* not rei-wm's own: the windows of the programs in `apps` (terminals), shaded by a
 	                             * window shader. Only the text effects (glow, blink), apps, shader and glow threshold apply */
 	REI_ELEM_COUNT,

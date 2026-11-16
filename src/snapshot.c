@@ -22,6 +22,9 @@ struct rei_scene_snapshot *rei_snapshot_clone(const struct rei_scene_snapshot *f
 	s->items = rei_xcalloc(from->n_items ? from->n_items : 1, sizeof *s->items);
 	s->n_items = s->cap_items = from->n_items;
 	memcpy(s->items, from->items, from->n_items * sizeof *s->items);
+	s->blur_from = from->blur_from;
+	s->blur_radius = from->blur_radius;
+	s->blur_dim = from->blur_dim;
 	memcpy(s->blink, from->blink, sizeof s->blink);
 	s->n_blink = from->n_blink;
 	s->animated = from->animated;

@@ -42,6 +42,13 @@ struct rei_config {
 	bool session_bus_private;  /* [general] session_bus = "private": launched programs get their own D-Bus session bus. */
 	bool focus_follows_mouse;  /* Moving the pointer onto a window focuses it. */
 
+	/* [mpd] */
+	bool mpd_enabled;
+	char *mpd_host;            /* "" = $MPD_HOST, else the default socket, else localhost */
+	int32_t mpd_port;
+	char *mpd_start_command;   /* run by the controls' "Start MPD" button */
+	bool mpd_announce;         /* a new song is announced in the message stack */
+
 	/* [cursor] */
 	char *cursor_theme;        /* An XCursor theme's name; "" = the system's default. */
 	int32_t cursor_size;       /* Logical pixels. */
@@ -99,6 +106,8 @@ struct rei_config {
 	int messages_width;             /* logical width of the message column, pixels */
 	int messages_history;           /* messages kept for the stack view */
 	char *messages_font;            /* Pango font description */
+	int messages_blur_radius;       /* the screen under the stack view (Mod+n) is blurred this much, logical pixels; 0 = not */
+	double messages_blur_dim;       /* ...and darkened by this much (0..1) */
 	char *start_run_font;           /* Pango font of the Run prompt. */
 	struct rei_shortcut_config *shortcuts;
 	size_t n_shortcuts;

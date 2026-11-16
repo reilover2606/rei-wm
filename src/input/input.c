@@ -19,6 +19,7 @@
 #include "backend/backend.h"
 #include "popup.h"
 #include "confirm.h"
+#include "mpd.h"
 #include "msgbuf.h"
 #include "runprompt.h"
 #include "volpop.h"
@@ -294,6 +295,19 @@ void rei_input_key(struct rei_server *server, uint32_t time_ms, uint32_t code, b
 		return;  /* The press was consumed, so its release is too. */
 	}
 
+	/* The message stack view (Mod+n) is the top layer: no key reaches a window while it is open. Its own
+	 * keys: Space plays or pauses the music. (Releases of keys pressed before it opened still go through, so
+	 * nothing stays stuck down.) */
+	if (pressed && rei_msg_stack_open(server)) {
+		set_add(in->swallowed, &in->n_swallowed, REI_MAX_PRESSED, code);
+		if (rei_xkb_sym(in->xkb, code) == XKB_KEY_space)
+			rei_mpd_toggle(server);
+		if (mods_changed && in->keyboard_focus)
+			rei_seat_keyboard_modifiers(server->seat, in->keyboard_focus);   /* (modifiers only: the state stays in step) */
+		rei_server_schedule_flush(server);
+		return;
+	}
+
 	if (!in->keyboard_focus)
 		return;
 	rei_seat_keyboard_key(server->seat, in->keyboard_focus, time_ms, code, pressed);
@@ -423,6 +437,16 @@ static void update_pointer(struct rei_input *in, uint32_t time_ms, bool send_mot
 		return;
 	}
 
+	/* The message stack view is the top layer: the pointer belongs to it, over the whole screen. */
+	if (rei_msg_stack_open(s)) {
+		set_pointer_focus(in, NULL, 0, 0);
+		rei_toolbar_set_hover(s, NULL, 0);
+		rei_wm_set_notch_hover(s, NULL, REI_NOTCH_NONE);
+		rei_tray_hover_clear(s);
+		rei_msg_stack_motion(s, s->cursor_x, s->cursor_y);
+		return;
+	}
+
 	/* The notches belong to the compositor: over one, no client has the pointer. */
 	struct rei_view *nv = NULL;
 	enum rei_notch_part part = REI_NOTCH_NONE;
@@ -502,6 +526,19 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 	if (pressed ? !set_add(in->buttons, &in->n_buttons, REI_MAX_BUTTONS, button)
 		    : !set_remove(in->buttons, &in->n_buttons, button))
 		return;
+
+	if (pressed && rei_msg_stack_open(s)) {
+		/* The top layer takes every press: a button, or a click on the blurred background. Its release is
+		 * swallowed like a toolbar press's. (A release of a press that was a client's before the view
+		 * opened still goes to that client, so no button stays held down.) */
+		rei_msg_stack_press(s, s->cursor_x, s->cursor_y);
+		in->bar_press = true;
+		in->bar_press_ws = 0;
+		in->bar_press_volume = false;
+		in->bar_press_tray = -1;
+		rei_server_schedule_flush(s);
+		return;
+	}
 
 	if (pressed && rei_confirm_is_open(s)) {
 		rei_confirm_press(s, s->cursor_x, s->cursor_y);
@@ -749,9 +786,10 @@ void rei_input_pointer_axis(struct rei_server *s, uint32_t time_ms, bool horizon
 	if (!in || in->move_view || in->resize_view || in->notch_press != REI_NOTCH_NONE || in->bar_press)
 		return;
 
-	/* The wheel over the message stack scrolls it. */
-	if (!horizontal && value != 0 && rei_msg_stack_at(s, s->cursor_x, s->cursor_y)) {
-		rei_msg_stack_scroll(s, value);
+	/* The wheel over the message stack scrolls it; with it open nothing else gets the wheel. */
+	if (rei_msg_stack_open(s)) {
+		if (!horizontal && value != 0 && rei_msg_stack_at(s, s->cursor_x, s->cursor_y))
+			rei_msg_stack_scroll(s, value);
 		return;
 	}
 

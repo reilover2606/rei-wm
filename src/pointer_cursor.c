@@ -11,6 +11,7 @@
 #include "config.h"
 #include "desktop.h"
 #include "input/input.h"
+#include "msgbuf.h"
 #include "output.h"
 #include "popup.h"
 #include "proto/surface.h"
@@ -95,6 +96,10 @@ static enum rei_cursor_shape ui_shape(struct rei_server *s)
 		return REI_SHAPE_GRABBING;
 	if (in && in->resize_view)
 		return resize_shape(in->resize_edges);
+
+	/* The message stack view covers everything: the pointer is the compositor's, a hand over a music button. */
+	if (rei_msg_stack_open(s))
+		return rei_msg_stack_hover(s) >= 0 ? REI_SHAPE_POINTER : REI_SHAPE_DEFAULT;
 
 	/* Modal and floating things first: they are above whatever window the pointer is over. */
 	if (rei_confirm_is_open(s))
