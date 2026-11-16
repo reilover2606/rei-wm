@@ -100,3 +100,13 @@ ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 ./build-asan/src/rei-wm --backend d
 ```
 
 then do whatever made it crash and send `rei-asan.log`. (It runs a little slower; that is expected.)
+
+## When the screen freezes
+
+The DRM backend runs a watchdog: if the event loop stops for 6 seconds (`REI_WATCHDOG_SECONDS`, 0 = off) it
+prints every thread's state, the kernel function it is waiting in, and a backtrace of each thread to stderr,
+then exits so the console comes back. Run with `2> rei.log` and send the end of the log. If the screen freezes
+and *no* watchdog report appears, the whole machine (usually the GPU or kernel) stalled; then
+`journalctl -k -b -1 | grep -iE "i915|drm|gpu hang"` after the next boot is the useful evidence.
+Bisecting knobs: `REI_DRM_NO_SCANOUT=1` (no direct scanout of client buffers), `REI_DRM_NO_HW_CURSOR=1`,
+`REI_DRM_LINEAR=1` (plain linear scanout buffers instead of tiled/compressed ones).

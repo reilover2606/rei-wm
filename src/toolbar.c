@@ -137,6 +137,7 @@ static void build_state_for(struct rei_server *s, struct rei_output *o, const st
 		for (size_t i = 0; i < set.n_groups; i++) {
 			struct rei_bar_tray_item *it = &st->tray[st->n_tray++];
 			snprintf(it->label, sizeof it->label, "%s", set.groups[i].label);
+			rei_utf8_trim(it->label);
 			it->count = set.groups[i].count;
 			it->active = set.groups[i].active;
 			it->minimized = set.groups[i].minimized;

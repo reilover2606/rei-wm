@@ -66,6 +66,7 @@ static bool view_wants_fullscreen(const struct rei_view *v)
 
 void rei_wm_close_view(struct rei_view *v)
 {
+	rei_info("close requested: \"%s\"", rei_view_title(v));
 	if (v->xwin)
 		rei_xwindow_close(v->xwin);
 	else
@@ -451,6 +452,7 @@ void rei_view_map(struct rei_view *v)
 void rei_view_destroy(struct rei_view *v)
 {
 	struct rei_server *s = v->server;
+	rei_info("window destroyed: \"%s\"", rei_view_title(v));
 	if (s->input) {
 		if (s->input->move_view == v)
 			s->input->move_view = NULL;

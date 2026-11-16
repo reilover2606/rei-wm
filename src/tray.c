@@ -181,9 +181,11 @@ void rei_tray_collect(struct rei_server *s, const struct rei_output *o, const st
 		const char *title = g->n_views ? rei_view_title(g->views[0]) : "";
 		if (g->count == 1) {
 			snprintf(g->label, sizeof g->label, "%s", title[0] ? title : g->app_id);
+			rei_utf8_trim(g->label);
 		} else {
 			const char *name = rei_icon_app_name(g->app_id);
 			snprintf(g->label, sizeof g->label, "%s (%d)", name ? name : g->app_id, g->count);
+			rei_utf8_trim(g->label);
 		}
 		out->groups[out->n_groups++] = *g;
 	}
@@ -220,8 +222,9 @@ static void append_titles(char *text, size_t cap, struct rei_view *const *views,
 	for (int i = 0; i < n && i < shown; i++) {
 		const char *t = rei_view_title(views[i]);
 		size_t used = strlen(text);
-		snprintf(text + used, cap - used, "\n  %.100s%s", t[0] ? t : rei_view_app_id(views[i]),
-			 views[i]->minimized ? "  (minimized)" : "");
+		char cut[104];
+		rei_utf8_prefix(cut, t[0] ? t : rei_view_app_id(views[i]), 100);
+		snprintf(text + used, cap - used, "\n  %s%s", cut, views[i]->minimized ? "  (minimized)" : "");
 	}
 	if (n > shown) {
 		size_t used = strlen(text);
@@ -259,8 +262,9 @@ static void on_hover_timer(evutil_socket_t fd, short what, void *arg)
 			return;
 		if (g->count == 1 && g->n_views == 1) {
 			const char *t = rei_view_title(g->views[0]);
-			snprintf(text, sizeof text, "%.200s%s", t[0] ? t : g->app_id,
-				 g->views[0]->minimized ? "  (minimized)" : "");
+			char cut[204];
+			rei_utf8_prefix(cut, t[0] ? t : g->app_id, 200);
+			snprintf(text, sizeof text, "%s%s", cut, g->views[0]->minimized ? "  (minimized)" : "");
 		} else {
 			const char *name = rei_icon_app_name(g->app_id);
 			snprintf(text, sizeof text, "%s: %d windows", name ? name : g->app_id, g->count);
@@ -561,8 +565,9 @@ void rei_tray_menu_open(struct rei_server *s, struct rei_output *o, const char *
 	for (int i = 0; i < st.n_rows; i++) {
 		const struct rei_view *v = u->menu_views[i];
 		const char *title = rei_view_title(v);
-		snprintf(st.rows[i].label, sizeof st.rows[i].label, "%.80s%s",
-			 title[0] ? title : rei_view_app_id(v), v->minimized ? "  (minimized)" : "");
+		char shown[81];
+		rei_utf8_prefix(shown, title[0] ? title : rei_view_app_id(v), 80);
+		snprintf(st.rows[i].label, sizeof st.rows[i].label, "%s%s", shown, v->minimized ? "  (minimized)" : "");
 		st.rows[i].minimized = v->minimized;
 	}
 	st.hover = -1;

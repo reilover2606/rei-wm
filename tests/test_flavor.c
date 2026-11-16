@@ -10,6 +10,7 @@
 #include "pngw.h"
 #include "sysinfo.h"
 #include "theme.h"
+#include "util/util.h"
 
 static char g_root[] = "/tmp/rei-flavor-test-XXXXXX";
 
@@ -86,6 +87,19 @@ int main(void)
 	CHECK(strcmp(text, "5.2/16.0GB") == 0);
 	rei_sysinfo_format_mem(1572864, 8388608, text, sizeof text);
 	CHECK(strcmp(text, "1.5/8.0GB") == 0);
+
+	/* Titles cut by a byte limit never end in half a character. */
+	{
+		char b[16];
+		rei_utf8_prefix(b, "ab\xc3\xa9" "cd", 3);   /* "abé" is 4 bytes: the é does not fit in 3 */
+		CHECK(strcmp(b, "ab") == 0);
+		rei_utf8_prefix(b, "ab\xc3\xa9" "cd", 4);
+		CHECK(strcmp(b, "ab\xc3\xa9") == 0);
+		rei_utf8_prefix(b, "\xe2\x80\x93x", 2);    /* an en dash is 3 bytes */
+		CHECK(b[0] == '\0');
+		rei_utf8_prefix(b, "plain", 99);
+		CHECK(strcmp(b, "plain") == 0);
+	}
 
 	rei_icons_cleanup();
 	char cmd[400];

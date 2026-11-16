@@ -18,6 +18,12 @@ void *rei_xrealloc(void *ptr, size_t size);
 char *rei_xstrndup(const char *s, size_t n);
 char *rei_xstrdup(const char *s);
 
+/* Cuts a string that was truncated by snprintf back to the last whole UTF-8 character, so a
+ * title like "Dictionary – é" never ends in half a character (Pango rejects that). */
+void rei_utf8_trim(char *s);
+/* Copies at most `max` bytes of `s` into `buf` (size >= max + 1), never splitting a character. */
+void rei_utf8_prefix(char *buf, const char *s, size_t max);
+
 /* Parses "1920x1080", "1920x1080@60" or "2560x1440@143.912". Returns false
  * on anything else. `refresh_mhz` is 0 when no rate was given. */
 bool rei_parse_mode(const char *text, int32_t *width, int32_t *height, int32_t *refresh_mhz);
