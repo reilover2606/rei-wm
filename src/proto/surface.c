@@ -256,8 +256,10 @@ static void apply_state(struct rei_surface *s, struct rei_surface_state *st)
 	}
 	int32_t cw, ch;
 	if (content_size(s->content, s->dmabuf, &cw, &ch)) {
-		s->width = cw / s->scale;
-		s->height = ch / s->scale;
+		/* Rounded up: a buffer whose size is not a multiple of its scale (cursor images are often
+		 * 9x16 at scale 2) is tolerated, as other compositors do, not made a protocol error. */
+		s->width = (cw + s->scale - 1) / s->scale;
+		s->height = (ch + s->scale - 1) / s->scale;
 	} else {
 		s->width = s->height = 0;
 	}
@@ -324,12 +326,6 @@ static bool latch_buffer(struct rei_surface *s)
 
 	struct rei_dmabuf *gpu = rei_dmabuf_from_buffer(p->buffer);
 	if (gpu) {
-		if (gpu->width % scale != 0 || gpu->height % scale != 0) {
-			wl_resource_post_error(s->resource, WL_SURFACE_ERROR_INVALID_SIZE,
-					       "buffer size %dx%d is not a multiple of scale %d",
-					       gpu->width, gpu->height, scale);
-			return false;
-		}
 		/* The client keeps the buffer until we release it, which waits for
 		 * the frame that stops showing it. */
 		p->dmabuf = rei_dmabuf_ref(gpu);
@@ -353,12 +349,7 @@ static bool latch_buffer(struct rei_surface *s)
 	int32_t h = wl_shm_buffer_get_height(shm);
 	int32_t stride = wl_shm_buffer_get_stride(shm);
 	uint32_t format = wl_shm_buffer_get_format(shm);
-	if (w % scale != 0 || h % scale != 0) {
-		wl_resource_post_error(s->resource, WL_SURFACE_ERROR_INVALID_SIZE,
-				       "buffer size %dx%d is not a multiple of scale %d",
-				       w, h, scale);
-		return false;
-	}
+	(void)scale;   /* see the rounding in apply (buffer sizes need not be multiples of the scale) */
 
 	if ((size_t)w * (size_t)h * 4 >= ((size_t)32 << 20)) {   /* 32 MiB and up: worth knowing about */
 		pid_t pid = 0;

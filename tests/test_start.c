@@ -393,6 +393,20 @@ int main(int argc, char **argv)
 		free(hov.rgb);
 	}
 
+	/* A buffer whose size is not a multiple of its scale (a 9x16 cursor image at scale 2) is tolerated. */
+	{
+		struct wl_surface *odd = wl_compositor_create_surface(c.compositor);
+		struct wl_buffer *buf = make_buffer(&c, 9, 16, WL_SHM_FORMAT_ARGB8888, 0xffffffff);
+		wl_surface_set_buffer_scale(odd, 2);
+		wl_surface_attach(odd, buf, 0, 0);
+		wl_surface_commit(odd);
+		CHECK(wl_display_roundtrip(c.d) >= 0);
+		CHECK(!log_has("buffer size 9x16 is not a multiple"));
+		wl_surface_destroy(odd);
+		wl_buffer_destroy(buf);
+		CHECK(wl_display_roundtrip(c.d) >= 0);
+	}
+
 	/* Looking around (only with REI_SHOT_DIR): windows, the menu, the dialog, the prompt, fullscreen. */
 	struct window wt, wf, wt2;
 	open_win(&c, &wt, "T", 0x3a7bd5);
