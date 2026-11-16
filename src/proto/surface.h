@@ -94,6 +94,7 @@ struct rei_surface {
 	struct rei_subsurface *self_marker;
 
 	struct wl_signal destroy_signal;
+	bool dying;   /* Its destroy signal is being emitted: nothing may take focus on it again. */
 };
 
 struct rei_subsurface {

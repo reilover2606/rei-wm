@@ -1,6 +1,11 @@
 #include "audio.h"
 
+#include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/prctl.h>
+#include <sys/wait.h>
 #include <event2/event.h>
 #include <math.h>
 #include <pipewire/pipewire.h>
@@ -256,6 +261,14 @@ static void core_error(void *data, uint32_t id, int seq, int res, const char *me
 	}
 }
 
+struct daemon {
+	const char *name;
+	pid_t pid;      /* > 0 once started by us */
+	bool decided;   /* started, or found running / missing: do not look again */
+};
+
+static struct daemon g_daemons[3] = { { "pipewire", 0, false }, { "wireplumber", 0, false }, { "pipewire-pulse", 0, false } };
+
 /* The registry's first listing is complete: say what we found, so a missing widget can be explained. */
 static void core_done(void *data, uint32_t id, int seq)
 {
@@ -278,7 +291,9 @@ static void core_done(void *data, uint32_t id, int seq)
 	}
 	rei_info("audio: PipeWire lists %d audio sink(s)%s%s; default sink: %s; %d with a volume", n,
 		 n ? ": " : "", names, a->default_name[0] ? a->default_name : "(not announced)", with_volume);
-	if (n == 0 && a->reports == 2)
+	if (n == 0 && a->reports == 2 && g_daemons[1].pid > 0)
+		rei_info("audio: no sinks yet; WirePlumber was only just started and will add them in a moment");
+	else if (n == 0 && a->reports == 2)
 		rei_warn("audio: no audio sinks, so no volume widget. PipeWire alone has no sound devices: "
 			 "a session manager (WirePlumber) must be running to create them (try: wpctl status)");
 	if (!a->metadata && a->reports == 2)
@@ -368,6 +383,148 @@ static bool find_pw_socket(char *out, size_t n, bool log_tried)
 	return false;
 }
 
+/* ------------------------------------------------------------------------ */
+/* Starting the sound system                                                */
+/* ------------------------------------------------------------------------ */
+
+/* PipeWire alone has no sound devices: WirePlumber makes them; pipewire-pulse serves programs that
+ * speak PulseAudio. When [audio] autostart is on, whichever of the three is missing is started
+ * here (and stopped when rei-wm exits). Each is only started if it is not already running, so a
+ * desktop session of the same user that already provides them is left alone. */
+static bool in_path(const char *name)
+{
+	const char *path = getenv("PATH");
+	if (!path)
+		path = "/usr/bin:/bin";
+	char buf[1024];
+	snprintf(buf, sizeof buf, "%s", path);
+	for (char *save = NULL, *dir = strtok_r(buf, ":", &save); dir; dir = strtok_r(NULL, ":", &save)) {
+		char full[1200];
+		snprintf(full, sizeof full, "%s/%s", dir, name);
+		if (access(full, X_OK) == 0)
+			return true;
+	}
+	return false;
+}
+
+/* Is a process of this user running with this name? */
+static bool process_running(const char *name)
+{
+	DIR *d = opendir("/proc");
+	if (!d)
+		return false;
+	bool found = false;
+	struct dirent *de;
+	while (!found && (de = readdir(d))) {
+		if (de->d_name[0] < '0' || de->d_name[0] > '9')
+			continue;
+		char path[300], comm[64] = "";
+		snprintf(path, sizeof path, "/proc/%s", de->d_name);
+		struct stat st;
+		if (stat(path, &st) != 0 || st.st_uid != getuid())
+			continue;
+		snprintf(path, sizeof path, "/proc/%s/comm", de->d_name);
+		FILE *f = fopen(path, "r");
+		if (!f)
+			continue;
+		if (fgets(comm, sizeof comm, f)) {
+			size_t l = strlen(comm);
+			if (l && comm[l - 1] == '\n')
+				comm[l - 1] = '\0';
+			found = strcmp(comm, name) == 0;
+		}
+		fclose(f);
+	}
+	closedir(d);
+	return found;
+}
+
+static bool pulse_socket_exists(void)
+{
+	const char *dir = getenv("XDG_RUNTIME_DIR");
+	if (!dir || !dir[0])
+		return false;
+	char path[512];
+	snprintf(path, sizeof path, "%s/pulse/native", dir);
+	return access(path, F_OK) == 0;
+}
+
+static void start_daemon(struct daemon *d)
+{
+	d->decided = true;
+	if (!in_path(d->name)) {
+		rei_warn("audio: autostart: '%s' is not installed (not in PATH)", d->name);
+		return;
+	}
+	pid_t pid = fork();
+	if (pid < 0)
+		return;
+	if (pid == 0) {
+		setsid();
+		prctl(PR_SET_PDEATHSIG, SIGTERM);   /* gone with rei-wm, even if it crashes */
+		signal(SIGPIPE, SIG_DFL);
+		sigset_t none;
+		sigemptyset(&none);
+		sigprocmask(SIG_SETMASK, &none, NULL);
+		int nul = open("/dev/null", O_RDWR);
+		if (nul >= 0) {
+			dup2(nul, STDIN_FILENO);
+			dup2(nul, STDOUT_FILENO);
+			if (rei_log_get_level() < REI_LOG_DEBUG)
+				dup2(nul, STDERR_FILENO);
+		}
+		execlp(d->name, d->name, (char *)NULL);
+		_exit(127);
+	}
+	d->pid = pid;
+	rei_info("audio: autostart: started %s (pid %d)", d->name, (int)pid);
+}
+
+/* One step of bringing the sound system up. Called until nothing is left to decide. Returns true
+ * while more steps may follow (so the caller looks again soon). */
+static bool autostart_step(struct rei_audio *a)
+{
+	const char *env = getenv("REI_AUDIO_AUTOSTART");   /* "0" disables, "1" enables, whatever the config says */
+	bool on = env && env[0] ? env[0] != '0' : a->server->config->audio_autostart;
+	if (!on)
+		return false;
+	char sock[600];
+	bool have_socket = find_pw_socket(sock, sizeof sock, false);
+
+	if (!g_daemons[0].decided && !have_socket) {
+		start_daemon(&g_daemons[0]);   /* pipewire */
+		return g_daemons[0].pid > 0;   /* its socket appears in a moment */
+	}
+	g_daemons[0].decided = true;
+	if (!have_socket)
+		return true;
+	if (!g_daemons[1].decided) {   /* wireplumber */
+		if (process_running("wireplumber"))
+			g_daemons[1].decided = true;
+		else
+			start_daemon(&g_daemons[1]);
+	}
+	if (!g_daemons[2].decided) {   /* pipewire-pulse */
+		if (pulse_socket_exists() || process_running("pipewire-pulse"))
+			g_daemons[2].decided = true;
+		else
+			start_daemon(&g_daemons[2]);
+	}
+	return false;
+}
+
+static void autostart_stop(void)
+{
+	for (int i = 2; i >= 0; i--) {
+		if (g_daemons[i].pid > 0) {
+			kill(g_daemons[i].pid, SIGTERM);
+			waitpid(g_daemons[i].pid, NULL, 0);
+		}
+		g_daemons[i].pid = 0;
+		g_daemons[i].decided = false;
+	}
+}
+
 static bool connect_pw(struct rei_audio *a)
 {
 	static bool logged;
@@ -443,13 +600,20 @@ static void on_retry(evutil_socket_t fd, short what, void *arg)
 	struct rei_audio *a = arg;
 	if (a->connected)
 		disconnect(a);  /* We got here because the connection died. */
+	bool more = autostart_step(a);
 	if (connect_pw(a)) {
 		rei_info("audio: connected to PipeWire");
 		changed(a);
+		if (more || !g_daemons[1].decided || !g_daemons[2].decided) {
+			autostart_step(a);   /* PipeWire is up: WirePlumber and pipewire-pulse can follow */
+			struct timeval soon = { .tv_sec = 1 };
+			if (!g_daemons[1].decided || !g_daemons[2].decided)
+				evtimer_add(a->retry_event, &soon);
+		}
 		return;
 	}
 	changed(a);
-	struct timeval tv = { .tv_sec = 5 };
+	struct timeval tv = more ? (struct timeval){ .tv_usec = 400000 } : (struct timeval){ .tv_sec = 5 };
 	evtimer_add(a->retry_event, &tv);
 }
 
@@ -483,11 +647,17 @@ void rei_audio_start(struct rei_server *server)
 	a->retry_event = evtimer_new(server->base, on_retry, a);
 	server->audio = a;
 
-	if (connect_pw(a))
+	bool more = autostart_step(a);
+	if (connect_pw(a)) {
 		rei_info("audio: connected to PipeWire");
-	else {
+		autostart_step(a);   /* WirePlumber and pipewire-pulse, if they are missing */
+		if (!g_daemons[1].decided || !g_daemons[2].decided) {
+			struct timeval soon = { .tv_sec = 1 };
+			evtimer_add(a->retry_event, &soon);
+		}
+	} else {
 		rei_info("audio: PipeWire is not running; the volume widget stays hidden until it is");
-		struct timeval tv = { .tv_sec = 5 };
+		struct timeval tv = more ? (struct timeval){ .tv_usec = 400000 } : (struct timeval){ .tv_sec = 5 };
 		evtimer_add(a->retry_event, &tv);
 	}
 }
@@ -501,6 +671,7 @@ void rei_audio_stop(struct rei_server *server)
 	if (a->retry_event)
 		event_free(a->retry_event);
 	disconnect(a);
+	autostart_stop();
 	if (a->loop_event)
 		event_free(a->loop_event);
 	pw_loop_leave(a->loop);

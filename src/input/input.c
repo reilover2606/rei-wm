@@ -155,6 +155,8 @@ static void on_keyboard_focus_destroyed(struct wl_listener *l, void *data)
 
 static void set_keyboard_focus(struct rei_input *in, struct rei_surface *surface)
 {
+	if (surface && surface->dying)
+		surface = NULL;
 	if (in->keyboard_focus == surface)
 		return;
 
@@ -306,6 +308,8 @@ static void on_grab_destroyed(struct wl_listener *l, void *data)
 
 static void set_pointer_focus(struct rei_input *in, struct rei_surface *surface, double sx, double sy)
 {
+	if (surface && surface->dying)
+		surface = NULL;
 	if (in->pointer_focus == surface)
 		return;
 	if (in->pointer_focus) {
@@ -625,7 +629,7 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 
 		if (!target)
 			rei_wm_focus_output_at(s, s->cursor_x, s->cursor_y);
-		if (target) {
+		if (target && !target->dying) {
 			struct rei_view *view = rei_wm_view_for_surface(s, target);
 			if (view)
 				rei_wm_focus_view(view);

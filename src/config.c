@@ -274,6 +274,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->tap_to_click = true;
 	cfg->xwayland = true;
 	cfg->audio_enabled = true;
+	cfg->audio_autostart = true;
 	cfg->volume_step = 5;
 	cfg->max_volume = 100;
 	cfg->wallpaper_mode = rei_xstrdup("fill");
@@ -425,6 +426,9 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		const struct toml_value *en = get(&r, audio, "audio.", "enabled", TOML_BOOL);
 		if (en)
 			cfg->audio_enabled = en->u.b;
+		const struct toml_value *au = get(&r, audio, "audio.", "autostart", TOML_BOOL);
+		if (au)
+			cfg->audio_autostart = au->u.b;
 		read_int(&r, audio, "audio.", "volume_step", &cfg->volume_step, 1, 100);
 		read_int(&r, audio, "audio.", "max_volume", &cfg->max_volume, 10, 150);
 	}

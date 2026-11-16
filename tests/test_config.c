@@ -190,7 +190,7 @@ static void test_first_run_creates_default_file(void)
 
 	FILE *f = fopen(path, "rb");
 	CHECK(f);
-	char buf[8192] = { 0 };
+	char buf[32768] = { 0 };
 	size_t n = fread(buf, 1, sizeof buf - 1, f);
 	fclose(f);
 	CHECK(n > 0);

@@ -126,6 +126,7 @@ static void start_compositor(const char *binary, const char *config_text, bool w
 		atexit(kill_compositor_at_exit);
 	if (g_pid == 0) {
 		setenv("XDG_RUNTIME_DIR", g_dir, 1);
+		setenv("REI_AUDIO_AUTOSTART", getenv("REI_AUDIO_AUTOSTART") ? getenv("REI_AUDIO_AUTOSTART") : "0", 1);   /* tests must not start a sound system */
 		unsetenv("WAYLAND_DISPLAY");
 		if (with_fifo)
 			setenv("REI_HEADLESS_INPUT", g_fifo, 1);

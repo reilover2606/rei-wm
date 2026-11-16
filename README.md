@@ -262,3 +262,13 @@ Wayland programs are unaffected; they do not use the bus to find an existing ins
   owns its LEDs). The *mute* key's LED is different: the kernel lights it from the sound card's own
   mute switch, so it follows only if PipeWire applies the mute to the hardware. The log shows
   `audio: toggling mute on ...` and `audio: '...' is now muted/unmuted` to tell whether PipeWire accepted it.
+
+## Starting the sound system (`[audio] autostart`)
+
+On by default. When rei-wm starts it makes sure the sound system is up, starting only what is missing:
+`pipewire` (if no PipeWire socket exists), `wireplumber` (if your user has none running; it creates the
+sound devices, so without it there is no volume widget) and `pipewire-pulse` (if there is no PulseAudio
+socket; Firefox and many others need it). Whatever rei-wm started is stopped when it exits, and anything
+already running (for example from another desktop session of yours) is left alone. Set
+`[audio] autostart = false` to manage them yourself; the environment variable `REI_AUDIO_AUTOSTART=0|1`
+overrides the file. Programs not installed are skipped with a warning in the log.

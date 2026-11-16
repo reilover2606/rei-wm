@@ -62,6 +62,7 @@ struct rei_config {
 
 	/* [audio] */
 	bool audio_enabled;
+	bool audio_autostart;   /* [audio] autostart: start pipewire, wireplumber and pipewire-pulse if they are not running. */
 	int32_t volume_step;  /* Percent per key press or wheel notch. */
 	int32_t max_volume;   /* Percent. */
 

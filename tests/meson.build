@@ -6,7 +6,7 @@ test_env.set('LSAN_OPTIONS', 'suppressions=' + meson.current_source_dir() / 'lsa
 
 test_deps = [rei_core_dep]
 
-foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'keybindings', 'layout', 'decoration', 'toolbar', 'icons', 'theme', 'battery', 'sysinfo', 'flavor']
+foreach t : ['toml', 'config', 'output_layout', 'msgq', 'rects', 'wallpaper', 'keybindings', 'layout', 'decoration', 'toolbar', 'icons', 'theme', 'battery', 'sysinfo', 'flavor', 'wlsignal']
   exe = executable('test_' + t, 'test_' + t + '.c',
     include_directories: inc,
     dependencies: test_deps,
@@ -161,3 +161,9 @@ start_test = executable('test_start', 'test_start.c', xdg_shell_client_h, xdg_sh
   dependencies: [wayland_client, m_dep],
 )
 test('start', start_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 120)
+
+autostart_test = executable('test_autostart', 'test_autostart.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('autostart', autostart_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)

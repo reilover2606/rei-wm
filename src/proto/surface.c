@@ -556,6 +556,11 @@ static void surface_resource_destroy(struct wl_resource *resource)
 {
 	struct rei_surface *s = wl_resource_get_user_data(resource);
 
+	/* From here on the surface is going away: while the destroy listeners run (and refocus), a hit-test
+	 * may still find it, and focus must not be handed back to it (that re-adds a listener to the very
+	 * signal being emitted). */
+	s->dying = true;
+
 	/* Listeners (xdg_surface, subsurface, input focus) may unlink each other as
 	 * they react, so this must not be a plain wl_signal_emit(). */
 	rei_signal_emit(&s->destroy_signal, s);

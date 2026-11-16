@@ -133,6 +133,7 @@ int main(int argc, char **argv)
 		int fd = open(logpath, O_WRONLY | O_CREAT | O_TRUNC, 0600);
 		dup2(fd, STDERR_FILENO);
 		setenv("REI_NO_XWAYLAND", "1", 1);
+		setenv("REI_AUDIO_AUTOSTART", "0", 1);   /* the test must not start a sound system */
 		execl(binary, binary, "-c", cfg, "-b", "headless", "-s", SOCKET, "-v", (char *)NULL);
 		_exit(127);
 	}
