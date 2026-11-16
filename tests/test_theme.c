@@ -88,6 +88,7 @@ int main(void)
 	CHECK(fx->glow_size == 6 && fx->glow_strength == 2.5f && fx->glow_color == 0xff8800 && fx->glow_tint == 0.5f);
 	CHECK(fx->blink == 1.5f && fx->shine == 0.7f && fx->shine_color == 0xffeeaa);
 	CHECK(c->theme.e[REI_ELEM_TOOLBAR].text_fx.glow_size == 0);   /* elements are independent */
+	CHECK(c->theme.window_area_limit == 0.5f);
 	CHECK(c->theme.window_threshold == 0.6f && c->theme.e[REI_ELEM_WINDOW_TEXT].text_fx.glow_size == 9);
 	CHECK(rei_theme_window_matches(&c->theme, "foot") && rei_theme_window_matches(&c->theme, "alacritty"));
 	CHECK(rei_theme_window_matches(&c->theme, "URxvt") && !rei_theme_window_matches(&c->theme, "foo"));
@@ -101,6 +102,11 @@ int main(void)
 	c = parse_ok("[theme.window_text]\ntext_glow_size = 0\ntext_blink = 2\n");   /* blinking alone counts */
 	CHECK(rei_theme_window_matches(&c->theme, "URxvt"));
 	rei_config_free(c);
+	c = parse_ok("[theme.window_text]\nglow_area_limit = 0.7\n");
+	CHECK(c->theme.window_area_limit == 0.7f);
+	rei_config_free(c);
+	parse_fails("[theme.window_text]\nglow_area_limit = 2\n", "theme.window_text.glow_area_limit");
+	parse_fails("[theme.toolbar]\nglow_area_limit = 0.5\n", "theme.toolbar.glow_area_limit: unknown property");
 	parse_fails("[theme.tray_tile]\ntext_glow_size = 100\n", "theme.tray_tile.text_glow_size");
 	parse_fails("[theme.tray_tile]\ntext_shine = 2\n", "theme.tray_tile.text_shine");
 	parse_fails("[theme.tray_tile]\ntext_blink = \"fast\"\n", "theme.tray_tile.text_blink: expected a number");

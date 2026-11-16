@@ -117,6 +117,32 @@ static struct wl_buffer *block_buffer(struct client *c, int w, int h)
 	return buf;
 }
 
+/* A highlighted line, as in a file manager's selection: a white bar (x 20..420, y 200..215) with dark "text" on
+ * it (a 6x6 block at (100,204)), and ordinary bright "text" (a white 6x6 block at (100,100)) on the black. */
+static struct wl_buffer *bar_buffer(struct client *c, int w, int h)
+{
+	size_t size = (size_t)w * (size_t)h * 4;
+	int fd = memfd_create("bar", MFD_CLOEXEC);
+	CHECK(fd >= 0 && ftruncate(fd, (off_t)size) == 0);
+	uint32_t *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	CHECK(p != MAP_FAILED);
+	for (int y = 0; y < h; y++)
+		for (int x = 0; x < w; x++) {
+			uint32_t v = 0xff000000;
+			if (x >= 20 && x < 420 && y >= 200 && y < 216)
+				v = (x >= 100 && x < 106 && y >= 204 && y < 210) ? 0xff000000 : 0xffffffff;
+			else if (x >= 100 && x < 106 && y >= 100 && y < 106)
+				v = 0xffffffff;
+			p[y * w + x] = v;
+		}
+	munmap(p, size);
+	struct wl_shm_pool *pool = wl_shm_create_pool(c->shm, fd, (int32_t)size);
+	struct wl_buffer *buf = wl_shm_pool_create_buffer(pool, 0, w, h, w * 4, WL_SHM_FORMAT_XRGB8888);
+	wl_shm_pool_destroy(pool);
+	close(fd);
+	return buf;
+}
+
 static int lum_at(int x, int y)
 {
 	struct ppm img = screenshot();
@@ -239,6 +265,24 @@ int main(int argc, char **argv)
 	CHECK(lum_at(ox + 110, oy + 103) > 40);
 	CHECK(log_count("ran the shader 'glow'") == runs + 1);
 
+	/* A highlighted line: its dark text stays readable, where bloom would wash it out. Ordinary text still glows. */
+	wl_surface_attach(w.surface, bar_buffer(&c, w.buf_w, w.buf_h), 0, 0);
+	wl_surface_damage(w.surface, 0, 0, w.buf_w, w.buf_h);
+	wl_surface_commit(w.surface);
+	set_config("[theme.window_text]\napps = \"glowterm\"\ntext_glow_size = 8\ntext_glow_strength = 2\n", true);
+	int ink = lum_at(ox + 103, oy + 207), ordinary = lum_at(ox + 110, oy + 103);
+	fprintf(stderr, "highlighted line: its text %d; ordinary text's glow %d\n", ink, ordinary);
+	CHECK(ink < 60);          /* dark on the bar, as drawn */
+	CHECK(ordinary > 40);     /* the glow beside ordinary text is still there */
+	set_config("[theme.window_text]\napps = \"glowterm\"\ntext_glow_size = 8\ntext_glow_strength = 2\nglow_area_limit = 1\n", true);
+	int washed = lum_at(ox + 103, oy + 207);
+	fprintf(stderr, "with the limit off: %d\n", washed);
+	CHECK(washed > 300);      /* ...which is what the limit prevents */
+	wl_surface_attach(w.surface, block_buffer(&c, w.buf_w, w.buf_h), 0, 0);
+	wl_surface_damage(w.surface, 0, 0, w.buf_w, w.buf_h);
+	wl_surface_commit(w.surface);
+	settle_all();
+
 	/* The size at 0 turns it off. */
 	set_config("[theme.window_text]\napps = \"glowterm\"\ntext_glow_size = 0\n", true);
 	CHECK(lum_at(ox + 110, oy + 103) < 12);
@@ -279,7 +323,7 @@ int main(int argc, char **argv)
 	/* For looking at (only with REI_SHOT_DIR): a terminal-like window with and without the glow, and a bar whose
 	 * text glows. The "terminal" is a picture ImageMagick draws. */
 	if (getenv("REI_SHOT_DIR")) {
-		char raw[300], cmd[1600];
+		char raw[300], cmd[4000];
 		snprintf(raw, sizeof raw, "%s/term.bgra", g_dir);
 		snprintf(cmd, sizeof cmd,
 			 "convert -size %dx%d xc:'#07080c' -font DejaVu-Sans-Mono -pointsize 15 "
@@ -290,9 +334,14 @@ int main(int argc, char **argv)
 			 "-fill '#ffcf40' -annotate +14+118 '8bc6858' -fill '#c8d0d8' -annotate +86+118 'Cursors: XCursor themes, shapes by context' "
 			 "-fill '#ffcf40' -annotate +14+140 '0507612' -fill '#c8d0d8' -annotate +86+140 'Watchdog: a VT switch is not a hang' "
 			 "-fill '#5aa8ff' -annotate +14+162 'src/  tests/  settings/  docs/' "
-			 "-fill '#3dff74' -annotate +14+184 'scribe@thinkpad ~/rei-wm $' -fill '#e8e8e8' -draw 'rectangle 250,170 259,188' "
-			 "-depth 8 bgra:%s", w.buf_w, w.buf_h, raw);
-		if (system(cmd) == 0) {
+			 "-fill '#5aa8ff' -annotate +14+184 'build/  src/' "
+			 "-fill '#d8dde4' -draw 'rectangle 0,194 %d,214' -fill '#101418' -annotate +14+210 ' docs/THEME.md                        14.2K' "
+			 "-fill '#c8d0d8' -annotate +14+232 'README.md' "
+			 "-depth 8 bgra:%s", w.buf_w, w.buf_h, w.buf_w, raw);
+		int rc_convert = system(cmd);
+		if (rc_convert != 0)
+			fprintf(stderr, "(no sample terminal picture: convert failed: %d)\n", rc_convert);
+		if (rc_convert == 0) {
 			size_t size = (size_t)w.buf_w * (size_t)w.buf_h * 4;
 			int fd = memfd_create("term", MFD_CLOEXEC);
 			CHECK(fd >= 0 && ftruncate(fd, (off_t)size) == 0);
@@ -312,6 +361,10 @@ int main(int argc, char **argv)
 			img = screenshot();
 			free(img.rgb);
 			keep("textfx-terminal-plain");
+			set_config("[theme.window_text]\napps = \"glowterm\"\nglow_area_limit = 1\n", true);
+			img = screenshot();
+			free(img.rgb);
+			keep("textfx-terminal-selection-washed");
 			set_config("[theme.window_text]\napps = \"glowterm\"\n"
 				   "[theme.toolbar]\ntext_glow_size = 5\ntext_glow_strength = 1.5\n"
 				   "[theme.tray_tile]\ntext_glow_size = 5\ntext_glow_color = \"#40a0ff\"\ntext_glow_tint = 1\n", true);

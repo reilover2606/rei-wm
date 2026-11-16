@@ -48,6 +48,7 @@ static void print_theme(const struct rei_theme *theme)
 			printf("%s.apps=%s\n", n, theme->window_apps);
 			printf("%s.shader=%s\n", n, theme->window_shader);
 			printf("%s.glow_threshold=%g\n", n, theme->window_threshold);
+			printf("%s.glow_area_limit=%g\n", n, theme->window_area_limit);
 		}
 		if (rei_element_iconable((enum rei_element)e)) {
 			printf("%s.icon=%s\n", n, s->icon ? "true" : "false");
@@ -371,7 +372,8 @@ int rei_theme_preview(const struct rei_config *cfg, const char *png_path)
 		const struct rei_text_fx *wfx = &cfg->theme.e[REI_ELEM_WINDOW_TEXT].text_fx;
 		bool custom = strcmp(cfg->theme.window_shader, "glow") != 0;
 		if (sh && (custom || (wfx->glow_size > 0 && wfx->glow_strength > 0) || wfx->blink > 0))
-			rei_fx_for_window(wfx, cfg->theme.window_threshold, sh, &g_items[g_n_items - 1].fx);
+			rei_fx_for_window(wfx, cfg->theme.window_threshold, cfg->theme.window_area_limit, sh,
+					  &g_items[g_n_items - 1].fx);
 		rei_pixbuf_unref(term);
 	}
 

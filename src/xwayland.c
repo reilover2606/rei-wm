@@ -992,6 +992,7 @@ static void load_xresources(struct rei_xwayland *x)
 	char *const argv[] = { "xrdb", "-merge", path, NULL };
 	pid_t pid = fork();
 	if (pid == 0) {
+		rei_child_reset_signals();
 		setsid();
 		if (fork() == 0) {   /* double fork: nothing for us to reap later */
 			execvpe("xrdb", argv, env);
@@ -1191,9 +1192,7 @@ void rei_xwayland_start(struct rei_server *server)
 			int flags = fcntl(keep[i], F_GETFD);
 			fcntl(keep[i], F_SETFD, flags & ~FD_CLOEXEC);
 		}
-		sigset_t none;
-		sigemptyset(&none);
-		sigprocmask(SIG_SETMASK, &none, NULL);
+		rei_child_reset_signals();
 		execvpe("Xwayland", argv, env);
 		_exit(127);
 	}
@@ -1259,8 +1258,7 @@ void rei_xwayland_stop(struct rei_server *server)
 	close_fd(&x->ready_fd);
 	if (x->pid > 0) {
 		kill(x->pid, SIGTERM);
-		int status;
-		waitpid(x->pid, &status, 0);
+		rei_wait_child(x->pid, 2000, "Xwayland");
 	}
 	release_display(x);
 	free(x);

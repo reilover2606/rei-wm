@@ -72,6 +72,7 @@ void rei_theme_defaults(struct rei_theme *t, uint32_t bg, uint32_t fg, uint32_t 
 	snprintf(t->window_apps, sizeof t->window_apps, "URxvt");
 	snprintf(t->window_shader, sizeof t->window_shader, "glow");
 	t->window_threshold = 0.35f;
+	t->window_area_limit = 0.5f;
 
 	/* The workspace buttons: no fill unless something is going on; "inactive" is a workspace shown
 	 * on a monitor that is not the focused one. */
@@ -260,6 +261,7 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				{ "text_glow_tint", &st->text_fx.glow_tint, 0, 1 }, { "text_blink", &st->text_fx.blink, 0, 30 },
 				{ "text_shine", &st->text_fx.shine, 0, 1 },
 				{ idx == REI_ELEM_WINDOW_TEXT ? "glow_threshold" : "", &t->window_threshold, 0, 1 },
+				{ idx == REI_ELEM_WINDOW_TEXT ? "glow_area_limit" : "", &t->window_area_limit, 0, 1 },
 			};
 			for (size_t n = 0; n < REI_ARRAY_LEN(nums) && !done; n++) {
 				if (strcmp(key, nums[n].name) != 0)

@@ -97,14 +97,10 @@ static bool spawn(struct rei_server *s, const char *command, int *out_fd)
 	} else if (pid == 0) {
 		/* Double fork: the grandchild is adopted by init, so there is never a
 		 * zombie to reap and no SIGCHLD handling is needed here. */
+		rei_child_reset_signals();
 		setsid();
 		pid_t inner = fork();
 		if (inner == 0) {
-			/* Dispositions we changed must not leak into the program. */
-			signal(SIGPIPE, SIG_DFL);
-			sigset_t none;
-			sigemptyset(&none);
-			sigprocmask(SIG_SETMASK, &none, NULL);
 			if (out_fd) {
 				int nul = open("/dev/null", O_RDONLY);
 				if (nul >= 0)

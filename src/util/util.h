@@ -24,6 +24,16 @@ void rei_utf8_trim(char *s);
 /* Copies at most `max` bytes of `s` into `buf` (size >= max + 1), never splitting a character. */
 void rei_utf8_prefix(char *buf, const char *s, size_t max);
 
+/* In a freshly forked child, before anything else: puts back the default action of the signals the parent
+ * handles through libevent (their handlers only write to a pipe shared with the parent, so a child stuck
+ * before exec() could neither be stopped by SIGTERM nor avoid telling the parent it had been), unblocks
+ * all signals and stops ignoring SIGPIPE. Only async-signal-safe calls. */
+void rei_child_reset_signals(void);
+
+/* Waits for a child that was sent SIGTERM: up to `term_ms`, then SIGKILL and up to a second more. Never blocks
+ * for good (shutdown must not hang on a program that ignores SIGTERM). True if it was reaped. */
+bool rei_wait_child(int pid, int term_ms, const char *what);
+
 /* Parses "1920x1080", "1920x1080@60" or "2560x1440@143.912". Returns false
  * on anything else. `refresh_mhz` is 0 when no rate was given. */
 bool rei_parse_mode(const char *text, int32_t *width, int32_t *height, int32_t *refresh_mhz);
