@@ -122,7 +122,8 @@ static enum rei_cursor_shape ui_shape(struct rei_server *s)
 		}
 	}
 	if (s->bar_hover_output) {
-		if (s->bar_hover_ws > 0 || s->start_hover || s->mode_hover || rei_tray_hovering(s))
+		if (s->bar_hover_ws > 0 || s->start_hover || s->mode_hover || rei_tray_hovering(s) ||
+		    rei_toolbar_wifi_at(s, s->cursor_x, s->cursor_y) || rei_toolbar_volume_at(s, s->cursor_x, s->cursor_y))
 			return REI_SHAPE_POINTER;
 		return REI_SHAPE_DEFAULT;
 	}

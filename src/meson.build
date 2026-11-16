@@ -1,5 +1,7 @@
 core_sources = files(
   'battery.c',
+  'brightness.c',
+  'wifi.c',
   'config.c',
   'config_default.c',
   'cursor.c',

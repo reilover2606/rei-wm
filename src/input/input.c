@@ -21,6 +21,7 @@
 #include "popup.h"
 #include "confirm.h"
 #include "mpd.h"
+#include "wifi.h"
 #include "msgbuf.h"
 #include "runprompt.h"
 #include "volpop.h"
@@ -484,7 +485,7 @@ static void update_pointer(struct rei_input *in, uint32_t time_ms, bool send_mot
 	if (send_motion && s->config->focus_follows_mouse && hit && !rei_xdg_topmost_grab_surface(s)) {
 		struct rei_view *v = rei_wm_view_for_surface(s, hit);
 		if (v && v != rei_wm_active_view(s))
-			rei_wm_focus_view(v);
+			rei_wm_focus_view_hover(v);   /* focus, not raise: a click raises */
 	} else if (send_motion && s->config->focus_follows_mouse && !hit && !rei_xdg_topmost_grab_surface(s) &&
 		   !rei_popup_is_open(s) && !rei_prompt_is_open(s)) {
 		rei_wm_clear_focus(s);   /* Over the desktop: no window is focused. */
@@ -616,6 +617,7 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 		if (rei_toolbar_hit(s, s->cursor_x, s->cursor_y, &bo, &ws)) {
 			in->bar_press = true;
 			in->bar_press_volume = ws == 0 && rei_toolbar_volume_at(s, s->cursor_x, s->cursor_y);
+			in->bar_press_wifi = ws == 0 && rei_toolbar_wifi_at(s, s->cursor_x, s->cursor_y);
 			in->bar_press_tray = -1;
 			struct rei_output *tray_output;
 			int tray_index;
@@ -633,7 +635,7 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 				rei_server_schedule_flush(s);
 				return;
 			}
-			if (ws == 0 && !in->bar_press_volume &&
+			if (ws == 0 && !in->bar_press_volume && !in->bar_press_wifi &&
 			    rei_toolbar_tray_at(s, s->cursor_x, s->cursor_y, &tray_output, &tray_index)) {
 				in->bar_press_tray = tray_index;
 				bo = tray_output;
@@ -719,10 +721,12 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 			int bar_ws = in->bar_press_ws;
 			struct rei_output *bar_output = in->bar_press_output;
 			bool volume_press = in->bar_press_volume;
+			bool wifi_press = in->bar_press_wifi;
 			int tray_press = in->bar_press_tray;
 			in->bar_press_tray = -1;
 			in->bar_press = false;
 			in->bar_press_volume = false;
+			in->bar_press_wifi = false;
 			in->bar_press_ws = 0;
 			in->bar_press_output = NULL;
 
@@ -731,6 +735,10 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 			/* The volume text: a click opens the volume popup (slider and mute button). */
 			if (bar_clicked && volume_press && rei_toolbar_volume_at(s, s->cursor_x, s->cursor_y))
 				rei_toolbar_volume_click(s);
+
+			/* The wifi icon: a click runs the configured wifi program (wpa_gui). */
+			if (bar_clicked && wifi_press && rei_toolbar_wifi_at(s, s->cursor_x, s->cursor_y))
+				rei_wifi_click(s);
 
 			/* A tray tile: clicked if released on the same one. */
 			if (bar_clicked && tray_press >= 0) {

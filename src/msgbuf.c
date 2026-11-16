@@ -33,6 +33,7 @@
 
 struct msg {
 	char *text;
+	char key[16];             /* see rei_msg_push_keyed ("" for an ordinary message) */
 	int64_t added_ms;
 	struct rei_pixbuf *pix;
 	int pw, ph;               /* the picture's logical size */
@@ -188,7 +189,19 @@ static void tick_start(struct rei_server *s)
 	evtimer_add(m->tick, &tv);
 }
 
+static void push(struct rei_server *s, const char *key, const char *text);
+
 void rei_msg_push(struct rei_server *s, const char *text)
+{
+	push(s, "", text);
+}
+
+void rei_msg_push_keyed(struct rei_server *s, const char *key, const char *text)
+{
+	push(s, key, text);
+}
+
+static void push(struct rei_server *s, const char *key, const char *text)
 {
 	if (!s->config->messages_enabled || !text)
 		return;
@@ -196,11 +209,26 @@ void rei_msg_push(struct rei_server *s, const char *text)
 	if (!clean)
 		return;
 	struct rei_messages *m = state_of(s);
+	if (key[0] && m->n > 0) {   /* the newest one is the same note: update it in place */
+		struct msg *last = &m->items[m->n - 1];
+		int64_t life = (int64_t)(s->config->messages_duration * 1000);
+		if (!strcmp(last->key, key) && now_ms() - last->added_ms < life) {
+			free(last->text);
+			last->text = clean;
+			last->added_ms = now_ms();
+			rei_pixbuf_unref(last->pix);
+			last->pix = NULL;
+			tick_start(s);
+			rei_server_schedule_damage(s);
+			return;
+		}
+	}
 	if (m->n == m->cap) {
 		m->cap = m->cap ? m->cap * 2 : 32;
 		m->items = rei_xrealloc(m->items, m->cap * sizeof *m->items);
 	}
 	m->items[m->n++] = (struct msg){ .text = clean, .added_ms = now_ms() };
+	snprintf(m->items[m->n - 1].key, sizeof m->items[0].key, "%s", key);
 	size_t limit = (size_t)s->config->messages_history;
 	while (m->n > limit) {   /* the oldest go */
 		msg_free(&m->items[0]);

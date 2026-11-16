@@ -275,6 +275,14 @@ QWidget *MainWindow::buildInputTab()
 	addField(f, tr("Natural scrolling"), "input", "natural_scroll", Bool, false);
 	addField(f, tr("Left-handed mouse"), "input", "left_handed", Bool, false);
 	addField(f, tr("Pointer speed (-1 … 1)"), "input", "pointer_accel", Double, 0.0, {}, -1, 1, 0.1);
+	addField(f, tr("Brightness step (percent per key press)"), "brightness", "step", Int, 5, {}, 1, 50, 1,
+		 tr("For the brightness keys (XF86MonBrightnessUp/Down). The steps are finer at the dim end, and the screen "
+		    "never goes below 1%."));
+	addField(f, tr("Backlight device"), "brightness", "device", String, "", {}, 0, 0, 1,
+		 tr("A name under /sys/class/backlight; empty: the finest one."));
+	addField(f, tr("Brightness command"), "brightness", "command", String, "", {}, 0, 0, 1,
+		 tr("Your own command instead of writing the backlight (or asking logind to), e.g. “brightnessctl set {percent}%”. "
+		    "{value}, {percent} and {device} are filled in."));
 	return w;
 }
 
@@ -291,6 +299,11 @@ QWidget *MainWindow::buildToolbarTab()
 	addField(f, tr("Show the battery"), "toolbar", "battery", Bool, true, {}, 0, 0, 1,
 		 tr("An icon and percentage before the volume and clock. Appears only if the machine has a battery; "
 		    "several batteries are combined."));
+	addField(f, tr("Show the wifi icon"), "toolbar", "wifi", Bool, true, {}, 0, 0, 1,
+		 tr("A small signal icon (red and struck through when not connected). Appears only if the machine has a "
+		    "wireless interface."));
+	addField(f, tr("Command the wifi icon runs"), "toolbar", "wifi_command", String, "wpa_gui", {}, 0, 0, 1,
+		 tr("Run when the icon is clicked, e.g. wpa_gui, nm-connection-editor, or a terminal with iwctl."));
 	addField(f, tr("Show CPU and RAM use"), "toolbar", "sysinfo", Bool, true, {}, 0, 0, 1,
 		 tr("One box left of the clock: the busy share of all cores and memory used/total, every two seconds."));
 	addField(f, tr("Tray lists"), "toolbar", "tray_scope", Choice, "workspace", { "workspace", "output" }, 0, 0, 1,

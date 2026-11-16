@@ -69,6 +69,21 @@ int main(void)
 	rei_config_free(c);
 	parse_fails("[theme.dialog]\nglow_size = 100\n", "theme.dialog.glow_size");
 
+	/* The wifi icon: the text colour when connected, red when not. */
+	c = parse_ok("");
+	CHECK_STR(rei_element_name(REI_ELEM_WIFI), "wifi");
+	CHECK(c->theme.e[REI_ELEM_WIFI].inactive_color == 0xe5534b && c->theme.e[REI_ELEM_WIFI].color != 0xe5534b);
+	CHECK(c->toolbar_wifi && !strcmp(c->toolbar_wifi_command, "wpa_gui"));
+	CHECK(c->brightness_step == 5 && !c->brightness_device[0] && !c->brightness_command[0]);
+	rei_config_free(c);
+	c = parse_ok("[toolbar]\nwifi = false\nwifi_command = \"nm-connection-editor\"\n[theme.wifi]\ninactive_color = \"#ff0000\"\n"
+		     "[brightness]\nstep = 10\ndevice = \"intel_backlight\"\ncommand = \"brightnessctl set {percent}%\"\n");
+	CHECK(!c->toolbar_wifi && !strcmp(c->toolbar_wifi_command, "nm-connection-editor"));
+	CHECK(c->theme.e[REI_ELEM_WIFI].inactive_color == 0xff0000);
+	CHECK(c->brightness_step == 10 && !strcmp(c->brightness_device, "intel_backlight") && !strcmp(c->brightness_command, "brightnessctl set {percent}%"));
+	rei_config_free(c);
+	parse_fails("[brightness]\nstep = 0\n", "brightness.step");
+
 	/* The music controls are an element of their own: a dialog-like box, a little see-through. */
 	c = parse_ok("");
 	CHECK_STR(rei_element_name(REI_ELEM_MPD), "mpd");

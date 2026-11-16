@@ -27,6 +27,7 @@ struct rei_sessionbus;
 struct rei_tray_ui;
 struct rei_winfx;
 struct rei_mpd;
+struct rei_wifi;
 struct rei_pointer_cursor;
 struct rei_popup;
 struct rei_prompt;
@@ -101,6 +102,7 @@ struct rei_server {
 	struct rei_tray_ui *tray_ui;
 	struct rei_winfx *winfx;
 	struct rei_mpd *mpd;
+	struct rei_wifi *wifi;
 	const char *window_shaders[16];   /* from the command line (see rei_server_options) */
 	bool window_shader_is_rule[16];
 	int n_window_shaders;

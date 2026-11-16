@@ -250,11 +250,16 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_thickness = 28;
 	cfg->toolbar_tray = REI_TRAY_ICONS_NAMES;
 	cfg->toolbar_battery = true;
+	cfg->toolbar_wifi = true;
+	cfg->toolbar_wifi_command = rei_xstrdup("wpa_gui");
 	cfg->toolbar_sysinfo = true;
 	cfg->start_enabled = true;
 	cfg->focus_follows_mouse = true;
 	cfg->cursor_theme = rei_xstrdup("");
 	cfg->volume_target = REI_VOLUME_AUTO;
+	cfg->brightness_step = 5;
+	cfg->brightness_device = rei_xstrdup("");
+	cfg->brightness_command = rei_xstrdup("");
 	cfg->mpd_enabled = true;
 	cfg->mpd_host = rei_xstrdup("");
 	cfg->mpd_port = 6600;
@@ -335,6 +340,13 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		const struct toml_value *ffm = get(&r, general, "general.", "focus_follows_mouse", TOML_BOOL);
 		if (ffm)
 			cfg->focus_follows_mouse = ffm->u.b;
+	}
+
+	const struct toml_table *br = get_table(&r, root, "brightness");
+	if (br) {
+		read_int(&r, br, "brightness.", "step", &cfg->brightness_step, 1, 50);
+		read_string(&r, br, "brightness.", "device", &cfg->brightness_device);
+		read_string(&r, br, "brightness.", "command", &cfg->brightness_command);
 	}
 
 	const struct toml_table *mpd = get_table(&r, root, "mpd");
@@ -525,6 +537,10 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		const struct toml_value *sysi = get(&r, tb, "toolbar.", "sysinfo", TOML_BOOL);
 		if (sysi)
 			cfg->toolbar_sysinfo = sysi->u.b;
+		const struct toml_value *wf = get(&r, tb, "toolbar.", "wifi", TOML_BOOL);
+		if (wf)
+			cfg->toolbar_wifi = wf->u.b;
+		read_string(&r, tb, "toolbar.", "wifi_command", &cfg->toolbar_wifi_command);
 		const struct toml_value *bat = get(&r, tb, "toolbar.", "battery", TOML_BOOL);
 		if (bat)
 			cfg->toolbar_battery = bat->u.b;
@@ -721,6 +737,9 @@ void rei_config_free(struct rei_config *cfg)
 	free(cfg->start_logout_command);
 	free(cfg->xresources);
 	free(cfg->cursor_theme);
+	free(cfg->toolbar_wifi_command);
+	free(cfg->brightness_device);
+	free(cfg->brightness_command);
 	free(cfg->mpd_host);
 	free(cfg->mpd_start_command);
 	free(cfg->start_run_font);

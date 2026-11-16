@@ -248,6 +248,22 @@ int main(int argc, char **argv)
 		CHECK(t.contains("sysinfo = false\n") && t.contains("autostart = false\n"));
 	}
 
+	/* Wifi and brightness settings. */
+	{
+		MainWindow ww(path, wm);
+		CHECK(field<QCheckBox>(ww, "toolbar.wifi")->isChecked());
+		CHECK(field<QWidget>(ww, "toolbar.wifi_command")->findChild<QLineEdit *>("edit")->text() == "wpa_gui");
+		CHECK(field<QSpinBox>(ww, "brightness.step")->value() == 5);
+		field<QCheckBox>(ww, "toolbar.wifi")->setChecked(false);
+		field<QSpinBox>(ww, "brightness.step")->setValue(8);
+		field<QWidget>(ww, "brightness.command")->findChild<QLineEdit *>("edit")->setText("brightnessctl set {percent}%");
+		CHECK(ww.save(&err));
+		QString wt = slurp(path);
+		CHECK(wt.contains("wifi = false\n") && wt.contains("[brightness]\nstep = 8\n"));
+		CHECK(wt.contains("command = \"brightnessctl set {percent}%\"\n"));
+		CHECK(ww.findChild<QWidget *>("theme.wifi.inactive_color") != nullptr);
+	}
+
 	/* The music tab and the message view's blur. */
 	{
 		MainWindow wm2(path, wm);

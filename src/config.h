@@ -44,6 +44,11 @@ struct rei_config {
 
 	enum rei_volume_target { REI_VOLUME_AUTO, REI_VOLUME_SINK, REI_VOLUME_MPD, REI_VOLUME_BOTH } volume_target;   /* [audio] volume_target */
 
+	/* [brightness] */
+	int32_t brightness_step;     /* percent of the range per key press */
+	char *brightness_device;     /* a name under /sys/class/backlight; "" = the finest one */
+	char *brightness_command;    /* "" = write the file, else ask logind; else this command ({value}, {percent}, {device}) */
+
 	/* [mpd] */
 	bool mpd_enabled;
 	char *mpd_host;            /* "" = $MPD_HOST, else the default socket, else localhost */
@@ -87,6 +92,8 @@ struct rei_config {
 	enum rei_tray_mode toolbar_tray;  /* The application tray in the middle of the bar. */
 	bool toolbar_sysinfo;             /* Show CPU and RAM use, left of the clock. */
 	bool toolbar_battery;             /* Show the battery, if the machine has one. */
+	bool toolbar_wifi;                /* Show the wifi item, if the machine has a wireless interface. */
+	char *toolbar_wifi_command;       /* Run when it is clicked. */
 	enum rei_tray_scope toolbar_tray_scope;
 	int32_t toolbar_tray_min_width;   /* Percent of its natural width a tile may shrink to. */
 	char *flavor_icons;          /* [theme] flavor_icons: a directory of icons for the iconable elements; "" = off. */

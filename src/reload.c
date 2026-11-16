@@ -1,6 +1,7 @@
 #include "reload.h"
 #include "pointer_cursor.h"
 #include "mpd.h"
+#include "wifi.h"
 #include "winfx.h"
 
 #include <errno.h>
@@ -86,6 +87,7 @@ bool rei_reload_config(struct rei_server *s, char *err, size_t errlen)
 	rei_pointer_cursor_reconfigure(s);
 	rei_winfx_configure(s);
 	rei_mpd_configure(s);
+	rei_wifi_configure(s);
 	s->float_new_set = false;   /* The file's new_windows applies again. */
 	rei_input_commit_reload(s, &in);
 
