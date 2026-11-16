@@ -272,11 +272,12 @@ int main(int argc, char **argv)
 	CHECK(mkdtemp(g_dir));
 	chmod(g_dir, 0700);
 
-	char config[500];
+	char config[700];
 	snprintf(config, sizeof config,
+		 "[keybindings]\n\"Mod+e\" = \"exec echo $DISPLAY > %s/disp\"\n"
 		 "[toolbar]\nenabled = false\n"
 		 "[layout]\ngap_outer = 4\ngap_inner = 4\n"
-		 "[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n", OUT_W, OUT_H);
+		 "[[output]]\nname = \"OUT\"\nwidth = %d\nheight = %d\n", g_dir, OUT_W, OUT_H);
 	start_compositor(argv[1], config, true);
 
 	wait_log("xwayland: ready on DISPLAY=", 40000);
@@ -286,6 +287,21 @@ int main(int argc, char **argv)
 	char display[32];
 	CHECK(sscanf(at, "DISPLAY=%31s", display) == 1);
 	free(log);
+
+	/* Programs launched from rei-wm are told which display is ours (so an X program never falls back
+	 * to :0, the display of some other desktop). */
+	inject_lines("key 125 1\nkey 18 1\nkey 18 0\nkey 125 0\n");
+	{
+		char path[200], *got = NULL;
+		snprintf(path, sizeof path, "%s/disp", g_dir);
+		for (int t = 0; t < 50 && !(got && got[0]); t++) {
+			free(got);
+			sleep_ms(100);
+			got = slurp(path);
+		}
+		CHECK(got && strncmp(got, display, strlen(display)) == 0);
+		free(got);
+	}
 
 	int screen = 0;
 	g_x = xcb_connect(display, &screen);
