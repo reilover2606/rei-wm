@@ -470,6 +470,19 @@ rei-wm speaks MPD's protocol itself (no libmpdclient); it keeps one connection w
 looks for MPD every two seconds while it is away. Names other than IP addresses and `localhost` are not looked
 up (a lookup would stall the compositor).
 
+## Smooth browsers (frame rate)
+
+Two things decide how smooth a browser's animations and canvases are. **How the program hands over its pixels:** with
+GPU buffers (linux-dmabuf) rei-wm just uses them, but over shared memory it copies every frame of the whole window on
+the CPU and uploads it again. `rei-wm -v` says, once per program, which one a window uses ("client pid 1234 (firefox)
+draws a 1920x1080 window with GPU buffers (dmabuf)" or "...shared memory: every frame is copied by the CPU"). For
+Firefox, run it with `MOZ_ENABLE_WAYLAND=1` (otherwise it may run through Xwayland), and look at `about:support`
+(*Compositing* should be WebRender, not software, and *Window Protocol* wayland). **When a program is told to draw
+its next frame:** a program's frame callback is answered by the next frame that reaches the screen. (Earlier it was
+answered only by a frame that already showed the program's latest commit, so a commit that arrived while another
+frame was in flight, for instance because the pointer was moving, had to wait one extra refresh: half the frame
+rate.)
+
 ## X resources and urxvt transparency
 
 An X session normally runs `xrdb -merge ~/.Xresources` at startup; under rei-wm nothing does, so Xwayland starts
