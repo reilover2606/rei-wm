@@ -2,6 +2,7 @@
 #include "pointer_cursor.h"
 #include "mpd.h"
 #include "wifi.h"
+#include "wallpapers.h"
 #include "winfx.h"
 
 #include <errno.h>
@@ -60,10 +61,6 @@ bool rei_reload_config(struct rei_server *s, char *err, size_t errlen)
 		rei_warn("config: [general] backend changed; restart rei-wm to use it");
 	if (outputs_differ(old, cfg))
 		rei_warn("config: [[output]] changed (scale applies now; anything else needs a restart)");
-	bool look_changed = strcmp(old->wallpaper_mode, cfg->wallpaper_mode) ||
-			    strcmp(old->wallpaper_path ? old->wallpaper_path : "",
-				   cfg->wallpaper_path ? cfg->wallpaper_path : "") ||
-			    old->background_rgb != cfg->background_rgb;
 
 	/* Commit: from here on nothing can fail. */
 	s->old_configs = rei_xrealloc(s->old_configs, (s->n_old_configs + 1) * sizeof *s->old_configs);
@@ -94,8 +91,7 @@ bool rei_reload_config(struct rei_server *s, char *err, size_t errlen)
 	rei_seat_keyboards_reconfigured(s->seat, in.keymap_changed);
 	if (s->backend && s->backend->impl->config_changed)
 		s->backend->impl->config_changed(s->backend);
-	if (look_changed)
-		rei_server_reload_look(s);
+	rei_wallpapers_configure(s);   /* the groups, the pictures, the fit mode */
 	rei_wm_arrange_all(s);  /* Gaps, notch height and toolbar size all move windows. */
 	rei_server_schedule_damage(s);
 	rei_server_schedule_flush(s);

@@ -580,6 +580,76 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 			fail(&r, "wallpaper.color: '%s' is not a colour like \"#1b2733\"", color->u.s);
 	}
 
+	const struct toml_value *groups = get(&r, root, "", "wallpaper_group", TOML_ARRAY);
+	if (groups) {
+		cfg->wallpaper_groups = rei_xcalloc(groups->u.arr.len, sizeof *cfg->wallpaper_groups);
+		cfg->n_wallpaper_groups = groups->u.arr.len;
+		int any_count = 0;
+		for (size_t i = 0; i < groups->u.arr.len && !r.failed; i++) {
+			const struct toml_value *item = groups->u.arr.items[i];
+			if (item->type != TOML_TABLE) {
+				fail(&r, "wallpaper_group[%zu]: expected table", i);
+				break;
+			}
+			struct rei_wallpaper_group *g = &cfg->wallpaper_groups[i];
+			char prefix[48];
+			snprintf(prefix, sizeof prefix, "wallpaper_group[%zu].", i);
+			g->interval = 600;
+			read_string(&r, item->u.tbl, prefix, "name", &g->name);
+			read_int(&r, item->u.tbl, prefix, "interval", &g->interval, 5, 86400);
+			const struct toml_value *any = get(&r, item->u.tbl, prefix, "any", TOML_BOOL);
+			g->any = any && any->u.b;
+			any_count += g->any;
+			const struct toml_value *paths = toml_table_get(item->u.tbl, "paths");
+			const struct toml_value *one = toml_table_get(item->u.tbl, "path");   /* a single one may be given as `path` */
+			if (paths && paths->type != TOML_ARRAY)
+				fail(&r, "%spaths: expected an array of strings", prefix);
+			else if (paths) {
+				g->paths = rei_xcalloc(paths->u.arr.len + 1, sizeof *g->paths);
+				for (size_t k = 0; k < paths->u.arr.len && !r.failed; k++) {
+					if (paths->u.arr.items[k]->type != TOML_STRING)
+						fail(&r, "%spaths: expected an array of strings", prefix);
+					else if (paths->u.arr.items[k]->u.s[0])
+						g->paths[g->n_paths++] = expand_home(paths->u.arr.items[k]->u.s);
+				}
+			}
+			if (one && !r.failed) {
+				if (one->type != TOML_STRING)
+					fail(&r, "%spath: expected a string", prefix);
+				else if (one->u.s[0]) {
+					g->paths = rei_xrealloc(g->paths, (g->n_paths + 2) * sizeof *g->paths);
+					g->paths[g->n_paths++] = expand_home(one->u.s);
+				}
+			}
+			const struct toml_value *ws = toml_table_get(item->u.tbl, "workspaces");
+			if (ws && ws->type != TOML_ARRAY)
+				fail(&r, "%sworkspaces: expected an array of workspace numbers", prefix);
+			else if (ws) {
+				g->workspaces = rei_xcalloc(ws->u.arr.len + 1, sizeof *g->workspaces);
+				for (size_t k = 0; k < ws->u.arr.len && !r.failed; k++) {
+					const struct toml_value *n = ws->u.arr.items[k];
+					if (n->type != TOML_INT || n->u.i < 1 || n->u.i > 99)
+						fail(&r, "%sworkspaces: workspace numbers are from 1 to 99", prefix);
+					else
+						g->workspaces[g->n_workspaces++] = (int32_t)n->u.i;
+				}
+			}
+			if (!g->name)
+				g->name = rei_xstrdup("");
+		}
+		if (!r.failed && any_count > 1)
+			fail(&r, "wallpaper_group: only one group can be the \"any\" group (any = true), not %d", any_count);
+		/* A workspace shows one group. */
+		for (size_t i = 0; i < cfg->n_wallpaper_groups && !r.failed; i++)
+			for (size_t k = 0; k < cfg->wallpaper_groups[i].n_workspaces && !r.failed; k++)
+				for (size_t j = i + 1; j < cfg->n_wallpaper_groups; j++)
+					for (size_t m = 0; m < cfg->wallpaper_groups[j].n_workspaces; m++)
+						if (cfg->wallpaper_groups[i].workspaces[k] == cfg->wallpaper_groups[j].workspaces[m])
+							fail(&r, "wallpaper_group: workspace %d is given to two groups (\"%s\" and \"%s\")",
+							     (int)cfg->wallpaper_groups[i].workspaces[k], cfg->wallpaper_groups[i].name,
+							     cfg->wallpaper_groups[j].name);
+	}
+
 	const struct toml_value *outs = get(&r, root, "", "output", TOML_ARRAY);
 	if (outs) {
 		cfg->outputs = rei_xcalloc(outs->u.arr.len, sizeof *cfg->outputs);
@@ -760,6 +830,15 @@ void rei_config_free(struct rei_config *cfg)
 		free(cfg->bindings[i].action);
 	}
 	free(cfg->bindings);
+	for (size_t i = 0; i < cfg->n_wallpaper_groups; i++) {
+		struct rei_wallpaper_group *g = &cfg->wallpaper_groups[i];
+		free(g->name);
+		for (size_t k = 0; k < g->n_paths; k++)
+			free(g->paths[k]);
+		free(g->paths);
+		free(g->workspaces);
+	}
+	free(cfg->wallpaper_groups);
 	free(cfg->wallpaper_path);
 	free(cfg->wallpaper_mode);
 	for (size_t i = 0; i < cfg->n_outputs; i++)

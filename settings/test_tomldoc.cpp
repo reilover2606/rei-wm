@@ -136,6 +136,47 @@ int main()
 	CHECK(d.tables("output").isEmpty());
 	CHECK(d.has("general", "backend"));
 
+	/* Arrays: on one line, over several lines with comments, written back on one line, never torn apart. */
+	{
+		TomlDoc a = TomlDoc::parse(QStringLiteral(
+			"[top]\nkeep = 1\n\n"
+			"[[wallpaper_group]]\nname = \"One\"\npaths = [\"/a b.png\", \"/dir/\"]   # two\nany = true\n\n"
+			"[[wallpaper_group]]\nname = \"Two\"\npaths = [\n    \"/x.png\",   # first\n    \"/y.png\",\n]\nworkspaces = [2, 5]\ninterval = 30\n"));
+		CHECK_EQ(a.text(), a.text());
+		QList<QVariantMap> t = a.tables("wallpaper_group");
+		CHECK(t.size() == 2);
+		CHECK(t[0].value("paths").toList().size() == 2 && t[0].value("paths").toList()[0].toString() == "/a b.png");
+		CHECK(t[1].value("paths").toList().size() == 2 && t[1].value("paths").toList()[1].toString() == "/y.png");
+		CHECK(t[1].value("workspaces").toList().size() == 2 && t[1].value("workspaces").toList()[1].toLongLong() == 5);
+		CHECK(t[1].value("interval").toLongLong() == 30 && t[1].value("name").toString() == "Two");   /* the keys after the array are read */
+		CHECK(t[0].value("any").toBool());
+		/* Rewriting a multi-line array's value leaves no orphan lines. */
+		a.set("wallpaper_group#1", "paths", QStringList{ "/new.png" });
+		CHECK(a.text().contains("paths = [\"/new.png\"]\nworkspaces = [2, 5]\n"));
+		CHECK(!a.text().contains("/y.png") && !a.text().contains("# first"));
+		/* ... and a one-line array keeps its trailing comment. */
+		a.set("wallpaper_group#0", "paths", QStringList{ "/p.png" });
+		CHECK(a.text().contains("paths = [\"/p.png\"]   # two\n"));
+		/* A new key goes after a multi-line array, not into it. */
+		TomlDoc b = TomlDoc::parse(QStringLiteral("[[g]]\nlist = [\n  1,\n  2\n]\n"));
+		b.set("g#0", "added", QVariant(true));
+		CHECK_EQ(b.text(), QStringLiteral("[[g]]\nlist = [\n  1,\n  2\n]\nadded = true\n"));
+		/* Removing the key takes all its lines. */
+		b.remove("g#0", "list");
+		CHECK_EQ(b.text(), QStringLiteral("[[g]]\nadded = true\n"));
+		/* Formatting. */
+		CHECK_EQ(TomlDoc::format(QStringList{ "a\"b", "c" }), QStringLiteral("[\"a\\\"b\", \"c\"]"));
+		CHECK_EQ(TomlDoc::format(QVariantList{ qlonglong(2), qlonglong(5) }), QStringLiteral("[2, 5]"));
+		CHECK_EQ(TomlDoc::format(QStringList{}), QStringLiteral("[]"));
+		/* Replacing all the tables of a name drops their arrays' continuation lines too. */
+		TomlDoc c = TomlDoc::parse(QStringLiteral("[x]\na = 1\n\n[[g]]\nlist = [\n  \"q\",\n]\nn = 1\n"));
+		c.setTables("g", {});
+		CHECK_EQ(c.text(), QStringLiteral("[x]\na = 1\n"));
+		/* An array holding something this editor cannot keep (nested) is not misread: its value is simply unknown. */
+		TomlDoc e = TomlDoc::parse(QStringLiteral("[[g]]\nnested = [[1, 2], [3]]\nok = 1\n"));
+		CHECK(!e.tables("g")[0].value("nested").isValid() && e.tables("g")[0].value("ok").toLongLong() == 1);
+	}
+
 	puts("tomldoc: ok");
 	return 0;
 }

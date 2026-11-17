@@ -238,3 +238,9 @@ wifi_test = executable('test_wifi', 'test_wifi.c',
   dependencies: [wayland_client, m_dep, rei_core_dep],
 )
 test('wifi', wifi_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+
+wallpapers_test = executable('test_wallpapers', 'test_wallpapers.c',
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep, rei_core_dep],
+)
+test('wallpapers', wallpapers_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 120)

@@ -1,6 +1,7 @@
 #include "scene.h"
 
 #include "pointer_cursor.h"
+#include "wallpapers.h"
 #include "desktop.h"
 #include "proto/xdg_shell.h"
 #include "server.h"
@@ -36,9 +37,9 @@ struct rei_scene_snapshot *rei_scene_build(struct rei_server *s, uint64_t serial
 	wl_list_for_each(o, &s->outputs, link) {
 		int32_t w, h;
 		rei_output_logical_size(o, &w, &h);
-		if (o->wallpaper)
-			rei_snapshot_add(snap, o->wallpaper, (float)o->x, (float)o->y,
-					 (float)w, (float)h, true);
+		struct rei_pixbuf *wp = rei_wallpapers_pixbuf(s, o);   /* by the workspace the output shows */
+		if (wp)
+			rei_snapshot_add(snap, wp, (float)o->x, (float)o->y, (float)w, (float)h, true);
 		/* Below every window, so a fullscreen one covers it. */
 		rei_toolbar_emit(s, o, snap);
 	}

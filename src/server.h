@@ -28,6 +28,7 @@ struct rei_tray_ui;
 struct rei_winfx;
 struct rei_mpd;
 struct rei_wifi;
+struct rei_wallpapers;
 struct rei_pointer_cursor;
 struct rei_popup;
 struct rei_prompt;
@@ -103,6 +104,7 @@ struct rei_server {
 	struct rei_winfx *winfx;
 	struct rei_mpd *mpd;
 	struct rei_wifi *wifi;
+	struct rei_wallpapers *wallpapers;
 	const char *window_shaders[16];   /* from the command line (see rei_server_options) */
 	bool window_shader_is_rule[16];
 	int n_window_shaders;
@@ -129,8 +131,6 @@ struct rei_server {
 	struct wl_client *xwayland_client;  /* The only client allowed xwayland_shell_v1. */
 
 	/* Look. */
-	struct rei_image *wallpaper_image;
-	int wallpaper_mode;
 	double cursor_x, cursor_y;  /* Global logical coordinates. */
 	bool cursor_placed;
 };
@@ -185,8 +185,6 @@ void rei_server_flush_damage(struct rei_server *server);
  * aid, also triggered by SIGUSR2. */
 void rei_server_screenshot(struct rei_server *server);
 
-/* Re-reads the wallpaper image and background colour from the config in effect. */
-void rei_server_reload_look(struct rei_server *server);
 
 /* Changes an output's scale while running (the scale of [[output]] in the config, applied on reload). */
 void rei_server_set_output_scale(struct rei_server *server, struct rei_output *output, double scale);

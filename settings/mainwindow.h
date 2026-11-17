@@ -32,6 +32,10 @@ public:
 	bool dirty() const;
 	QString configPath() const { return path_; }
 
+	/* Adds a wallpaper group made of these: one picture, several pictures, or a folder (its pictures). The
+	 * Wallpaper tab's buttons call this; it is public for tests. */
+	void addWallpapers(const QStringList &paths);
+
 private slots:
 	void onSaveClicked();
 	void onRevertClicked();
@@ -58,7 +62,11 @@ private:
 	QWidget *buildLayoutTab();
 	QWidget *buildInputTab();
 	QWidget *buildToolbarTab();
-	QWidget *buildLookTab();
+	QWidget *buildWallpaperTab();
+	void loadWallpapers();
+	QList<QVariantMap> wallpaperTable() const;
+	QString wallpaperProblem() const;
+	void setWallpaperRow(int row, const QString &name, const QStringList &paths, int interval, bool any, const QString &workspaces);
 	QWidget *buildKeysTab();
 	QWidget *buildOutputsTab();
 	QWidget *buildStartMenuTab();
@@ -83,11 +91,12 @@ private:
 	QString path_, binary_;   /* (binary_ is also used by the theme editor) */
 	TomlDoc doc_;
 	QVector<Field> fields_;
-	QTableWidget *keys_ = nullptr, *outputs_ = nullptr, *shortcuts_ = nullptr;
+	QTableWidget *keys_ = nullptr, *outputs_ = nullptr, *shortcuts_ = nullptr, *wallpapers_ = nullptr;
+	class QButtonGroup *anyGroup_ = nullptr;   /* the "any" radio buttons: at most one group is the any group */
 	QLabel *status_ = nullptr, *cursorPreview_ = nullptr;
 	ThemeEditor *theme_ = nullptr;
 	QMap<QString, QString> loadedKeys_;
-	QList<QVariantMap> loadedOutputs_, loadedShortcuts_;
+	QList<QVariantMap> loadedOutputs_, loadedShortcuts_, loadedWallpapers_;
 	bool loading_ = false;
 	bool dirty_ = false;
 };

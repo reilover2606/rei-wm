@@ -51,7 +51,6 @@ struct rei_output {
 	struct rei_workspace *workspace;  /* What this output is showing. */
 	struct rei_bar_cache *bar;        /* Its toolbar, redrawn only when it changes. */
 
-	struct rei_pixbuf *wallpaper;     /* Rendered for this output's size. */
 	struct rei_wl_output *wl_output;  /* The protocol-visible twin. */
 
 	/* What the render thread and clients were last told, to send only changes. */

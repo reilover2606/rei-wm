@@ -213,6 +213,37 @@ Configuration lives in `~/.config/rei-wm/config.toml` (or
 `$XDG_CONFIG_HOME/rei-wm/`). A commented default is written on first run. Use
 `rei-wm --check-config` to validate a file, and `--help` for all options.
 
+## Wallpaper groups
+
+The wallpaper is a set of **groups**. A group is one picture, or many that take turns: a list of picture files
+and folders (a folder stands for the pictures in it, by name, and is looked at again each time the group moves on).
+A group with several pictures changes every `interval` seconds, **ten minutes** by default, set for each group; the
+same picture shows on every workspace and output that shows the group.
+
+Which group a workspace shows: the group that lists that workspace in `workspaces`; **every other workspace shows
+the "any" group** (`any = true`, and only one group can be it); with no "any" group, the plain background colour.
+
+```toml
+[[wallpaper_group]]
+name = "Forest"
+paths = ["~/Pictures/forest"]        # a folder: its pictures
+interval = 300
+any = true
+
+[[wallpaper_group]]
+name = "Desk"
+paths = ["~/Pictures/desk.png"]       # one picture: a group of one
+workspaces = [2, 5]
+```
+
+In the settings app the **Wallpaper** tab (it used to be "Look") lists the groups as rows. Choose the "any" group with
+the radio buttons, write a group's workspaces in the last column, and set how often it changes. **Add picture(s)…**
+makes a group from one picture (a group of one) or from several you select with Shift or Ctrl; **Add folder…** makes
+one from a folder. The fit mode and background colour are above the table. `[wallpaper] path`, the single picture
+of earlier versions, still works and shows up there as one group; the first time you change the groups it is
+replaced by `[[wallpaper_group]]` tables. Pictures are drawn at the output's size and kept for a while, so going back
+to a workspace costs nothing; one that cannot be loaded is skipped (and said so in the log).
+
 ## Wifi and brightness
 
 **Wifi.** If the machine has a wireless interface, a small signal icon sits before the battery (or the volume,

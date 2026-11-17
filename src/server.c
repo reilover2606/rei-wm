@@ -37,7 +37,7 @@
 #include "scene.h"
 #include "snapshot.h"
 #include "toolbar.h"
-#include "wallpaper.h"
+#include "wallpapers.h"
 #include "xwayland.h"
 #include "util/log.h"
 #include "util/util.h"
@@ -328,35 +328,6 @@ struct rei_output *rei_server_output_by_id(struct rei_server *s, uint32_t id)
 	return NULL;
 }
 
-static void refresh_wallpaper(struct rei_server *s, struct rei_output *o)
-{
-	rei_pixbuf_unref(o->wallpaper);
-	o->wallpaper = NULL;
-	if (!s->wallpaper_image)
-		return;
-	o->wallpaper = rei_wallpaper_render(s->wallpaper_image,
-					    (enum rei_wallpaper_mode)s->wallpaper_mode,
-					    s->config->background_rgb, o->width, o->height);
-}
-
-void rei_server_reload_look(struct rei_server *s)
-{
-	const struct rei_config *config = s->config;
-	rei_image_free(s->wallpaper_image);
-	s->wallpaper_image = NULL;
-	s->wallpaper_mode = rei_wallpaper_parse_mode(config->wallpaper_mode);
-	if (config->wallpaper_path) {
-		char err[256];
-		s->wallpaper_image = rei_image_load(config->wallpaper_path, err, sizeof err);
-		if (!s->wallpaper_image)
-			rei_warn("wallpaper not loaded: %s", err);
-	}
-	struct rei_output *o;
-	wl_list_for_each(o, &s->outputs, link)
-		refresh_wallpaper(s, o);
-	rei_server_schedule_damage(s);
-}
-
 /*
  * Pushes position/size/scale to anything that cares, but only where it changed.
  * Called after every layout change, since adding or removing one output can
@@ -440,7 +411,6 @@ struct rei_output *rei_server_add_output(struct rei_server *s,
 	o->sent_height = o->height;
 	o->sent_scale = o->scale;
 
-	refresh_wallpaper(s, o);
 	rei_wl_output_add(s, o);
 
 	rei_info("output added: name=%s id=%u mode=%dx%d@%.3f pos=%d,%d scale=%g",
@@ -474,7 +444,6 @@ void rei_server_remove_output(struct rei_server *s, struct rei_output *o)
 	rei_render_destroy(o->render);
 	wl_list_remove(&o->link);
 	rei_outputs_layout(&s->outputs);
-	rei_pixbuf_unref(o->wallpaper);
 	free(o->name);
 	free(o);
 
@@ -490,7 +459,6 @@ void rei_server_set_output_mode(struct rei_server *s, struct rei_output *o,
 	o->width = width;
 	o->height = height;
 	rei_outputs_layout(&s->outputs);
-	refresh_wallpaper(s, o);
 	rei_info("output resized: name=%s mode=%dx%d", o->name, width, height);
 	sync_output_geometry(s);
 	rei_server_schedule_damage(s);
@@ -670,17 +638,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	signal(SIGPIPE, SIG_IGN);
 	rei_toolbar_init(s);
 
-	s->wallpaper_mode = rei_wallpaper_parse_mode(config->wallpaper_mode);
-	if (config->wallpaper_path) {
-		char err[256];
-		s->wallpaper_image = rei_image_load(config->wallpaper_path, err, sizeof err);
-		if (s->wallpaper_image)
-			rei_info("wallpaper: %s (%dx%d, %s)", config->wallpaper_path,
-				 s->wallpaper_image->width, s->wallpaper_image->height,
-				 config->wallpaper_mode);
-		else
-			rei_warn("wallpaper not loaded: %s", err);
-	}
+	rei_wallpapers_configure(s);
 
 	const char *backend_name = resolve_backend(s, opts);
 	s->backend = rei_backend_create(backend_name, s);
@@ -798,7 +756,7 @@ void rei_server_destroy(struct rei_server *s)
 	rei_toolbar_finish(s);
 	rei_wm_finish(s);
 	rei_seat_finish(s);
-	rei_image_free(s->wallpaper_image);
+	rei_wallpapers_stop(s);
 	rei_watchdog_stop();
 	if (s->base)
 		event_base_free(s->base);

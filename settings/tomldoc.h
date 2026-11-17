@@ -16,7 +16,8 @@
  * `key = value` line (keeping any trailing comment), inserts a missing key after the
  * last key of its section, and only rewrites whole blocks for [[output]]. It understands
  * exactly the subset of TOML that rei-wm's config uses: [tables], [[arrays of tables]],
- * and string / integer / float / boolean values.
+ * and string / integer / float / boolean values, and flat arrays of them (on one line or spread over several,
+ * with comments inside; written back on one line).
  */
 class TomlDoc {
 public:
@@ -25,7 +26,7 @@ public:
 	QString text() const;
 
 	bool has(const QString &section, const QString &key) const;
-	/* A QString, qlonglong, double or bool; invalid if absent. */
+	/* A QString, qlonglong, double, bool or (for an array) a QVariantList; invalid if absent. */
 	QVariant get(const QString &section, const QString &key) const;
 	void set(const QString &section, const QString &key, const QVariant &value);
 	void remove(const QString &section, const QString &key);
@@ -37,19 +38,21 @@ public:
 	QList<QVariantMap> tables(const QString &name) const;
 	void setTables(const QString &name, const QList<QVariantMap> &tables);
 
-	/* TOML spelling of a value ("abc", 12, 1.5, true). */
+	/* TOML spelling of a value ("abc", 12, 1.5, true, ["a", "b"], [1, 2]). */
 	static QString format(const QVariant &value);
 
 private:
 	struct Line {
-		enum Kind { Other, Table, ArrayTable, Key } kind = Other;
+		enum Kind { Other, Table, ArrayTable, Key, Cont } kind = Other;   /* Cont: a later line of an array value */
 		QString section;  /* for a table: its name; for a key: its table ("" = top level) */
 		QString key;
 		int valueStart = 0, valueEnd = 0;  /* span of the value text within the line */
+		int endLine = -1, endCol = 0;      /* where the value ends (a multi-line array ends on a later line) */
 		QVariant value;
 	};
 
 	void scan();
+	bool parseArray(int line, int col, QVariantList *out, int *endLine, int *endCol) const;
 	int lastLineOfSection(const QString &section) const;
 
 	QStringList lines_;

@@ -40,6 +40,7 @@ core_sources = files(
   'server.c',
   'snapshot.c',
   'wallpaper.c',
+  'wallpapers.c',
   'winfx.c',
   'backend/backend.c',
   'backend/headless.c',
