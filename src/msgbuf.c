@@ -72,6 +72,19 @@ struct rei_messages {
 	int mpd_margin;
 	struct rei_rect mpd_box;   /* as last drawn, global coordinates */
 	int mpd_hover;
+	bool seek_hover, seek_drag;   /* the slider's knob under the pointer / being dragged */
+	double seek_frac;             /* while dragging: where the knob is, 0..1 */
+	struct rei_pixbuf *tip_pix;   /* the drag's time tooltip */
+	char tip_text[16];
+	int tip_scale, tip_w, tip_h, tip_margin;
+
+	/* The album cover above the controls. */
+	struct rei_pixbuf *art_pix;
+	uint64_t art_id;
+	int art_scale;
+	const void *art_cfg;
+	int art_margin;
+	struct rei_rect art_box;   /* where the square is (0 size: none shown) */
 };
 
 static int64_t now_ms(void)
@@ -385,10 +398,113 @@ static void mpd_state_for(struct rei_server *s, struct rei_mpd_panel_state *st, 
 			 info.state == REI_MPD_PAUSED ? " (paused)" : "");
 	st->hover = hover;
 	st->scale = scale;
+	st->seekable = info.connected && info.state != REI_MPD_STOPPED && info.duration_ms > 0;
+	st->seek_hover = s->messages->seek_hover && st->seekable;
+	st->seek_drag = s->messages->seek_drag && st->seekable;
+	if (st->seekable) {
+		double f = st->seek_drag ? s->messages->seek_frac
+					 : (info.elapsed_ms >= 0 ? (double)info.elapsed_ms / info.duration_ms : 0);
+		/* In whole pixels of the track: the picture is only made again when the knob has moved. */
+		struct rei_rect tr = rei_bar_mpd_seek_track();
+		st->progress = (float)(floor(f * tr.w + 0.5) / tr.w);
+	}
 	snprintf(st->font, sizeof st->font, "%s", cfg->messages_font);
 	st->box = cfg->theme.e[REI_ELEM_MPD];
 	rei_theme_button_style(&cfg->theme, REI_ELEM_MPD_TRANSPORT, &st->button);
 	rei_theme_button_style(&cfg->theme, REI_ELEM_MPD_MODES, &st->button2);
+}
+
+/* "1:23" (or "1:02:03" past an hour). */
+static void format_time(double seconds, char *out, size_t n)
+{
+	int t = seconds < 0 ? 0 : (int)seconds;
+	if (t >= 3600)
+		snprintf(out, n, "%d:%02d:%02d", t / 3600, t / 60 % 60, t % 60);
+	else
+		snprintf(out, n, "%d:%02d", t / 60, t % 60);
+}
+
+/* Where along the slider (0..1) the pointer is. */
+static double seek_fraction_at(const struct rei_messages *m, double x)
+{
+	struct rei_rect tr = rei_bar_mpd_seek_track();
+	double f = (x - (m->mpd_box.x + tr.x)) / tr.w;
+	return f < 0 ? 0 : f > 1 ? 1 : f;
+}
+
+/* Is (x, y) on the slider (a generous band around the track), while it can be used? */
+static bool on_seek(const struct rei_server *s, double x, double y)
+{
+	const struct rei_messages *m = s->messages;
+	if (!m || !s->config->mpd_enabled || m->mpd_box.w == 0)
+		return false;
+	struct rei_mpd_info info;
+	rei_mpd_info_get(s, &info);
+	if (!info.connected || info.state == REI_MPD_STOPPED || info.duration_ms <= 0)
+		return false;
+	struct rei_rect tr = rei_bar_mpd_seek_track();
+	return x >= m->mpd_box.x + tr.x - 8 && x < m->mpd_box.x + tr.x + tr.w + 8 && y >= m->mpd_box.y + tr.y - 9 &&
+	       y < m->mpd_box.y + tr.y + tr.h + 9;
+}
+
+/* The time tooltip over the knob while dragging, and the cover above the controls. */
+static void emit_mpd_extras(struct rei_server *s, struct rei_scene_snapshot *snap, struct rei_rect usable, int scale)
+{
+	struct rei_messages *m = s->messages;
+	const struct rei_config *cfg = s->config;
+	/* The cover: a square 3/5 of the controls' width, centred over them, a gap above. */
+	struct rei_pixbuf *art = rei_mpd_album_art(s);
+	int side = REI_MPD_ART_SIDE;
+	int ax = m->mpd_box.x + (m->mpd_box.w - side) / 2, ay = m->mpd_box.y - REI_MPD_ART_GAP - side;
+	m->art_box = (struct rei_rect){ 0, 0, 0, 0 };
+	if (art && ay >= usable.y + MARGIN / 2) {
+		if (!m->art_pix || m->art_id != art->id || m->art_scale != scale || m->art_cfg != cfg) {
+			rei_pixbuf_unref(m->art_pix);
+			m->art_pix = rei_bar_mpd_art_render(art, &cfg->theme.e[REI_ELEM_MPD], scale, &m->art_margin);
+			m->art_id = art->id;
+			m->art_scale = scale;
+			m->art_cfg = cfg;
+		}
+		if (m->art_pix) {
+			m->art_box = (struct rei_rect){ ax, ay, side, side };
+			rei_snapshot_add(snap, m->art_pix, (float)(ax - m->art_margin), (float)(ay - m->art_margin),
+					 (float)(side + 2 * m->art_margin), (float)(side + 2 * m->art_margin), false);
+		}
+	}
+	if (!art && m->art_pix) {
+		rei_pixbuf_unref(m->art_pix);
+		m->art_pix = NULL;
+		m->art_id = 0;
+	}
+
+	if (!m->seek_drag)
+		return;
+	struct rei_mpd_info info;
+	rei_mpd_info_get(s, &info);
+	if (info.duration_ms <= 0)
+		return;
+	char text[16];
+	format_time(m->seek_frac * info.duration_ms / 1000.0, text, sizeof text);
+	if (!m->tip_pix || strcmp(text, m->tip_text) != 0 || m->tip_scale != scale) {
+		rei_pixbuf_unref(m->tip_pix);
+		m->tip_pix = rei_bar_tooltip_render(text, cfg->messages_font, &cfg->theme.e[REI_ELEM_TOOLTIP], scale, &m->tip_w,
+						    &m->tip_h, &m->tip_margin);
+		snprintf(m->tip_text, sizeof m->tip_text, "%s", text);
+		m->tip_scale = scale;
+		rei_debug("seek tooltip: %s", text);
+	}
+	if (!m->tip_pix)
+		return;
+	struct rei_rect tr = rei_bar_mpd_seek_track();
+	double kx = m->mpd_box.x + tr.x + tr.w * m->seek_frac;
+	double tx = kx - m->tip_w / 2.0;
+	if (tx < usable.x)
+		tx = usable.x;
+	if (tx + m->tip_w > usable.x + usable.w)
+		tx = usable.x + usable.w - m->tip_w;
+	double ty = m->mpd_box.y + tr.y - m->tip_h - 12;
+	rei_snapshot_add(snap, m->tip_pix, (float)(tx - m->tip_margin), (float)(ty - m->tip_margin),
+			 (float)(m->tip_w + 2 * m->tip_margin), (float)(m->tip_h + 2 * m->tip_margin), false);
 }
 
 static void emit_mpd(struct rei_server *s, struct rei_scene_snapshot *snap, struct rei_rect usable, int scale,
@@ -419,6 +535,7 @@ static void emit_mpd(struct rei_server *s, struct rei_scene_snapshot *snap, stru
 	if (m->mpd_pix)
 		rei_snapshot_add(snap, m->mpd_pix, (float)(x - m->mpd_margin), (float)(y - m->mpd_margin),
 				 (float)(REI_MPDP_W + 2 * m->mpd_margin), (float)(REI_MPDP_H + 2 * m->mpd_margin), false);
+	emit_mpd_extras(s, snap, usable, scale);
 }
 
 /* The button at (x, y) of the controls: its index (see rei_bar_mpd_buttons), or -1. */
@@ -586,6 +703,7 @@ void rei_msg_toggle_stack(struct rei_server *s)
 	m->stack_open = !m->stack_open;
 	m->scroll = 0;
 	m->mpd_hover = -1;
+	m->seek_drag = m->seek_hover = false;
 	if (m->stack_open)
 		tick_start(s);
 	rei_input_refocus(s);   /* the pointer leaves whatever window it was over, or returns to it */
@@ -602,6 +720,7 @@ void rei_msg_stack_close(struct rei_server *s)
 	if (s->messages && s->messages->stack_open) {
 		s->messages->stack_open = false;
 		s->messages->mpd_hover = -1;
+		s->messages->seek_drag = s->messages->seek_hover = false;
 		rei_input_refocus(s);
 		rei_server_schedule_damage(s);
 	}
@@ -620,11 +739,35 @@ void rei_msg_stack_motion(struct rei_server *s, double x, double y)
 	struct rei_messages *m = s->messages;
 	if (!m || !m->stack_open)
 		return;
+	if (m->seek_drag) {   /* the knob follows the pointer, wherever it goes */
+		m->seek_frac = seek_fraction_at(m, x);
+		rei_server_schedule_damage(s);
+		return;
+	}
 	int h = mpd_button_at(s, x, y);
 	if (h != m->mpd_hover) {
 		m->mpd_hover = h;
 		rei_server_schedule_damage(s);
 	}
+	bool sh = on_seek(s, x, y);
+	if (sh != m->seek_hover) {
+		m->seek_hover = sh;
+		rei_server_schedule_damage(s);
+	}
+}
+
+/* The button is let go: a drag on the slider ends by seeking to where the knob is. */
+void rei_msg_stack_release(struct rei_server *s)
+{
+	struct rei_messages *m = s->messages;
+	if (!m || !m->seek_drag)
+		return;
+	m->seek_drag = false;
+	struct rei_mpd_info info;
+	rei_mpd_info_get(s, &info);
+	if (info.duration_ms > 0)
+		rei_mpd_seek(s, m->seek_frac * info.duration_ms / 1000.0);
+	rei_server_schedule_damage(s);
 }
 
 int rei_msg_stack_hover(const struct rei_server *s)
@@ -637,6 +780,12 @@ void rei_msg_stack_press(struct rei_server *s, double x, double y)
 	struct rei_messages *m = s->messages;
 	if (!m || !m->stack_open)
 		return;
+	if (on_seek(s, x, y)) {   /* the slider: drag, or click to jump */
+		m->seek_drag = true;
+		m->seek_frac = seek_fraction_at(m, x);
+		rei_server_schedule_damage(s);
+		return;
+	}
 	int b = mpd_button_at(s, x, y);
 	if (b >= 0) {
 		struct rei_mpd_info info;
@@ -659,6 +808,9 @@ void rei_msg_stack_press(struct rei_server *s, double x, double y)
 	}
 	bool on_controls = m->mpd_box.w > 0 && s->config->mpd_enabled && x >= m->mpd_box.x - 8 &&
 			   y >= m->mpd_box.y - 8 && x < m->mpd_box.x + m->mpd_box.w + 8 && y < m->mpd_box.y + m->mpd_box.h + 8;
+	if (m->art_box.w > 0 && x >= m->art_box.x && y >= m->art_box.y && x < m->art_box.x + m->art_box.w &&
+	    y < m->art_box.y + m->art_box.h)
+		on_controls = true;
 	if (!on_controls && !rei_msg_stack_at(s, x, y))
 		rei_msg_stack_close(s);   /* a click on the blurred background puts it away */
 }
@@ -691,6 +843,8 @@ void rei_msg_finish(struct rei_server *s)
 	free(m->items);
 	rei_pixbuf_unref(m->panel_pix);
 	rei_pixbuf_unref(m->mpd_pix);
+	rei_pixbuf_unref(m->tip_pix);
+	rei_pixbuf_unref(m->art_pix);
 	free(m);
 	s->messages = NULL;
 }

@@ -228,7 +228,7 @@ struct rei_pixbuf *rei_bar_confirm_render(const struct rei_confirm_state *state,
 /* ---- The music controls' picture (MPD) ---- */
 
 #define REI_MPDP_W 360
-#define REI_MPDP_H 134
+#define REI_MPDP_H 164
 
 struct rei_mpd_panel_state {
 	char label[300];   /* "Now playing: Artist - Title", or why there is nothing to control */
@@ -236,6 +236,9 @@ struct rei_mpd_panel_state {
 	int mode;          /* 0 stopped, 1 playing, 2 paused */
 	bool shuffle, loop_all, loop_one;   /* the toggles that are on */
 	int hover;         /* the button under the pointer, or -1 */
+	bool seekable;     /* the seek slider can be used (playing or paused, length known) */
+	bool seek_hover, seek_drag;
+	float progress;    /* 0..1: where the slider's knob is */
 	int scale;
 	char font[96];
 	struct rei_style box, button;    /* button: previous, play/pause, skip; */
@@ -248,6 +251,15 @@ struct rei_mpd_panel_state {
  * or, with MPD not running, just 0 = "Start MPD". */
 #define REI_MPD_BUTTONS 6
 int rei_bar_mpd_buttons(bool running, struct rei_rect out[REI_MPD_BUTTONS]);
+/* The seek slider's track in the box (logical, relative to it). */
+struct rei_rect rei_bar_mpd_seek_track(void);
+
+/* The album cover's square above the controls: 3/5 of their width, centred, REI_MPD_ART_GAP above them. */
+#define REI_MPD_ART_SIDE (REI_MPDP_W * 3 / 5)
+#define REI_MPD_ART_GAP 12
+/* The square, styled as the music controls' box, with `art` filling it (cropped to fit). */
+struct rei_pixbuf *rei_bar_mpd_art_render(const struct rei_pixbuf *art, const struct rei_style *box, int scale,
+					  int *margin);
 struct rei_pixbuf *rei_bar_mpd_render(const struct rei_mpd_panel_state *state, int *margin);
 
 /* ---- The volume popup's picture ---- */

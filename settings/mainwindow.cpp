@@ -745,6 +745,9 @@ QWidget *MainWindow::buildMusicTab()
 	auto *f = new QFormLayout;
 	addField(f, tr("Music controls"), "mpd", "enabled", Bool, true);
 	addField(f, tr("Announce a new song in the messages"), "mpd", "announce", Bool, true);
+	addField(f, tr("Show the album cover"), "mpd", "album_art", Bool, true, {}, 0, 0, 1,
+		 tr("The cover of the song playing (embedded in the file, or the cover.jpg/png next to it) in a square above the "
+		    "music controls. Needs MPD 0.21 or newer."));
 	addField(f, tr("MPD host"), "mpd", "host", String, "", {}, 0, 0, 1,
 		 tr("Empty: $MPD_HOST, else the socket in $XDG_RUNTIME_DIR/mpd, else localhost. An IP address, localhost "
 		    "or the path of a socket; “password@host” gives a password."));

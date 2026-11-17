@@ -439,7 +439,12 @@ single **play/pause** button in the middle (it shows pause while playing, and li
 below it three smaller toggles: **shuffle**, **loop all** (repeat the playlist) and **loop one** (repeat the
 song). The two loops exclude each other, and pressing the lit one stops looping. Space also toggles play/pause. If MPD is not running there are no controls, only a
 **Start MPD** button, which runs `[mpd] start_command` (default `mpd`) and picks the server up as soon as it
-answers. When the song changes, `Now playing: Artist - Title` is added to the messages. The panel keeps clear of
+answers. When the song changes, `Now playing: Artist - Title` is added to the messages. Above the song's name is a **seek slider** like the volume popup's: it moves with the song, a click jumps
+to that point, and dragging the knob shows a tooltip with the exact minute and second it is at (the seek happens when
+you let go). Above the panel is the song's **cover**, in a square 3/5 of the panel's width, centred, with a gap
+between it and the panel; it is fetched from MPD (`readpicture`, the picture inside the file, else `albumart`, the
+cover file next to it), shrunk to at most 640 pixels, and left out when the song has none or `[mpd] album_art`
+is false. The panel keeps clear of
 the message column on a narrow screen. The look is the `[theme.mpd]` element (its two rows of buttons are `mpd_transport` and `mpd_modes`, see docs/THEME.md).
 
 ```toml
@@ -450,6 +455,7 @@ host = ""           # "" = $MPD_HOST, else $XDG_RUNTIME_DIR/mpd/socket, else loc
 port = 6600
 start_command = "mpd"
 announce = true     # "Now playing: ..." messages
+album_art = true    # the cover above the controls
 ```
 
 **The volume.** MPD has a volume of its own, which the sound system's does not affect when MPD plays straight to

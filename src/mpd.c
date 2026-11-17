@@ -16,9 +16,11 @@
 #include "config.h"
 #include "input/actions.h"
 #include "msgbuf.h"
+#include "pixbuf.h"
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
+#include "../third_party/stb_image.h"
 
 #define RETRY_MS 2000
 #define LAUNCH_RETRY_MS 400
@@ -26,11 +28,15 @@
 #define MAX_QUEUE 16
 #define RBUF 65536
 
-enum kind { K_STATUS, K_SONG, K_CMD, K_PASSWORD };
+enum kind { K_STATUS, K_SONG, K_CMD, K_PASSWORD, K_ART, K_ART_DIR, K_IGNORE };
+
+#define ART_MAX_BYTES (16 << 20)
+#define ART_MAX_PX 640
 
 struct req {
-	char text[600];
+	char text[1200];
 	enum kind kind;
+	int gen;   /* the song's art generation when it was asked (an answer for another song is dropped) */
 };
 
 struct rei_mpd {
@@ -48,6 +54,7 @@ struct rei_mpd {
 	int nq;
 	bool busy;          /* a request is in flight */
 	enum kind inflight;
+	int inflight_gen;
 	bool idling, noidle_sent;
 	bool refresh_after_idle;
 
@@ -68,6 +75,20 @@ struct rei_mpd {
 	long pending_songid;
 	int pending_volume;
 	bool pending_random, pending_repeat, pending_single;
+	int pending_elapsed_ms, pending_duration_ms;
+	int elapsed_ms, duration_ms;   /* as of `stamp_ns` */
+	uint64_t stamp_ns;
+
+	/* The cover. `art_gen` counts songs: an answer for an earlier one is dropped. */
+	char file[512];
+	int art_gen;
+	struct rei_pixbuf *art;
+	uint8_t *art_buf;           /* the picture as MPD sends it, in chunks */
+	size_t art_len, art_total;
+	bool art_dir_tried;
+	uint8_t *chunk;             /* the chunk being received (raw bytes after a "binary: N" line) */
+	size_t chunk_len, bin_need;
+	bool album_art;
 
 	/* Settings in use. */
 	bool enabled;
@@ -139,6 +160,19 @@ static void changed(struct rei_mpd *m)
 	rei_server_schedule_damage(m->server);   /* the controls, if open, show it */
 }
 
+static void clear_art(struct rei_mpd *m)
+{
+	m->art_gen++;
+	free(m->art_buf);
+	m->art_buf = NULL;
+	m->art_len = m->art_total = 0;
+	m->art_dir_tried = false;
+	if (m->art) {
+		rei_pixbuf_unref(m->art);
+		m->art = NULL;
+	}
+}
+
 static void close_connection(struct rei_mpd *m, const char *why)
 {
 	if (m->readable)
@@ -162,6 +196,10 @@ static void close_connection(struct rei_mpd *m, const char *why)
 	m->shuffle = m->repeat = m->single = false;
 	m->title[0] = '\0';
 	m->songid = -1;
+	m->elapsed_ms = m->duration_ms = -1;
+	m->file[0] = '\0';
+	m->bin_need = m->chunk_len = 0;
+	clear_art(m);
 	if (was_up) {
 		rei_info("mpd: disconnected (%s)", why);
 		changed(m);
@@ -227,6 +265,7 @@ static void enqueue(struct rei_mpd *m, enum kind kind, const char *text)
 		return;
 	struct req *r = &m->queue[m->nq++];
 	r->kind = kind;
+	r->gen = m->art_gen;
 	snprintf(r->text, sizeof r->text, "%s", text);
 	pump(m);
 }
@@ -249,6 +288,7 @@ static void pump(struct rei_mpd *m)
 		m->nq--;
 		m->busy = true;
 		m->inflight = r.kind;
+		m->inflight_gen = r.gen;
 		m->resp_len = 0;
 		send_text(m, r.text);
 		return;
@@ -265,6 +305,114 @@ static void pump(struct rei_mpd *m)
 	m->noidle_sent = false;
 	m->resp_len = 0;
 	send_text(m, "idle player mixer");   /* (the mixer: someone else turned the volume) */
+}
+
+/* ------------------------------------------------------------------------ */
+/* The cover                                                                */
+/* ------------------------------------------------------------------------ */
+
+/* `s` as an MPD argument: in double quotes, with \ and " escaped. */
+static void quote(char *out, size_t n, const char *s)
+{
+	size_t o = 0;
+	if (o < n)
+		out[o++] = '"';
+	for (; *s && o + 3 < n; s++) {
+		if (*s == '"' || *s == '\\')
+			out[o++] = '\\';
+		out[o++] = *s;
+	}
+	if (o < n)
+		out[o++] = '"';
+	out[o < n ? o : n - 1] = '\0';
+}
+
+static void ask_art(struct rei_mpd *m, enum kind kind, size_t offset)
+{
+	char q[1100], cmd[1200];
+	quote(q, sizeof q, m->file);
+	snprintf(cmd, sizeof cmd, "%s %s %zu", kind == K_ART ? "readpicture" : "albumart", q, offset);
+	enqueue(m, kind, cmd);
+}
+
+/* The whole picture has arrived: decode it, shrink it to fit ART_MAX_PX, keep it. */
+static void art_finish(struct rei_mpd *m)
+{
+	int w = 0, h = 0, c = 0;
+	uint8_t *px = stbi_load_from_memory(m->art_buf, (int)m->art_len, &w, &h, &c, 4);
+	free(m->art_buf);
+	m->art_buf = NULL;
+	m->art_len = m->art_total = 0;
+	if (!px || w <= 0 || h <= 0 || w > 16384 || h > 16384) {
+		rei_debug("mpd: the cover could not be decoded");
+		if (px)
+			stbi_image_free(px);
+		return;
+	}
+	int f = 1;
+	while ((w / f > ART_MAX_PX) || (h / f > ART_MAX_PX))
+		f++;
+	int ow = w / f, oh = h / f;
+	struct rei_pixbuf *pb = ow > 0 && oh > 0 ? rei_pixbuf_create_uninit(ow, oh, false) : NULL;
+	if (pb) {
+		for (int y = 0; y < oh; y++)
+			for (int x = 0; x < ow; x++) {
+				unsigned r = 0, g = 0, b = 0, a = 0;
+				for (int dy = 0; dy < f; dy++)
+					for (int dx = 0; dx < f; dx++) {
+						const uint8_t *s = px + ((size_t)(y * f + dy) * (size_t)w + (size_t)(x * f + dx)) * 4;
+						r += s[0]; g += s[1]; b += s[2]; a += s[3];
+					}
+				unsigned n = (unsigned)(f * f);
+				r /= n; g /= n; b /= n; a /= n;
+				uint8_t *d = pb->data + ((size_t)y * (size_t)ow + (size_t)x) * 4;
+				d[0] = (uint8_t)(b * a / 255);   /* premultiplied B, G, R, A */
+				d[1] = (uint8_t)(g * a / 255);
+				d[2] = (uint8_t)(r * a / 255);
+				d[3] = (uint8_t)a;
+			}
+	}
+	stbi_image_free(px);
+	if (!pb)
+		return;
+	rei_pixbuf_unref(m->art);
+	m->art = pb;
+	rei_debug("mpd: cover %dx%d (from %dx%d)", ow, oh, w, h);
+	changed(m);
+}
+
+/* An answer to readpicture / albumart: `ok`, with a chunk received (m->chunk) or none. */
+static void art_answer(struct rei_mpd *m, enum kind k, bool ok)
+{
+	char v[64];
+	bool got = ok && m->chunk_len > 0;
+	if (got) {
+		if (m->art_len == 0 && field(m->resp, "size", v, sizeof v))
+			m->art_total = (size_t)strtoull(v, NULL, 10);
+		if (m->art_total == 0 || m->art_total > ART_MAX_BYTES || m->art_len + m->chunk_len > m->art_total) {
+			got = false;
+		} else {
+			if (!m->art_buf)
+				m->art_buf = rei_xrealloc(NULL, m->art_total);
+			memcpy(m->art_buf + m->art_len, m->chunk, m->chunk_len);
+			m->art_len += m->chunk_len;
+		}
+	}
+	m->chunk_len = 0;
+	if (got) {
+		if (m->art_len < m->art_total)
+			ask_art(m, k, m->art_len);   /* the next piece */
+		else
+			art_finish(m);
+		return;
+	}
+	free(m->art_buf);
+	m->art_buf = NULL;
+	m->art_len = m->art_total = 0;
+	if (k == K_ART && !m->art_dir_tried) {   /* no picture inside the file: the cover file next to it */
+		m->art_dir_tried = true;
+		ask_art(m, K_ART_DIR, 0);
+	}
 }
 
 /* The status and the current song are both known: apply them and announce a new song. */
@@ -286,6 +434,15 @@ static void apply(struct rei_mpd *m, const char *song_resp)
 		st = REI_MPD_PAUSED;
 	(void)v;
 
+	if (strcmp(file, m->file) != 0) {   /* another song: its cover */
+		snprintf(m->file, sizeof m->file, "%s", file);
+		clear_art(m);
+		if (m->album_art && file[0])
+			ask_art(m, K_ART, 0);
+	}
+	m->elapsed_ms = m->pending_elapsed_ms;
+	m->duration_ms = m->pending_duration_ms;
+	m->stamp_ns = rei_now_ns();
 	bool differs = st != m->state || strcmp(text, m->title) != 0 || m->pending_volume != m->volume ||
 		       m->pending_random != m->shuffle || m->pending_repeat != m->repeat || m->pending_single != m->single;
 	m->shuffle = m->pending_random;
@@ -320,6 +477,20 @@ static void handle_response(struct rei_mpd *m, bool ok)
 	m->idling = false;
 	m->noidle_sent = false;
 	m->resp[m->resp_len] = '\0';
+	if (!was_idle && (k == K_ART || k == K_ART_DIR)) {   /* (an idle wait leaves `inflight` as it was) */
+		if (m->inflight_gen == m->art_gen && m->album_art)
+			art_answer(m, k, ok);
+		else
+			m->chunk_len = 0;
+		m->resp_len = 0;
+		pump(m);
+		return;
+	}
+	if (k == K_IGNORE && !was_idle) {
+		m->resp_len = 0;
+		pump(m);
+		return;
+	}
 	if (was_idle) {
 		if (ok && strstr(m->resp, "changed:"))
 			m->refresh_after_idle = true;
@@ -335,6 +506,20 @@ static void handle_response(struct rei_mpd *m, bool ok)
 		m->pending_repeat = field(m->resp, "repeat", v, sizeof v) && atoi(v) == 1;
 		/* single is 0, 1 or "oneshot" (stop after this song, once) */
 		m->pending_single = field(m->resp, "single", v, sizeof v) && !strcmp(v, "1");
+		m->pending_elapsed_ms = m->pending_duration_ms = -1;
+		if (field(m->resp, "elapsed", v, sizeof v))
+			m->pending_elapsed_ms = (int)(atof(v) * 1000.0);
+		if (field(m->resp, "duration", v, sizeof v))
+			m->pending_duration_ms = (int)(atof(v) * 1000.0);
+		if (m->pending_duration_ms < 0 && field(m->resp, "time", v, sizeof v)) {   /* older MPD: "elapsed:total" */
+			const char *colon = strchr(v, ':');
+			if (m->pending_elapsed_ms < 0)
+				m->pending_elapsed_ms = atoi(v) * 1000;
+			if (colon)
+				m->pending_duration_ms = atoi(colon + 1) * 1000;
+		}
+		if (m->pending_duration_ms == 0)
+			m->pending_duration_ms = -1;
 		m->pending_volume = field(m->resp, "volume", v, sizeof v) ? atoi(v) : -1;
 		if (m->pending_volume < 0 || m->pending_volume > 100)
 			m->pending_volume = -1;
@@ -351,6 +536,17 @@ static void handle_response(struct rei_mpd *m, bool ok)
 static void parse(struct rei_mpd *m)
 {
 	for (;;) {
+		if (m->bin_need > 0) {   /* raw bytes of a picture chunk, not lines */
+			size_t take = m->rlen < m->bin_need ? m->rlen : m->bin_need;
+			memcpy(m->chunk + m->chunk_len, m->rbuf, take);
+			m->chunk_len += take;
+			m->bin_need -= take;
+			memmove(m->rbuf, m->rbuf + take, m->rlen - take);
+			m->rlen -= take;
+			if (m->bin_need > 0)
+				return;
+			continue;
+		}
 		char *nl = memchr(m->rbuf, '\n', m->rlen);
 		if (!nl)
 			break;
@@ -370,6 +566,8 @@ static void parse(struct rei_mpd *m)
 				snprintf(cmd, sizeof cmd, "password %s", m->password);
 				enqueue(m, K_PASSWORD, cmd);
 			}
+			if (m->album_art)
+				enqueue(m, K_IGNORE, "binarylimit 262144");   /* (bigger pieces: fewer round trips) */
 			enqueue(m, K_STATUS, "status");
 			enqueue(m, K_SONG, "currentsong");
 			changed(m);
@@ -386,6 +584,17 @@ static void parse(struct rei_mpd *m)
 			if (m->phase != M_READY)
 				return;
 			continue;
+		} else if (m->busy && (m->inflight == K_ART || m->inflight == K_ART_DIR) && !strncmp(line, "binary: ", 8)) {
+			size_t need = (size_t)strtoull(line + 8, NULL, 10);
+			if (need > (size_t)4 << 20) {   /* more than binarylimit allows: not what was asked for */
+				close_connection(m, "picture chunk too large");
+				schedule_retry(m, RETRY_MS);
+				return;
+			}
+			free(m->chunk);
+			m->chunk = rei_xrealloc(NULL, need ? need : 1);
+			m->chunk_len = 0;
+			m->bin_need = need;
 		} else if (m->busy && m->resp_len + len + 2 < sizeof m->resp) {
 			memcpy(m->resp + m->resp_len, line, len);
 			m->resp_len += len;
@@ -605,6 +814,14 @@ void rei_mpd_configure(struct rei_server *s)
 	m->password[0] = '\0';
 	snprintf(m->start_command, sizeof m->start_command, "%s", cfg->mpd_start_command ? cfg->mpd_start_command : "mpd");
 	m->announce = cfg->mpd_announce;
+	bool art_was = m->album_art;
+	m->album_art = cfg->mpd_album_art;
+	if (art_was && !m->album_art) {   /* turned off: the cover goes */
+		clear_art(m);
+		changed(m);
+	}
+	if (!art_was && m->album_art && m->phase == M_READY && m->file[0])
+		ask_art(m, K_ART, 0);
 	if (!m->enabled) {
 		if (m->phase != M_DOWN)
 			close_connection(m, "disabled");
@@ -636,6 +853,9 @@ void rei_mpd_stop(struct rei_server *s)
 	if (m->fd >= 0)
 		close(m->fd);
 	free(m->wbuf);
+	free(m->art_buf);
+	free(m->chunk);
+	rei_pixbuf_unref(m->art);
 	free(m);
 }
 
@@ -655,6 +875,39 @@ void rei_mpd_info_get(const struct rei_server *s, struct rei_mpd_info *out)
 	out->loop_all = m->repeat && !m->single;
 	out->loop_one = m->repeat && m->single;
 	snprintf(out->title, sizeof out->title, "%s", m->title);
+	out->elapsed_ms = -1;
+	out->duration_ms = m->duration_ms > 0 ? m->duration_ms : -1;
+	if (m->phase == M_READY && m->elapsed_ms >= 0 && m->state != REI_MPD_STOPPED) {
+		int64_t e = m->elapsed_ms;
+		if (m->state == REI_MPD_PLAYING)
+			e += (int64_t)((rei_now_ns() - m->stamp_ns) / 1000000ull);   /* it moves on by itself */
+		if (m->duration_ms > 0 && e > m->duration_ms)
+			e = m->duration_ms;
+		out->elapsed_ms = (int)e;
+	}
+}
+
+void rei_mpd_seek(struct rei_server *s, double seconds)
+{
+	struct rei_mpd *m = of(s);
+	if (!m || m->phase != M_READY || m->state == REI_MPD_STOPPED || m->duration_ms <= 0)
+		return;
+	if (seconds < 0)
+		seconds = 0;
+	if (seconds * 1000.0 > m->duration_ms)
+		seconds = m->duration_ms / 1000.0;
+	char cmd[48];
+	snprintf(cmd, sizeof cmd, "seekcur %.3f", seconds);
+	enqueue(m, K_CMD, cmd);
+	m->elapsed_ms = (int)(seconds * 1000.0);   /* known now; MPD confirms it */
+	m->stamp_ns = rei_now_ns();
+	changed(m);
+}
+
+struct rei_pixbuf *rei_mpd_album_art(const struct rei_server *s)
+{
+	const struct rei_mpd *m = of(s);
+	return m && m->album_art && m->phase == M_READY ? m->art : NULL;
 }
 
 void rei_mpd_play(struct rei_server *s)

@@ -37,6 +37,8 @@ bool rei_msg_stack_at(const struct rei_server *server, double x, double y);
 void rei_msg_stack_motion(struct rei_server *server, double x, double y);
 int rei_msg_stack_hover(const struct rei_server *server);   /* the button index, or -1 */
 void rei_msg_stack_press(struct rei_server *server, double x, double y);
+/* The button was let go (ends a drag on the music controls' seek slider). */
+void rei_msg_stack_release(struct rei_server *server);
 /* The wheel over the stack view: positive scrolls toward newer messages, negative toward older ones. */
 void rei_msg_stack_scroll(struct rei_server *server, double value);
 

@@ -267,6 +267,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->mpd_port = 6600;
 	cfg->mpd_start_command = rei_xstrdup("mpd");
 	cfg->mpd_announce = true;
+	cfg->mpd_album_art = true;
 	cfg->cursor_size = 24;
 	cfg->start_label = rei_xstrdup("Start");
 	cfg->start_shutdown_command = rei_xstrdup("loginctl poweroff || systemctl poweroff || poweroff");
@@ -360,6 +361,9 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		const struct toml_value *an = get(&r, mpd, "mpd.", "announce", TOML_BOOL);
 		if (an)
 			cfg->mpd_announce = an->u.b;
+		const struct toml_value *art = get(&r, mpd, "mpd.", "album_art", TOML_BOOL);
+		if (art)
+			cfg->mpd_album_art = art->u.b;
 		read_string(&r, mpd, "mpd.", "host", &cfg->mpd_host);
 		read_int(&r, mpd, "mpd.", "port", &cfg->mpd_port, 1, 65535);
 		read_string(&r, mpd, "mpd.", "start_command", &cfg->mpd_start_command);
