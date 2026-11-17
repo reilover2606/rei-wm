@@ -61,7 +61,7 @@ void rei_confirm_open(struct rei_server *s, const char *title, const char *messa
 	c->st.scale = (int)ceil(o->scale);
 	snprintf(c->st.font, sizeof c->st.font, "%s", s->config->toolbar_font);
 	c->st.box = s->config->theme.e[REI_ELEM_DIALOG];
-	c->st.button = s->config->theme.e[REI_ELEM_START_BUTTON];
+	rei_theme_button_style(&s->config->theme, REI_ELEM_DIALOG_BUTTONS, &c->st.button);
 	rebuild(s);
 	rei_info("confirm: %s", title);
 }

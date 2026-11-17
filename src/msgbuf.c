@@ -387,7 +387,8 @@ static void mpd_state_for(struct rei_server *s, struct rei_mpd_panel_state *st, 
 	st->scale = scale;
 	snprintf(st->font, sizeof st->font, "%s", cfg->messages_font);
 	st->box = cfg->theme.e[REI_ELEM_MPD];
-	st->button = cfg->theme.e[REI_ELEM_START_BUTTON];
+	rei_theme_button_style(&cfg->theme, REI_ELEM_MPD_TRANSPORT, &st->button);
+	rei_theme_button_style(&cfg->theme, REI_ELEM_MPD_MODES, &st->button2);
 }
 
 static void emit_mpd(struct rei_server *s, struct rei_scene_snapshot *snap, struct rei_rect usable, int scale,

@@ -238,7 +238,8 @@ struct rei_mpd_panel_state {
 	int hover;         /* the button under the pointer, or -1 */
 	int scale;
 	char font[96];
-	struct rei_style box, button;
+	struct rei_style box, button;    /* button: previous, play/pause, skip; */
+	struct rei_style button2;        /* button2: shuffle, loop all, loop one (resolved by rei_theme_button_style) */
 };
 
 /* The buttons' rectangles in the box (logical, relative to it), and how many there are:

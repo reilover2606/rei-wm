@@ -1,6 +1,9 @@
 #include "themeeditor.h"
 
 #include <QCheckBox>
+#include <QDialog>
+#include <QTabWidget>
+#include <QDialogButtonBox>
 #include <QCoreApplication>
 #include <QComboBox>
 #include <QDir>
@@ -42,14 +45,14 @@ const ElementInfo kElements[] = {
 	{ "tooltip", "Tooltip", "The text that appears when you hover a tray tile." },
 	{ "menu", "Menus", "The box of a pop-up list (the Start menu, a tray tile's window list)." },
 	{ "menu_row", "Menu rows", "A row of a menu: active colours and the glow are used while hovered." },
-	{ "start_button", "Start button", "The Start button (active while its menu is open); also the buttons of dialogs." },
+	{ "start_button", "Start button", "The Start button (active while its menu is open)." },
 	{ "run_prompt", "Run prompt", "The large, see-through command box (Mod+r)." },
 	{ "messages", "Message column", "Text colour, the dark halo (shadow) around the text, and the stack view's backdrop (colour, opacity, shape)." },
 	{ "sysinfo", "CPU/RAM readout", "The box left of the clock." },
-	{ "dialog", "Dialogs", "Confirmation dialogs (the box; their buttons use the Start button's look)." },
-	{ "battery", "Battery", "The battery icon: colour = level, active = charging, inactive = low." },
-	{ "wifi", "Wifi", "The wifi icon in the toolbar: colour = connected, inactive = not connected (struck through)." },
-	{ "mpd", "Music controls (MPD)", "The now-playing box with play, pause and skip, at the bottom of the message stack view (Mod+n). Its buttons use the Start button's look." },
+	{ "dialog", "Dialogs", "Confirmation dialogs: the box. Its buttons are styled under \"Buttons\" below." },
+	{ "battery", "Battery", "The battery icon in the toolbar. The three colours say what it shows: the level, charging, and low." },
+	{ "wifi", "Wifi", "The wifi icon in the toolbar: one colour while connected, another (struck through) when not." },
+	{ "mpd", "Music controls (MPD)", "The now-playing box at the bottom of the message stack view (Mod+n). Its two rows of buttons are styled under \"Buttons\" below." },
 	{ "window_text", "Window text (terminals)", "Not rei-wm's own text: the windows of the listed programs are drawn through a "
 	  "fragment shader that makes their bright pixels (a terminal's text) glow. Size 0 turns it off." },
 };
@@ -113,6 +116,70 @@ const PropInfo kWindowText[] = {
 	{ "text_glow_tint", "Glow tint (0 = the text's own colour)", "number", 0, 1, 0.05, 2 },
 	{ "text_glow_color", "Glow tint colour", "color", 0, 0, 0, 0 },
 	{ "text_blink", "Blink (seconds per cycle, 0 = steady)", "number", 0, 30, 0.1, 2 },
+};
+
+
+struct ColorSpec {
+	const char *name;
+	const char *label;
+};
+
+/* The colours an element really has, named for what they mean there. Most elements have one fill and one text colour;
+ * only things that change to show a state (a focused workspace, a minimized window, a charging battery) have more. */
+QList<ColorSpec> colorsFor(const QString &e)
+{
+	if (e == "toolbar")
+		return { { "color", "Background" }, { "text_color", "Text" }, { "inactive_text_color", "Muted volume text" } };
+	if (e == "workspace_button")
+		return { { "color", "Workspace with windows" }, { "active_color", "Focused workspace" },
+			 { "inactive_color", "Shown on another monitor" }, { "text_color", "Text" },
+			 { "active_text_color", "Text, focused" }, { "inactive_text_color", "Text, on another monitor" } };
+	if (e == "tray_tile" || e == "tray_overflow")
+		return { { "color", "Colour" }, { "active_color", "Focused window" }, { "inactive_color", "Minimized" },
+			 { "text_color", "Text" }, { "active_text_color", "Text, focused" },
+			 { "inactive_text_color", "Text, minimized" } };
+	if (e == "menu_row")
+		return { { "active_color", "Hovered row" }, { "text_color", "Text" }, { "active_text_color", "Text, hovered" },
+			 { "inactive_text_color", "Text of minimized windows" } };
+	if (e == "start_button")
+		return { { "color", "Colour" }, { "active_color", "While its menu is open" }, { "text_color", "Text" },
+			 { "active_text_color", "Text while open" } };
+	if (e == "messages")
+		return { { "color", "Backdrop of the stack view" }, { "text_color", "Text" } };
+	if (e == "menu")
+		return { { "color", "Colour" } };
+	if (e == "battery")
+		return { { "color", "Level (normal)" }, { "active_color", "Charging" }, { "inactive_color", "Low (15% or less)" },
+			 { "text_color", "Percentage text" } };
+	if (e == "wifi")
+		return { { "color", "Connected" }, { "inactive_color", "Not connected (struck through)" } };
+	if (e == "mpd_transport" || e == "mpd_modes")
+		return { { "color", "Button" }, { "active_color", "Lit: playing, or a mode that is on" }, { "text_color", "Text and icon" },
+			 { "active_text_color", "Text and icon, lit" } };
+	if (e == "dialog_buttons")
+		return { { "color", "Button" }, { "active_color", "The confirm button" }, { "text_color", "Text" },
+			 { "active_text_color", "Text of the confirm button" } };
+	return { { "color", "Colour" }, { "text_color", "Text" } };   /* tooltip, run_prompt, sysinfo, dialog, mpd */
+}
+
+struct GroupInfo {
+	const char *key;
+	const char *parent;
+	const char *title;
+};
+
+/* Groups of buttons inside an element, each styled as a unit. */
+const GroupInfo kGroups[] = {
+	{ "mpd_transport", "mpd", "Top row: previous, play/pause, skip (and Start MPD)" },
+	{ "mpd_modes", "mpd", "Bottom row: shuffle, loop all, loop one" },
+	{ "dialog_buttons", "dialog", "The buttons: Cancel and the confirm button" },
+};
+
+const char *const kModes[][2] = {
+	{ "custom", "Own colour and style" },
+	{ "color", "Colour of the surrounding box, own style" },
+	{ "inherit", "Colour and style of the surrounding box" },
+	{ "text", "Just the text or icon, like a link" },
 };
 
 QString normalized(const QString &kind, const QString &v)
@@ -226,6 +293,130 @@ ThemeEditor::~ThemeEditor()
 	}
 }
 
+/* One editor row: the widget (named "theme.<element>.<name>"), its reset arrow and its label, added to `form`. */
+void ThemeEditor::addProp(QFormLayout *form, const QString &element, const QString &name, const QString &label,
+			  const QString &kind, double lo, double hi, double step, int decimals)
+{
+	Prop p;
+	p.name = name;
+	p.kind = kind;
+	QWidget *w = nullptr;
+	if (kind == "color") {
+		auto *b = new ColorButton;
+		b->onChange = [this, element, name] { touch(element, name); };
+		w = b;
+	} else if (kind == "shape") {
+		auto *c = new QComboBox;
+		c->addItems({ "square", "rounded", "pill", "bevel" });
+		connect(c, &QComboBox::currentTextChanged, this, [this, element, name] { touch(element, name); });
+		w = c;
+	} else if (kind == "mode") {
+		auto *c = new QComboBox;
+		for (auto &m : kModes)
+			c->addItem(tr(m[1]), m[0]);
+		connect(c, &QComboBox::currentIndexChanged, this, [this, element, name] {
+			updateGroup(element);
+			touch(element, name);
+		});
+		w = c;
+	} else if (kind == "string") {
+		auto *e = new QLineEdit;
+		connect(e, &QLineEdit::textChanged, this, [this, element, name] { touch(element, name); });
+		w = e;
+	} else {
+		auto *s = new QDoubleSpinBox;
+		s->setRange(lo, hi);
+		s->setSingleStep(step);
+		s->setDecimals(decimals);
+		connect(s, &QDoubleSpinBox::valueChanged, this, [this, element, name] { touch(element, name); });
+		w = s;
+	}
+	w->setObjectName("theme." + element + "." + name);
+	auto *rowWidget = new QWidget;
+	auto *rowLayout = new QHBoxLayout(rowWidget);
+	rowLayout->setContentsMargins(0, 0, 0, 0);
+	rowLayout->addWidget(w, 1);
+	auto *reset = new QToolButton;
+	reset->setText(QStringLiteral("↺"));
+	reset->setObjectName("reset." + element + "." + name);
+	reset->setAutoRaise(true);
+	connect(reset, &QToolButton::clicked, this, [this, element, name] {
+		Prop &pr = props_[element][name];
+		setValue(pr, pr.defaultV);
+		touch(element, name);
+	});
+	rowLayout->addWidget(reset);
+	auto *labelWidget = new QLabel(label);
+	form->addRow(labelWidget, rowWidget);
+	p.widget = w;
+	p.reset = reset;
+	p.row = rowWidget;
+	p.label = labelWidget;
+	props_[element][name] = p;
+}
+
+/* The window with the style of an element (or of a group of buttons): one tab each for shape, fill and border; text
+ * effects; glow; shadow. Opened from the element's page; closing it keeps the values (they are applied as edited). */
+QPushButton *ThemeEditor::buildStyleButton(const QString &element, const QString &title)
+{
+	auto *dialog = new QDialog(this);
+	dialog->setObjectName("theme_style." + element);
+	dialog->setWindowTitle(tr("Style: %1").arg(title));
+	dialog->setWindowFlag(Qt::Tool);
+	auto *lay = new QVBoxLayout(dialog);
+	auto *tabs = new QTabWidget;
+	tabs->setObjectName("theme_style_tabs." + element);
+	auto tab = [&](const QString &name, const PropInfo *list, size_t n) {
+		auto *page = new QWidget;
+		auto *form = new QFormLayout(page);
+		for (size_t i = 0; i < n; i++)
+			addProp(form, element, list[i].name, tr(list[i].label), list[i].kind, list[i].lo, list[i].hi,
+				list[i].step, list[i].decimals);
+		tabs->addTab(page, name);
+	};
+	tab(tr("Shape, fill and border"), kShape, sizeof kShape / sizeof *kShape);
+	tab(tr("Text effects"), kTextFx, sizeof kTextFx / sizeof *kTextFx);
+	tab(tr("Glow"), kGlow, sizeof kGlow / sizeof *kGlow);
+	tab(tr("Shadow"), kShadow, sizeof kShadow / sizeof *kShadow);
+	lay->addWidget(tabs);
+	auto *box = new QDialogButtonBox(QDialogButtonBox::Close);
+	connect(box, &QDialogButtonBox::rejected, dialog, &QDialog::close);
+	lay->addWidget(box);
+	styleDialogs_[element] = dialog;
+
+	auto *button = new QPushButton(tr("Style…"));
+	button->setObjectName("style_button." + element);
+	button->setToolTip(tr("Shape, fill and border; text effects; glow; shadow — in a window of their own."));
+	connect(button, &QPushButton::clicked, this, [dialog] {
+		dialog->show();
+		dialog->raise();
+		dialog->activateWindow();
+	});
+	return button;
+}
+
+/* A group's colours depend on its mode: the box's colours replace them, or they are not there at all. */
+void ThemeEditor::updateGroup(const QString &group)
+{
+	if (!props_.contains(group) || !props_[group].contains("mode"))
+		return;
+	const QString mode = valueOf(props_[group]["mode"]);
+	const bool own = mode == "custom";
+	const bool text = mode == "text";
+	for (const ColorSpec &c : colorsFor(group)) {
+		Prop &p = props_[group][c.name];
+		bool show = own || (text && (QString(c.name) == "text_color" || QString(c.name) == "active_color"));
+		p.row->setVisible(show);
+		p.label->setVisible(show);
+		if (text && QString(c.name) == "active_color")
+			p.label->setText(tr("Lit and hovered"));
+		else
+			p.label->setText(tr(c.label));
+	}
+	if (styleButtons_.contains(group))
+		styleButtons_[group]->setVisible(mode != "inherit");
+}
+
 void ThemeEditor::buildPage(const QString &element, bool iconable)
 {
 	const ElementInfo *info = nullptr;
@@ -243,72 +434,40 @@ void ThemeEditor::buildPage(const QString &element, bool iconable)
 	connect(resetElem, &QPushButton::clicked, this, [this, element] { resetElement(element); });
 	v->addWidget(resetElem, 0, Qt::AlignLeft);
 
-	auto group = [&](const QString &title, const PropInfo *list, size_t n) {
-		auto *box = new QGroupBox(title);
-		auto *form = new QFormLayout(box);
-		for (size_t i = 0; i < n; i++) {
-			const PropInfo &pi = list[i];
-			Prop p;
-			p.name = pi.name;
-			p.kind = pi.kind;
-			QWidget *w = nullptr;
-			if (p.kind == "color") {
-				auto *b = new ColorButton;
-				const QString nm = pi.name;
-				b->onChange = [this, element, nm] { touch(element, nm); };
-				w = b;
-			} else if (p.kind == "shape") {
-				auto *c = new QComboBox;
-				c->addItems({ "square", "rounded", "pill", "bevel" });
-				const QString nm = pi.name;
-				connect(c, &QComboBox::currentTextChanged, this, [this, element, nm] { touch(element, nm); });
-				w = c;
-			} else if (p.kind == "string") {
-				auto *e = new QLineEdit;
-				const QString nm = pi.name;
-				connect(e, &QLineEdit::textChanged, this, [this, element, nm] { touch(element, nm); });
-				w = e;
-			} else {
-				auto *s = new QDoubleSpinBox;
-				s->setRange(pi.lo, pi.hi);
-				s->setSingleStep(pi.step);
-				s->setDecimals(pi.decimals);
-				const QString nm = pi.name;
-				connect(s, &QDoubleSpinBox::valueChanged, this, [this, element, nm] { touch(element, nm); });
-				w = s;
-			}
-			const QString nm = pi.name;
-			w->setObjectName("theme." + element + "." + pi.name);
-			auto *rowWidget = new QWidget;
-			auto *rowLayout = new QHBoxLayout(rowWidget);
-			rowLayout->setContentsMargins(0, 0, 0, 0);
-			rowLayout->addWidget(w, 1);
-			auto *reset = new QToolButton;
-			reset->setText(QStringLiteral("↺"));
-			reset->setObjectName("reset." + element + "." + pi.name);
-			reset->setAutoRaise(true);
-			connect(reset, &QToolButton::clicked, this, [this, element, nm] {
-				Prop &pr = props_[element][nm];
-				setValue(pr, pr.defaultV);
-				touch(element, nm);
-			});
-			rowLayout->addWidget(reset);
-			form->addRow(tr(pi.label), rowWidget);
-			p.widget = w;
-			p.reset = reset;
-			props_[element][p.name] = p;
-		}
-		v->addWidget(box);
-	};
 	if (element == "window_text") {
-		group(tr("Window shader"), kWindowText, sizeof kWindowText / sizeof *kWindowText);
+		auto *box = new QGroupBox(tr("Window shader"));
+		auto *form = new QFormLayout(box);
+		for (const PropInfo &pi : kWindowText)
+			addProp(form, element, pi.name, tr(pi.label), pi.kind, pi.lo, pi.hi, pi.step, pi.decimals);
+		v->addWidget(box);
 	} else {
-		group(tr("Colours"), kColors, sizeof kColors / sizeof *kColors);
-		group(tr("Text colours"), kText, sizeof kText / sizeof *kText);
-		group(tr("Text effects (glow, blink, shine)"), kTextFx, sizeof kTextFx / sizeof *kTextFx);
-		group(tr("Shape, fill and border"), kShape, sizeof kShape / sizeof *kShape);
-		group(tr("Shadow"), kShadow, sizeof kShadow / sizeof *kShadow);
-		group(tr("Glow"), kGlow, sizeof kGlow / sizeof *kGlow);
+		auto colourBox = [&](const QString &key, const QString &title) {
+			auto *box = new QGroupBox(title);
+			auto *form = new QFormLayout(box);
+			for (const ColorSpec &c : colorsFor(key))
+				addProp(form, key, c.name, tr(c.label), "color", 0, 0, 0, 0);
+			v->addWidget(box);
+		};
+		colourBox(element, tr("Colours"));
+		v->addWidget(buildStyleButton(element, tr(info->title)), 0, Qt::AlignLeft);
+		for (const GroupInfo &g : kGroups) {
+			if (element != g.parent)
+				continue;
+			const QString key = g.key;
+			auto *box = new QGroupBox(tr("Buttons – %1").arg(tr(g.title)));
+			auto *gl = new QVBoxLayout(box);
+			auto *modeForm = new QFormLayout;
+			addProp(modeForm, key, "mode", tr("Look"), "mode", 0, 0, 0, 0);
+			gl->addLayout(modeForm);
+			auto *form = new QFormLayout;
+			for (const ColorSpec &c : colorsFor(key))
+				addProp(form, key, c.name, tr(c.label), "color", 0, 0, 0, 0);
+			gl->addLayout(form);
+			auto *sb = buildStyleButton(key, tr(g.title));
+			styleButtons_[key] = sb;
+			gl->addWidget(sb, 0, Qt::AlignLeft);
+			v->addWidget(box);
+		}
 	}
 	if (iconable) {
 		auto *box = new QGroupBox(tr("Icon"));
@@ -370,6 +529,9 @@ void ThemeEditor::buildPage(const QString &element, bool iconable)
 	scroll->setWidgetResizable(true);
 	scroll->setWidget(page);
 	pageOf_[element] = pages_->addWidget(scroll);
+	for (const GroupInfo &g : kGroups)
+		if (element == g.parent)
+			updateGroup(g.key);
 }
 
 QString ThemeEditor::valueOf(const Prop &p) const
@@ -379,6 +541,8 @@ QString ThemeEditor::valueOf(const Prop &p) const
 		raw = static_cast<ColorButton *>(p.widget)->color();
 	else if (p.kind == "shape")
 		raw = static_cast<QComboBox *>(p.widget)->currentText();
+	else if (p.kind == "mode")
+		raw = static_cast<QComboBox *>(p.widget)->currentData().toString();
 	else if (p.kind == "bool")
 		raw = static_cast<QCheckBox *>(p.widget)->isChecked() ? "true" : "false";
 	else if (p.kind == "string")
@@ -394,6 +558,11 @@ void ThemeEditor::setValue(Prop &p, const QString &text)
 		static_cast<ColorButton *>(p.widget)->setColor(text);
 	else if (p.kind == "shape")
 		static_cast<QComboBox *>(p.widget)->setCurrentText(text);
+	else if (p.kind == "mode") {
+		auto *c = static_cast<QComboBox *>(p.widget);
+		int i = c->findData(text);
+		c->setCurrentIndex(i < 0 ? 0 : i);
+	}
 	else if (p.kind == "bool")
 		static_cast<QCheckBox *>(p.widget)->setChecked(text == "true");
 	else if (p.kind == "string")
@@ -427,12 +596,19 @@ void ThemeEditor::updateReset(Prop &p)
 void ThemeEditor::resetElement(const QString &element)
 {
 	loading_ = true;   /* one preview and one notice for the lot */
-	for (auto p = props_[element].begin(); p != props_[element].end(); ++p) {
-		setValue(*p, p->defaultV);
-		p->touched = true;
-		updateReset(*p);
-	}
+	QStringList keys { element };
+	for (const GroupInfo &g : kGroups)   /* a box's button groups are part of it */
+		if (element == g.parent)
+			keys << g.key;
+	for (const QString &key : keys)
+		for (auto p = props_[key].begin(); p != props_[key].end(); ++p) {
+			setValue(*p, p->defaultV);
+			p->touched = true;
+			updateReset(*p);
+		}
 	loading_ = false;
+	for (const GroupInfo &g : kGroups)
+		updateGroup(g.key);
 	emit edited();
 	schedulePreview();
 }
@@ -447,6 +623,8 @@ void ThemeEditor::resetAll()
 			updateReset(*p);
 		}
 	loading_ = false;
+	for (const GroupInfo &g : kGroups)
+		updateGroup(g.key);
 	emit edited();
 	schedulePreview();
 }
@@ -523,6 +701,8 @@ bool ThemeEditor::load(const QString &configText, QString *error)
 			updateReset(*p);
 		}
 	loading_ = false;
+	for (const GroupInfo &g : kGroups)
+		updateGroup(g.key);
 	body_->setEnabled(true);
 	schedulePreview();
 	return true;
