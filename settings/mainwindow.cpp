@@ -302,6 +302,8 @@ QWidget *MainWindow::buildToolbarTab()
 	addField(f, tr("Show the battery"), "toolbar", "battery", Bool, true, {}, 0, 0, 1,
 		 tr("An icon and percentage before the volume and clock. Appears only if the machine has a battery; "
 		    "several batteries are combined."));
+	addField(f, tr("Show the battery percentage"), "toolbar", "battery_percent", Bool, true, {}, 0, 0, 1,
+		 tr("Off: only the icon is shown, and hovering it shows the exact percentage."));
 	addField(f, tr("Show the wifi icon"), "toolbar", "wifi", Bool, true, {}, 0, 0, 1,
 		 tr("A small signal icon (red and struck through when not connected). Appears only if the machine has a "
 		    "wireless interface."));

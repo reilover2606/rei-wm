@@ -2,6 +2,7 @@
 #define REI_XWAYLAND_H
 
 #include <stdbool.h>
+#include <sys/types.h>
 #include <stdint.h>
 
 #include "geom.h"
@@ -46,6 +47,8 @@ const char *rei_xwindow_title(const struct rei_xwindow *xw);
 /* WM_CLASS's class part, the X11 counterpart of an app id. */
 const char *rei_xwindow_class(const struct rei_xwindow *xw);
 bool rei_xwindow_wants_float(const struct rei_xwindow *xw);
+/* The process that made the window, as it said (_NET_WM_PID); 0 if unknown. */
+pid_t rei_xwindow_pid(const struct rei_xwindow *xw);
 bool rei_xwindow_wants_fullscreen(const struct rei_xwindow *xw);
 void rei_xwindow_set_fullscreen(struct rei_xwindow *xw, bool on);
 void rei_xwindow_emit(const struct rei_view *view, struct rei_scene_snapshot *snap);

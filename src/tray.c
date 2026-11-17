@@ -61,6 +61,8 @@ struct rei_tray_ui {
 
 	/* Hover, and the tooltip it earns. */
 	bool hover_valid;
+	bool hover_item;             /* the pointer is on a bar item with a tooltip (battery, clock), not a tray tile */
+	int hover_item_id;
 	struct rei_output *hover_output;
 	char hover_key[96];
 	struct rei_rect hover_tile;  /* Global. */
@@ -233,54 +235,80 @@ static void append_titles(char *text, size_t cap, struct rei_view *const *views,
 	}
 }
 
+static void show_tip(struct rei_tray_ui *u, bool refresh);
+
 static void on_hover_timer(evutil_socket_t fd, short what, void *arg)
 {
 	(void)fd; (void)what;
 	struct rei_tray_ui *u = arg;
-	struct rei_server *s = u->server;
-	if (!u->hover_valid || u->drag || u->press || rei_popup_is_open(s))
+	if (!u->hover_valid || u->drag || u->press || rei_popup_is_open(u->server))
 		return;
-	struct rei_output *o = u->hover_output;
+	show_tip(u, false);
+}
 
-	struct rei_tray_set set;
-	rei_tray_collect(s, o, NULL, &set);
+/* Builds the tooltip for what the pointer is on and puts it beside it. `refresh`: the same tooltip again with new text
+ * (the clock's seconds): it keeps its place in the fade-in. */
+static void show_tip(struct rei_tray_ui *u, bool refresh)
+{
+	struct rei_server *s = u->server;
+	struct rei_output *o = u->hover_output;
 	char text[1024];
-	if (strcmp(u->hover_key, REI_TRAY_OVERFLOW_KEY) == 0) {
-		/* Everything not shown as a tile: the windows of the groups past the visible ones. */
-		struct rei_view *all[REI_TRAY_MAX_VIEWS * 2];
-		int n = 0;
-		size_t first = rei_toolbar_tray_visible(s, o, &set);
-		for (size_t i = first; i < set.n_groups; i++)
-			for (int k = 0; k < set.groups[i].n_views && n < (int)REI_ARRAY_LEN(all); k++)
-				all[n++] = set.groups[i].views[k];
-		for (int k = 0; k < set.n_extra_views && n < (int)REI_ARRAY_LEN(all); k++)
-			all[n++] = set.extra_views[k];
-		snprintf(text, sizeof text, "%d more windows", n);
-		append_titles(text, sizeof text, all, n, 10);
-	} else {
-		const struct rei_tray_group *g = find_group(&set, u->hover_key);
-		if (!g)
+	if (u->hover_item) {
+		rei_toolbar_item_tip(s, u->hover_item_id, text, sizeof text);
+		if (!text[0])
 			return;
-		if (g->count == 1 && g->n_views == 1) {
-			const char *t = rei_view_title(g->views[0]);
-			char cut[204];
-			rei_utf8_prefix(cut, t[0] ? t : g->app_id, 200);
-			snprintf(text, sizeof text, "%s%s", cut, g->views[0]->minimized ? "  (minimized)" : "");
+	} else {
+		struct rei_tray_set set;
+		rei_tray_collect(s, o, NULL, &set);
+		if (strcmp(u->hover_key, REI_TRAY_OVERFLOW_KEY) == 0) {
+			/* Everything not shown as a tile: the windows of the groups past the visible ones. */
+			struct rei_view *all[REI_TRAY_MAX_VIEWS * 2];
+			int n = 0;
+			size_t first = rei_toolbar_tray_visible(s, o, &set);
+			for (size_t i = first; i < set.n_groups; i++)
+				for (int k = 0; k < set.groups[i].n_views && n < (int)REI_ARRAY_LEN(all); k++)
+					all[n++] = set.groups[i].views[k];
+			for (int k = 0; k < set.n_extra_views && n < (int)REI_ARRAY_LEN(all); k++)
+				all[n++] = set.extra_views[k];
+			snprintf(text, sizeof text, "%d more windows", n);
+			append_titles(text, sizeof text, all, n, 10);
 		} else {
-			const char *name = rei_icon_app_name(g->app_id);
-			snprintf(text, sizeof text, "%s: %d windows", name ? name : g->app_id, g->count);
-			append_titles(text, sizeof text, g->views, g->n_views, 10);
+			const struct rei_tray_group *g = find_group(&set, u->hover_key);
+			if (!g)
+				return;
+			if (g->count == 1 && g->n_views == 1) {
+				const char *t = rei_view_title(g->views[0]);
+				char cut[204];
+				rei_utf8_prefix(cut, t[0] ? t : g->app_id, 200);
+				snprintf(text, sizeof text, "%s%s", cut, g->views[0]->minimized ? "  (minimized)" : "");
+			} else {
+				const char *name = rei_icon_app_name(g->app_id);
+				snprintf(text, sizeof text, "%s: %d windows", name ? name : g->app_id, g->count);
+				append_titles(text, sizeof text, g->views, g->n_views, 10);
+			}
 		}
 	}
 
-	rei_debug("tray tooltip: %.*s", (int)strcspn(text, "\n"), text);
+	if (!refresh) {
+		if (u->hover_item) {
+			char one[1024];
+			snprintf(one, sizeof one, "%s", text);
+			for (char *c = one; *c; c++)
+				if (*c == '\n')
+					*c = '|';
+			rei_debug("bar tooltip: %s", one);
+		} else {
+			rei_debug("tray tooltip: %.*s", (int)strcspn(text, "\n"), text);
+		}
+	}
 	const struct rei_config *cfg = s->config;
 	int bw, bh, m;
-	rei_pixbuf_unref(u->tip);
-	u->tip = rei_bar_tooltip_render(text, cfg->toolbar_font, &cfg->theme.e[REI_ELEM_TOOLTIP],
-					(int)ceil(o->scale), &bw, &bh, &m);
-	if (!u->tip)
+	struct rei_pixbuf *pic = rei_bar_tooltip_render(text, cfg->toolbar_font, &cfg->theme.e[REI_ELEM_TOOLTIP],
+							(int)ceil(o->scale), &bw, &bh, &m);
+	if (!pic)
 		return;
+	rei_pixbuf_unref(u->tip);
+	u->tip = pic;
 
 	/* Beside the tile, away from the screen edge the bar sits on, kept on the screen. */
 	struct rei_rect bar = rei_toolbar_rect(s, o), t = u->hover_tile;
@@ -298,11 +326,12 @@ static void on_hover_timer(evutil_socket_t fd, short what, void *arg)
 	if (box.x < o->x + 2) box.x = o->x + 2;
 	if (box.y < o->y + 2) box.y = o->y + 2;
 	u->tip_rect = (struct rei_rect){ box.x - m, box.y - m, bw + 2 * m, bh + 2 * m };
-	u->tip_start_ns = rei_now_ns();
-	u->tip_on = true;
-
-	struct timeval tv = { 0, TICK_MS * 1000 };
-	evtimer_add(u->tick_timer, &tv);
+	if (!refresh) {
+		u->tip_start_ns = rei_now_ns();
+		u->tip_on = true;
+		struct timeval tv = { 0, TICK_MS * 1000 };
+		evtimer_add(u->tick_timer, &tv);
+	}
 	rei_server_schedule_damage(s);
 }
 
@@ -315,6 +344,14 @@ static void on_tick(evutil_socket_t fd, short what, void *arg)
 	rei_server_schedule_damage(u->server);
 	if (rei_now_ns() - u->tip_start_ns < (uint64_t)FADE_MS * 1000000ull + 40000000ull) {
 		struct timeval tv = { 0, TICK_MS * 1000 };
+		evtimer_add(u->tick_timer, &tv);
+	} else if (u->hover_item && u->hover_item_id == REI_BAR_ITEM_CLOCK) {
+		/* The clock's tooltip counts the seconds: its text is made again each second (just after the second). */
+		show_tip(u, true);
+		struct timespec ts;
+		clock_gettime(CLOCK_REALTIME, &ts);
+		long wait_ms = 1000 - ts.tv_nsec / 1000000 + 15;
+		struct timeval tv = { wait_ms / 1000, (wait_ms % 1000) * 1000 };
 		evtimer_add(u->tick_timer, &tv);
 	}
 }
@@ -332,6 +369,7 @@ void rei_tray_hover_clear(struct rei_server *s)
 		u->hover_valid = false;
 		rei_server_schedule_damage(s);
 	}
+	u->hover_item = false;
 	tip_hide(u);
 }
 
@@ -371,12 +409,33 @@ static void update_hover(struct rei_tray_ui *u, double x, double y)
 	}
 
 	if (!over) {
+		/* Not a tray tile: maybe a bar item with a tooltip of its own (battery, clock). */
+		struct rei_output *io = NULL;
+		int item = 0;
+		struct rei_rect r = { 0 };
+		if (rei_toolbar_item_at(s, x, y, &io, &item, &r)) {
+			u->hover_tile = r;
+			if (u->hover_valid && u->hover_item && u->hover_output == io && u->hover_item_id == item)
+				return;
+			tip_hide(u);
+			u->hover_valid = true;
+			u->hover_item = true;
+			u->hover_item_id = item;
+			u->hover_output = io;
+			u->hover_key[0] = '\0';
+			if (!rei_popup_is_open(s)) {
+				struct timeval tv = { 0, HOVER_DELAY_MS * 1000 };
+				evtimer_add(u->hover_timer, &tv);
+			}
+			return;
+		}
 		rei_tray_hover_clear(s);
 		return;
 	}
 	u->hover_tile = tile;
-	if (u->hover_valid && u->hover_output == o && strcmp(u->hover_key, key) == 0)
+	if (u->hover_valid && !u->hover_item && u->hover_output == o && strcmp(u->hover_key, key) == 0)
 		return;  /* Still on the same tile. */
+	u->hover_item = false;
 
 	/* A new tile: highlight it now, and start the tooltip's half-second. */
 	tip_hide(u);
@@ -454,7 +513,8 @@ void rei_tray_pointer_moved(struct rei_server *s, double x, double y)
 		s->start_hover = over_start;
 		rei_server_schedule_damage(s);
 	}
-	if (!s->tray_ui && s->config->toolbar_tray == REI_TRAY_OFF)
+	if (!s->tray_ui && s->config->toolbar_tray == REI_TRAY_OFF && !s->config->toolbar_battery &&
+	    !s->config->toolbar_clock_format[0])
 		return;
 	struct rei_tray_ui *u = ui_of(s);
 	rei_popup_motion(s, x, y);  /* The open list's hover row follows the pointer. */
@@ -650,5 +710,5 @@ void rei_tray_finish(struct rei_server *s)
 
 bool rei_tray_hovering(const struct rei_server *s)
 {
-	return s->tray_ui && s->tray_ui->hover_valid;
+	return s->tray_ui && s->tray_ui->hover_valid && !s->tray_ui->hover_item;
 }

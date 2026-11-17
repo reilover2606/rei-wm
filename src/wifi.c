@@ -1,6 +1,10 @@
 #include "wifi.h"
 
 #include <dirent.h>
+#include <errno.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <wayland-server-core.h>
 #include <event2/event.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,6 +13,9 @@
 #include <unistd.h>
 
 #include "config.h"
+#include "desktop.h"
+#include "proto/xdg_shell.h"
+#include "xwayland.h"
 #include "input/actions.h"
 #include "msgbuf.h"
 #include "server.h"
@@ -21,6 +28,7 @@ struct rei_wifi {
 	struct event *timer;
 	struct rei_wifi_info info;
 	bool on;
+	pid_t group;   /* the session of the instance the last click started (0: none) */
 };
 
 static bool is_dir(const char *path)
@@ -171,11 +179,42 @@ struct rei_wifi_info rei_wifi_state(const struct rei_server *s)
 	return s->wifi && s->wifi->on ? s->wifi->info : none;
 }
 
+/* Whether the instance the icon started is still running (anything left in its session). */
+static bool instance_alive(const struct rei_wifi *w)
+{
+	return w && w->group > 0 && (kill(-w->group, 0) == 0 || errno == EPERM);
+}
+
 void rei_wifi_click(struct rei_server *s)
 {
 	const char *cmd = s->config->toolbar_wifi_command;
 	if (!cmd || !cmd[0])
 		return;
+	/* Clicking again closes what the first click opened, rather than opening a second. */
+	if (instance_alive(s->wifi)) {
+		rei_info("wifi: closing %s", cmd);
+		kill(-s->wifi->group, SIGTERM);
+		s->wifi->group = 0;
+		return;
+	}
 	rei_info("wifi: %s", cmd);
-	rei_msg_run_captured(s, cmd);   /* (if it cannot be run, its error is a message) */
+	pid_t group = 0;
+	rei_msg_run_captured_group(s, cmd, &group);   /* (if it cannot be run, its error is a message) */
+	if (s->wifi)
+		s->wifi->group = group;
+}
+
+bool rei_wifi_owns_view(struct rei_server *s, const struct rei_view *v)
+{
+	if (!instance_alive(s->wifi))
+		return false;
+	pid_t pid = 0;
+	if (v->xwin) {
+		pid = rei_xwindow_pid(v->xwin);
+	} else if (v->toplevel && v->toplevel->resource) {
+		uid_t uid;
+		gid_t gid;
+		wl_client_get_credentials(wl_resource_get_client(v->toplevel->resource), &pid, &uid, &gid);
+	}
+	return pid > 0 && getsid(pid) == s->wifi->group;
 }

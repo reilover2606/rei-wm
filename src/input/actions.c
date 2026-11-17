@@ -82,8 +82,10 @@ static void free_environment(char **env)
 
 /* Starts `command` through the shell, detached. With out_fd, its stdout and stderr are connected to a
  * pipe whose read end is returned there (non-blocking); its stdin is /dev/null. */
-static bool spawn(struct rei_server *s, const char *command, int *out_fd)
+static bool spawn(struct rei_server *s, const char *command, int *out_fd, pid_t *group)
 {
+	if (group)
+		*group = 0;
 	char **env = build_environment(s, s->socket_name);
 	bool ok = false;
 	int pfd[2] = { -1, -1 };
@@ -119,6 +121,8 @@ static bool spawn(struct rei_server *s, const char *command, int *out_fd)
 		int status = 0;
 		waitpid(pid, &status, 0);
 		ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+		if (ok && group)
+			*group = pid;   /* its setsid made it the session and process group id of all it started */
 		if (!ok)
 			rei_error("cannot start '%s'", command);
 	}
@@ -138,12 +142,17 @@ static bool spawn(struct rei_server *s, const char *command, int *out_fd)
 
 bool rei_spawn(struct rei_server *s, const char *command)
 {
-	return spawn(s, command, NULL);
+	return spawn(s, command, NULL, NULL);
 }
 
 bool rei_spawn_capture(struct rei_server *s, const char *command, int *out_fd)
 {
-	return spawn(s, command, out_fd);
+	return spawn(s, command, out_fd, NULL);
+}
+
+bool rei_spawn_capture_group(struct rei_server *s, const char *command, int *out_fd, pid_t *group)
+{
+	return spawn(s, command, out_fd, group);
 }
 
 void rei_actions_run(struct rei_server *s, const struct rei_action *action)

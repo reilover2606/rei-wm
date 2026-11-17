@@ -429,6 +429,8 @@ static void battery_layout(cairo_t *cr, PangoFontDescription *font, const struct
 	int tw, th;
 	pango_layout_get_pixel_size(l, &tw, &th);
 	g_object_unref(l);
+	if (!st->battery_show_percent)   /* the icon alone */
+		tw = th = 0;
 	*tw_out = tw;
 	*th_out = th;
 
@@ -445,16 +447,56 @@ static void battery_layout(cairo_t *cr, PangoFontDescription *font, const struct
 	}
 	bool anything = st->volume[0] || st->clock[0];
 	if (!vertical) {
-		*w = BATT_ICON_W + BATT_GAP + tw;
+		*w = BATT_ICON_W + (tw > 0 ? BATT_GAP + tw : 0);
 		*h = th > BATT_BODY_H ? th : BATT_BODY_H;
 		*x = edge - (anything ? VOLUME_GAP : 0) - *w;
 		*y = (lh - *h) / 2.0;
 	} else {
 		*w = tw > BATT_ICON_W ? tw : BATT_ICON_W;
-		*h = BATT_BODY_H + 3 + th;
+		*h = BATT_BODY_H + (th > 0 ? 3 + th : 0);
 		*x = (lw - *w) / 2.0;
 		*y = edge - (anything ? VOLUME_GAP : 0) - *h;
 	}
+}
+
+/* The battery's rectangle (bar-local), for hit-testing and its tooltip. */
+bool rei_bar_battery_rect(const struct rei_bar_state *st, struct rei_rect *out)
+{
+	if (!st->battery_present)
+		return false;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
+	cairo_t *cr = cairo_create(surface);
+	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
+	double x, y, w, h, tw, th;
+	battery_layout(cr, font, st, &x, &y, &w, &h, &tw, &th);
+	pango_font_description_free(font);
+	cairo_destroy(cr);
+	cairo_surface_destroy(surface);
+	if (!rei_bar_vertical(st->position))
+		*out = (struct rei_rect){ (int)floor(x) - 4, 0, (int)ceil(w) + 8, st->thickness };
+	else
+		*out = (struct rei_rect){ 0, (int)floor(y) - 3, st->thickness, (int)ceil(h) + 6 };
+	return true;
+}
+
+/* The clock's rectangle (bar-local). */
+bool rei_bar_clock_rect(const struct rei_bar_state *st, struct rei_rect *out)
+{
+	if (!st->clock[0])
+		return false;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
+	cairo_t *cr = cairo_create(surface);
+	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
+	double cw, ch, cl;
+	clock_only_extent(cr, font, st, &cw, &ch, &cl);
+	pango_font_description_free(font);
+	cairo_destroy(cr);
+	cairo_surface_destroy(surface);
+	if (!rei_bar_vertical(st->position))
+		*out = (struct rei_rect){ st->length - (int)BAR_PAD - (int)ceil(cw) - 4, 0, (int)ceil(cw) + (int)BAR_PAD + 4, st->thickness };
+	else
+		*out = (struct rei_rect){ 0, st->length - (int)BAR_PAD - (int)ceil(ch) - 3, st->thickness, (int)ceil(ch) + (int)BAR_PAD + 3 };
+	return true;
 }
 
 /* ---- Wifi: a small signal icon, just before the battery (or the volume, or the clock) ---- */
@@ -1032,7 +1074,9 @@ static void draw_battery(cairo_t *cr, PangoFontDescription *font, const struct r
 		cairo_fill(cr);
 	}
 
-	/* The percentage. */
+	/* The percentage (unless only the icon is wanted). */
+	if (!st->battery_show_percent)
+		return;
 	char text[16];
 	battery_text(st, text, sizeof text);
 	set_color(cr, low ? bs->inactive_color : bs->text_color);

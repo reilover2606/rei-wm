@@ -92,6 +92,7 @@ struct rei_config {
 	enum rei_tray_mode toolbar_tray;  /* The application tray in the middle of the bar. */
 	bool toolbar_sysinfo;             /* Show CPU and RAM use, left of the clock. */
 	bool toolbar_battery;             /* Show the battery, if the machine has one. */
+	bool toolbar_battery_percent;     /* The battery shows its percentage beside the icon (else the icon alone; a tooltip has it). */
 	bool toolbar_wifi;                /* Show the wifi item, if the machine has a wireless interface. */
 	char *toolbar_wifi_command;       /* Run when it is clicked. */
 	enum rei_tray_scope toolbar_tray_scope;

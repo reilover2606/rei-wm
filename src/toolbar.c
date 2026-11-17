@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "audio.h"
 #include "volume.h"
@@ -134,6 +135,7 @@ static void build_state_for(struct rei_server *s, struct rei_output *o, const st
 	struct rei_battery_info bat = rei_battery_state(s);
 	st->battery_present = bat.present;
 	st->battery_percent = bat.percent;
+	st->battery_show_percent = cfg->toolbar_battery_percent;
 	st->battery_charging = bat.charging;
 	st->tray_mode = cfg->toolbar_tray;
 	st->tray_min_percent = cfg->toolbar_tray_min_width;
@@ -288,6 +290,97 @@ bool rei_toolbar_volume_at(struct rei_server *s, double x, double y)
 		return lx >= v.x && ly >= v.y && lx < v.x + v.w && ly < v.y + v.h;
 	}
 	return false;
+}
+
+bool rei_toolbar_item_at(struct rei_server *s, double x, double y, struct rei_output **out, int *item,
+			 struct rei_rect *rect)
+{
+	if (!bar_enabled(s))
+		return false;
+	struct rei_output *o;
+	wl_list_for_each(o, &s->outputs, link) {
+		struct rei_rect r = bar_rect(s, o);
+		if (x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h)
+			continue;
+		struct rei_bar_state st;
+		build_state(s, o, &st);
+		double lx = x - r.x, ly = y - r.y;
+		struct rei_rect v;
+		/* The battery, then the clock (the more specific first: they do not overlap). */
+		if (rei_bar_battery_rect(&st, &v) && lx >= v.x && ly >= v.y && lx < v.x + v.w && ly < v.y + v.h) {
+			*out = o;
+			*item = REI_BAR_ITEM_BATTERY;
+			*rect = (struct rei_rect){ r.x + v.x, r.y + v.y, v.w, v.h };
+			return true;
+		}
+		if (rei_bar_clock_rect(&st, &v) && lx >= v.x && ly >= v.y && lx < v.x + v.w && ly < v.y + v.h) {
+			*out = o;
+			*item = REI_BAR_ITEM_CLOCK;
+			*rect = (struct rei_rect){ r.x + v.x, r.y + v.y, v.w, v.h };
+			return true;
+		}
+		return false;
+	}
+	return false;
+}
+
+/* The zone's name ("Europe/Berlin"): $TZ, else where /etc/localtime points, else /etc/timezone. Empty if unknown. */
+static void timezone_name(char *out, size_t n)
+{
+	out[0] = '\0';
+	const char *tz = getenv("TZ");
+	if (tz && tz[0]) {
+		if (tz[0] == ':')
+			tz++;
+		const char *z = strstr(tz, "zoneinfo/");
+		snprintf(out, n, "%s", z ? z + 9 : tz);
+		return;
+	}
+	char link[300];
+	ssize_t l = readlink("/etc/localtime", link, sizeof link - 1);
+	if (l > 0) {
+		link[l] = '\0';
+		const char *z = strstr(link, "zoneinfo/");
+		if (z) {
+			snprintf(out, n, "%s", z + 9);
+			return;
+		}
+	}
+	FILE *f = fopen("/etc/timezone", "r");
+	if (f) {
+		if (fgets(out, (int)n, f))
+			out[strcspn(out, "\r\n")] = '\0';
+		fclose(f);
+	}
+}
+
+void rei_toolbar_item_tip(struct rei_server *s, int item, char *out, size_t n)
+{
+	out[0] = '\0';
+	if (item == REI_BAR_ITEM_BATTERY) {
+		struct rei_battery_info bat = rei_battery_state(s);
+		const char *state = bat.charging ? " (charging)" : bat.discharging ? " (on battery)" : bat.percent >= 100 ? " (full)" : "";
+		snprintf(out, n, "Battery: %d%%%s", bat.percent, state);
+	} else if (item == REI_BAR_ITEM_CLOCK) {
+		time_t now = time(NULL);
+		struct tm tm;
+		localtime_r(&now, &tm);
+		char date[96], clock[32], zone[80], abbr[16] = "";
+		strftime(date, sizeof date, "%A, %d %B %Y", &tm);
+		strftime(clock, sizeof clock, "%H:%M:%S", &tm);
+		timezone_name(zone, sizeof zone);
+		if (tm.tm_zone)
+			snprintf(abbr, sizeof abbr, "%s", tm.tm_zone);
+		long off = tm.tm_gmtoff;
+		char sign = off < 0 ? '-' : '+';
+		long a = off < 0 ? -off : off;
+		char utc[24];
+		snprintf(utc, sizeof utc, "UTC%c%02ld:%02ld", sign, a / 3600, (a % 3600) / 60);
+		if (zone[0])
+			snprintf(out, n, "%s\n%s\n%s (%s%s%s)", date, clock, zone, abbr, abbr[0] ? ", " : "", utc);
+		else
+			snprintf(out, n, "%s\n%s\n%s%s%s", date, clock, abbr, abbr[0] ? ", " : "", utc);
+	}
 }
 
 bool rei_toolbar_wifi_at(struct rei_server *s, double x, double y)

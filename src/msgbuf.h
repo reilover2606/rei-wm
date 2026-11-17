@@ -2,6 +2,7 @@
 #define REI_MSGBUF_H
 
 #include <stdbool.h>
+#include <sys/types.h>
 
 #include "snapshot.h"
 
@@ -23,6 +24,8 @@ void rei_msg_push_keyed(struct rei_server *server, const char *key, const char *
 /* Runs `command` like rei_spawn, but its output (stdout and stderr) becomes messages. No output, no
  * message. Used by the Run prompt. */
 bool rei_msg_run_captured(struct rei_server *server, const char *command);
+/* The same, with the id of the session the command runs in (see rei_spawn_capture_group). */
+bool rei_msg_run_captured_group(struct rei_server *server, const char *command, pid_t *group);
 
 void rei_msg_toggle_stack(struct rei_server *server);
 bool rei_msg_stack_open(const struct rei_server *server);

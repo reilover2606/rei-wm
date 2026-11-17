@@ -310,10 +310,15 @@ static void on_capture_readable(evutil_socket_t fd, short what, void *arg)
 
 bool rei_msg_run_captured(struct rei_server *s, const char *command)
 {
+	return rei_msg_run_captured_group(s, command, NULL);
+}
+
+bool rei_msg_run_captured_group(struct rei_server *s, const char *command, pid_t *group)
+{
 	if (!s->config->messages_enabled)
-		return rei_spawn(s, command);
+		return rei_spawn_capture_group(s, command, NULL, group);
 	int fd = -1;
-	if (!rei_spawn_capture(s, command, &fd))
+	if (!rei_spawn_capture_group(s, command, &fd, group))
 		return false;
 	struct rei_messages *m = state_of(s);
 	struct capture *c = rei_xcalloc(1, sizeof *c);

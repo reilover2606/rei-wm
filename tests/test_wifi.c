@@ -63,6 +63,43 @@ static struct icon look(void)
 	return ic;
 }
 
+static int read_pid(const char *path)
+{
+	FILE *f = fopen(path, "r");
+	int pid = 0;
+	if (f) {
+		if (fscanf(f, "%d", &pid) != 1)
+			pid = 0;
+		fclose(f);
+	}
+	return pid;
+}
+
+/* Alive and not a zombie (nothing may be reaping what the compositor's spawn left to init). */
+static bool pid_running(int pid)
+{
+	char path[64], line[256];
+	snprintf(path, sizeof path, "/proc/%d/stat", pid);
+	FILE *f = fopen(path, "r");
+	if (!f)
+		return false;
+	bool alive = true;
+	if (fgets(line, sizeof line, f)) {
+		const char *p = strrchr(line, ')');
+		alive = !(p && p[1] == ' ' && p[2] == 'Z');
+	}
+	fclose(f);
+	return alive;
+}
+
+static void click_icon(int x, int y)
+{
+	inject("motion_abs %d %d", x, y);
+	inject("button 272 1");
+	inject("button 272 0");
+	settle_all();
+}
+
 int main(int argc, char **argv)
 {
 	CHECK(argc == 2);
@@ -100,7 +137,7 @@ int main(int argc, char **argv)
 	char config[1500];
 	snprintf(config, sizeof config,
 		 "[toolbar]\nenabled = true\nclock_format = \"CLOCK\"\nbattery = false\nsysinfo = false\nbackground = \"#101010\"\n"
-		 "foreground = \"#e8e8e8\"\nwifi_command = \"touch %s\"\n[start_menu]\nenabled = false\n[audio]\nenabled = false\n"
+		 "foreground = \"#e8e8e8\"\nwifi_command = \"echo $$ > %s; exec sleep 300\"\n[start_menu]\nenabled = false\n[audio]\nenabled = false\n"
 		 "[[output]]\nname = \"OUT\"\nwidth = 800\nheight = 600\n", started);
 	set_quality("wlan0", 60);
 	start_compositor(argv[1], config, true);
@@ -159,14 +196,34 @@ int main(int argc, char **argv)
 		CHECK(t < 4000);
 		sleep_ms(30);
 	}
-	/* A click beside it does not. */
+	/* A second click closes that instance rather than starting another; a third starts one again. */
+	int first = read_pid(started);
+	CHECK(first > 0 && pid_running(first));
+	click_icon(down.x, down.y);
+	for (int t = 0; pid_running(first); t += 30) {
+		CHECK(t < 4000);
+		sleep_ms(30);
+	}
 	unlink(started);
+	click_icon(down.x, down.y);
+	for (int t = 0; access(started, F_OK) != 0; t += 30) {
+		CHECK(t < 4000);
+		sleep_ms(30);
+	}
+	int second = read_pid(started);
+	CHECK(second > 0 && second != first && pid_running(second));
+	/* A click beside it does nothing. */
 	inject("motion_abs %d 14", down.x - 60);
 	inject("button 272 1");
 	inject("button 272 0");
 	settle_all();
 	sleep_ms(300);
-	CHECK(access(started, F_OK) != 0);
+	CHECK(pid_running(second));
+	click_icon(down.x, down.y);   /* (closes it again) */
+	for (int t = 0; pid_running(second); t += 30) {
+		CHECK(t < 4000);
+		sleep_ms(30);
+	}
 	CHECK(stop_compositor() == 0);
 
 	/* ---- A machine without a wireless interface: no item. ---- */

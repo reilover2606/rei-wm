@@ -250,6 +250,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_thickness = 28;
 	cfg->toolbar_tray = REI_TRAY_ICONS_NAMES;
 	cfg->toolbar_battery = true;
+	cfg->toolbar_battery_percent = true;
 	cfg->toolbar_wifi = true;
 	cfg->toolbar_wifi_command = rei_xstrdup("wpa_gui");
 	cfg->toolbar_sysinfo = true;
@@ -537,6 +538,9 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		const struct toml_value *sysi = get(&r, tb, "toolbar.", "sysinfo", TOML_BOOL);
 		if (sysi)
 			cfg->toolbar_sysinfo = sysi->u.b;
+		const struct toml_value *bp = get(&r, tb, "toolbar.", "battery_percent", TOML_BOOL);
+		if (bp)
+			cfg->toolbar_battery_percent = bp->u.b;
 		const struct toml_value *wf = get(&r, tb, "toolbar.", "wifi", TOML_BOOL);
 		if (wf)
 			cfg->toolbar_wifi = wf->u.b;

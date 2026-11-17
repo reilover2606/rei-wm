@@ -9,6 +9,7 @@
 #include "toolbar.h"
 #include "tray.h"
 #include "server.h"
+#include "wifi.h"
 #include "proto/fractional_scale.h"
 #include "winfx.h"
 #include "util/log.h"
@@ -372,6 +373,8 @@ static void detach(struct rei_view *v)
 /* Dialogs, and windows that can't be resized, are better off floating. */
 static bool wants_float(struct rei_server *s, const struct rei_view *v)
 {
+	if (rei_wifi_owns_view(s, v))
+		return true;
 	bool float_new = s->float_new_set ? s->float_new : s->config->float_new_windows;
 	if (v->xwin)
 		return float_new || rei_xwindow_wants_float(v->xwin);

@@ -30,7 +30,7 @@
 struct atoms {
 	xcb_atom_t wm_protocols, wm_delete_window, wm_take_focus, wm_state, wm_change_state;
 	xcb_atom_t wm_normal_hints, wm_transient_for, wm_class, wm_name;
-	xcb_atom_t net_wm_name, utf8_string;
+	xcb_atom_t net_wm_name, utf8_string, net_wm_pid;
 	xcb_atom_t net_wm_state, net_wm_state_fullscreen;
 	xcb_atom_t net_wm_window_type, type_dialog, type_utility, type_splash, type_toolbar, type_menu;
 	xcb_atom_t net_active_window, net_supported, net_supporting_wm_check, net_close_window;
@@ -58,6 +58,7 @@ struct rei_xwindow {
 	char *wm_class;  /* WM_CLASS's class (the second string). */
 	int32_t min_w, min_h, max_w, max_h;
 	xcb_window_t transient_for;
+	uint32_t pid;           /* _NET_WM_PID: the process that made it (0: it did not say). */
 	bool dialog_type;
 	bool supports_delete, supports_take_focus;
 };
@@ -115,7 +116,7 @@ static void load_atoms(struct rei_xwayland *x)
 		A(wm_take_focus, "WM_TAKE_FOCUS"), A(wm_state, "WM_STATE"),
 		A(wm_change_state, "WM_CHANGE_STATE"), A(wm_normal_hints, "WM_NORMAL_HINTS"),
 		A(wm_transient_for, "WM_TRANSIENT_FOR"), A(wm_class, "WM_CLASS"), A(wm_name, "WM_NAME"),
-		A(net_wm_name, "_NET_WM_NAME"), A(utf8_string, "UTF8_STRING"),
+		A(net_wm_name, "_NET_WM_NAME"), A(utf8_string, "UTF8_STRING"), A(net_wm_pid, "_NET_WM_PID"),
 		A(net_wm_state, "_NET_WM_STATE"), A(net_wm_state_fullscreen, "_NET_WM_STATE_FULLSCREEN"),
 		A(net_wm_window_type, "_NET_WM_WINDOW_TYPE"),
 		A(type_dialog, "_NET_WM_WINDOW_TYPE_DIALOG"), A(type_utility, "_NET_WM_WINDOW_TYPE_UTILITY"),
@@ -208,6 +209,12 @@ static void read_hints(struct rei_xwayland *x, struct rei_xwindow *w)
 	r = get_prop(x, w->id, x->atoms.wm_transient_for, XCB_ATOM_WINDOW, 1);
 	if (r && xcb_get_property_value_length(r) >= 4)
 		w->transient_for = *(const xcb_window_t *)xcb_get_property_value(r);
+	free(r);
+
+	w->pid = 0;
+	r = get_prop(x, w->id, x->atoms.net_wm_pid, XCB_ATOM_CARDINAL, 1);
+	if (r && xcb_get_property_value_length(r) >= 4)
+		w->pid = *(const uint32_t *)xcb_get_property_value(r);
 	free(r);
 
 	w->dialog_type = false;
@@ -724,6 +731,11 @@ bool rei_xwindow_wants_float(const struct rei_xwindow *w)
 {
 	bool fixed = w->min_w > 0 && w->min_h > 0 && w->min_w == w->max_w && w->min_h == w->max_h;
 	return w->transient_for != 0 || w->dialog_type || fixed;
+}
+
+pid_t rei_xwindow_pid(const struct rei_xwindow *w)
+{
+	return (pid_t)w->pid;
 }
 
 bool rei_xwindow_wants_fullscreen(const struct rei_xwindow *w)

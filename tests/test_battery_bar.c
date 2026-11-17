@@ -24,16 +24,37 @@ static void put(const char *supply, const char *file, const char *text)
 }
 
 /* Counts pixels in the bar's right half that look like the battery's "level" colour. */
-static int count_level(const struct ppm *img, bool green)
+static int count_level_to(const struct ppm *img, bool green, int x1)
 {
 	int n = 0;
 	for (int y = 2; y < 26; y++)
-		for (int x = 500; x < OUT_W - 90; x++) {
+		for (int x = 500; x < x1; x++) {
 			const uint8_t *p = img->rgb + ((size_t)y * (size_t)img->w + (size_t)x) * 3;
 			if (green ? (p[1] > 150 && p[0] < 160 && p[2] < 160) : (p[0] > 180 && p[1] > 180 && p[2] > 180))
 				n++;
 		}
 	return n;
+}
+
+static int count_level(const struct ppm *img, bool green)
+{
+	return count_level_to(img, green, OUT_W - 90);
+}
+
+static void reload_config(const char *text)
+{
+	char path[500], tmp[520];
+	snprintf(path, sizeof path, "%s/config.toml", g_dir);
+	snprintf(tmp, sizeof tmp, "%s.new", path);
+	write_text(tmp, text);
+	int ok = log_count("config reloaded");
+	CHECK(rename(tmp, path) == 0);
+	CHECK(kill(g_pid, SIGHUP) == 0);
+	for (int t = 0; log_count("config reloaded") <= ok; t += 20) {
+		CHECK(t < 5000);
+		sleep_ms(20);
+	}
+	settle_all();
 }
 
 int main(int argc, char **argv)
@@ -56,6 +77,7 @@ int main(int argc, char **argv)
 	put("BAT1", "status", "Discharging");
 	setenv("REI_POWER_SUPPLY_DIR", g_supply, 1);
 	setenv("REI_BATTERY_POLL_SECONDS", "1", 1);
+	setenv("TZ", "Asia/Kolkata", 1);
 
 	char config[300];
 	snprintf(config, sizeof config,
@@ -81,6 +103,50 @@ int main(int argc, char **argv)
 			break;
 		CHECK(t < 6000);
 	}
+
+	/* Hovering the battery (it is among the last items on the bar) shows its exact percentage after half a second. */
+	for (int x = OUT_W - 20; x > 500 && !log_has("bar tooltip: Battery"); x -= 6) {
+		char buf[64];
+		snprintf(buf, sizeof buf, "motion_abs %d 14\n", x);
+		inject_lines(buf);
+		settle_all();
+		sleep_ms(560);
+		settle_all();
+	}
+	CHECK(log_has("bar tooltip: Battery: 63%"));
+	inject_lines("motion_abs 400 400\n");
+	settle_all();
+
+	/* The clock's tooltip: the date and time to the second, and the zone. */
+	for (int x = OUT_W - 20; x > 300 && !log_has("+05:30"); x -= 12) {
+		char buf[64];
+		snprintf(buf, sizeof buf, "motion_abs %d 14\n", x);
+		inject_lines(buf);
+		settle_all();
+		sleep_ms(560);
+		settle_all();
+	}
+	CHECK(log_has("+05:30"));
+	CHECK(log_has("Asia/Kolkata") || log_has("IST"));
+	inject_lines("motion_abs 400 400\n");
+	settle_all();
+
+	/* Icon only: the percentage text goes (the bar picture changes), and the battery is still there. */
+	struct ppm with = screenshot();
+	reload_config("[toolbar]\nenabled = true\nsysinfo = false\nbattery_percent = false\n[[output]]\nname = \"OUT\"\n"
+		      "width = 800\nheight = 600\n");
+	struct ppm icon = screenshot();
+	int w_all = count_level_to(&with, false, OUT_W - 2), i_all = count_level_to(&icon, false, OUT_W - 2);
+	CHECK(i_all > 5 && i_all < w_all);        /* still there, but without the digits */
+	free(with.rgb);
+	free(icon.rgb);
+
+	/* Disabled in the config and reloaded: the battery really goes (it used to stay). */
+	reload_config("[toolbar]\nenabled = true\nsysinfo = false\nbattery = false\n[[output]]\nname = \"OUT\"\n"
+		      "width = 800\nheight = 600\n");
+	img = screenshot();
+	CHECK(log_has("battery: stopped"));
+	free(img.rgb);
 
 	inject_lines("key 125 1\nkey 42 1\nkey 18 1\nkey 18 0\nkey 42 0\nkey 125 0\n");
 	for (int t = 0;; t += 10) {
