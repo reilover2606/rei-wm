@@ -114,6 +114,14 @@ int main(int argc, char **argv)
 		settle_all();
 	}
 	CHECK(log_has("bar tooltip: Battery: 63%"));
+	if (getenv("REI_SHOT_DIR")) {
+		sleep_ms(400);
+		struct ppm im = screenshot();
+		free(im.rgb);
+		char cmd[600];
+		snprintf(cmd, sizeof cmd, "cp %s %s/battery-tip.ppm", g_shot, getenv("REI_SHOT_DIR"));
+		CHECK(system(cmd) == 0);
+	}
 	inject_lines("motion_abs 400 400\n");
 	settle_all();
 
@@ -127,15 +135,33 @@ int main(int argc, char **argv)
 		settle_all();
 	}
 	CHECK(log_has("+05:30"));
+	if (getenv("REI_SHOT_DIR")) {
+		sleep_ms(400);
+		struct ppm im = screenshot();
+		free(im.rgb);
+		char cmd[600];
+		snprintf(cmd, sizeof cmd, "cp %s %s/clock-tip.ppm", g_shot, getenv("REI_SHOT_DIR"));
+		CHECK(system(cmd) == 0);
+	}
 	CHECK(log_has("Asia/Kolkata") || log_has("IST"));
 	inject_lines("motion_abs 400 400\n");
 	settle_all();
 
 	/* Icon only: the percentage text goes (the bar picture changes), and the battery is still there. */
 	struct ppm with = screenshot();
+	if (getenv("REI_SHOT_DIR")) {
+		char cmd[600];
+		snprintf(cmd, sizeof cmd, "cp %s %s/battery-full.ppm", g_shot, getenv("REI_SHOT_DIR"));
+		CHECK(system(cmd) == 0);
+	}
 	reload_config("[toolbar]\nenabled = true\nsysinfo = false\nbattery_percent = false\n[[output]]\nname = \"OUT\"\n"
 		      "width = 800\nheight = 600\n");
 	struct ppm icon = screenshot();
+	if (getenv("REI_SHOT_DIR")) {
+		char cmd[600];
+		snprintf(cmd, sizeof cmd, "cp %s %s/battery-icon.ppm", g_shot, getenv("REI_SHOT_DIR"));
+		CHECK(system(cmd) == 0);
+	}
 	int w_all = count_level_to(&with, false, OUT_W - 2), i_all = count_level_to(&icon, false, OUT_W - 2);
 	CHECK(i_all > 5 && i_all < w_all);        /* still there, but without the digits */
 	free(with.rgb);
