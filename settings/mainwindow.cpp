@@ -229,6 +229,8 @@ QWidget *MainWindow::buildGeneralTab()
 		 { "super", "alt", "ctrl", "shift" });
 	addField(f, tr("Focus follows the mouse"), "general", "focus_follows_mouse", Bool, true, {}, 0, 0, 1,
 		 tr("Hovering a window focuses it; leaving every window focuses nothing. Off: click to focus."));
+	addField(f, tr("Turn the display off after (minutes)"), "general", "display_sleep", Int, 5, {}, 0, 1440, 1,
+		 tr("Without keyboard or mouse use. Any input wakes it. 0 means never. Programs playing video keep it awake."));
 	addField(f, tr("Run Xwayland (X11 programs)"), "general", "xwayland", Bool, true,
 		 {}, 0, 0, 1, tr("Needs a restart of rei-wm to change."));
 	addField(f, tr("X resources file"), "general", "xresources", String, "~/.Xresources", {}, 0, 0, 1,

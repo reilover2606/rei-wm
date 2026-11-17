@@ -1,3 +1,4 @@
+#include "idle.h"
 #include "audio.h"
 #include "volume.h"
 #include "tray.h"
@@ -220,6 +221,8 @@ void rei_input_key(struct rei_server *server, uint32_t time_ms, uint32_t code, b
 {
 	struct rei_input *in = server->input;
 	if (!in)
+		return;
+	if (rei_idle_activity(server, pressed))   /* a press that only woke the display is not typed */
 		return;
 
 	/* Ignore a press of a key already down or a release of one that isn't:
@@ -505,6 +508,7 @@ void rei_input_pointer_motion(struct rei_server *s, uint32_t time_ms, double dx,
 {
 	if (!s->input || wl_list_empty(&s->outputs))
 		return;
+	rei_idle_activity(s, false);
 	s->cursor_x += dx;
 	s->cursor_y += dy;
 	pointer_moved(s->input, time_ms);
@@ -514,6 +518,7 @@ void rei_input_pointer_motion_abs(struct rei_server *s, uint32_t time_ms, double
 {
 	if (!s->input || wl_list_empty(&s->outputs))
 		return;
+	rei_idle_activity(s, false);
 	s->cursor_x = x;
 	s->cursor_y = y;
 	pointer_moved(s->input, time_ms);
@@ -523,6 +528,8 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 {
 	struct rei_input *in = s->input;
 	if (!in)
+		return;
+	if (rei_idle_activity(s, pressed))   /* a click that only woke the display lands on nothing */
 		return;
 
 	if (pressed ? !set_add(in->buttons, &in->n_buttons, REI_MAX_BUTTONS, button)
@@ -792,6 +799,8 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 void rei_input_pointer_axis(struct rei_server *s, uint32_t time_ms, bool horizontal, double value)
 {
 	struct rei_input *in = s->input;
+	if (in && rei_idle_activity(s, true))
+		return;
 	if (!in || in->move_view || in->resize_view || in->notch_press != REI_NOTCH_NONE || in->bar_press)
 		return;
 

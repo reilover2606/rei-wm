@@ -256,6 +256,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_sysinfo = true;
 	cfg->start_enabled = true;
 	cfg->focus_follows_mouse = true;
+	cfg->display_sleep_minutes = 5;
 	cfg->cursor_theme = rei_xstrdup("");
 	cfg->volume_target = REI_VOLUME_AUTO;
 	cfg->brightness_step = 5;
@@ -338,6 +339,7 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		read_choice(&r, general, "general.", "session_bus", &bus, buses);
 		cfg->session_bus_private = strcmp(bus, "private") == 0;
 		free(bus);
+		read_int(&r, general, "general.", "display_sleep", &cfg->display_sleep_minutes, 0, 1440);
 		const struct toml_value *ffm = get(&r, general, "general.", "focus_follows_mouse", TOML_BOOL);
 		if (ffm)
 			cfg->focus_follows_mouse = ffm->u.b;

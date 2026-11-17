@@ -81,6 +81,11 @@ xwayland_shell_xml = files(protocols_dir / 'staging' / 'xwayland-shell' / 'xwayl
 xwayland_shell_server_h = scan_server_header.process(xwayland_shell_xml)
 xwayland_shell_code = scan_code.process(xwayland_shell_xml)
 
+idle_inhibit_xml = files(protocols_dir / 'unstable' / 'idle-inhibit' / 'idle-inhibit-unstable-v1.xml')
+idle_inhibit_server_h = scan_server_header.process(idle_inhibit_xml)
+idle_inhibit_client_h = scan_client_header.process(idle_inhibit_xml)
+idle_inhibit_code = scan_code.process(idle_inhibit_xml)
+
 viewporter_xml = files(protocols_dir / 'stable' / 'viewporter' / 'viewporter.xml')
 viewporter_server_h = scan_server_header.process(viewporter_xml)
 viewporter_client_h = scan_client_header.process(viewporter_xml)

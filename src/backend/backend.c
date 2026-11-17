@@ -25,6 +25,14 @@ struct rei_backend *rei_backend_create(const char *name, struct rei_server *serv
 	return NULL;
 }
 
+void rei_backend_set_display_power(struct rei_server *server, bool on)
+{
+	rei_info("display power: %s", on ? "on" : "off");
+	struct rei_backend *b = server->backend;
+	if (b && b->impl->set_display_power)
+		b->impl->set_display_power(b, on);
+}
+
 size_t rei_backend_output_count(struct rei_server *server)
 {
 	size_t n = server->config->n_outputs;

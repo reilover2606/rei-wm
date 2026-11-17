@@ -87,6 +87,16 @@ Ctrl+Backspace/Ctrl+W (word) and Ctrl+U (line) edit. Style it with `[theme.run_p
 - **Look:** colours, corner shapes, transparency and shadows of these elements are a theme; see
   [docs/THEME.md](docs/THEME.md).
 
+## Display sleep
+
+`[general] display_sleep = 5` turns the displays off after that many minutes without keyboard, mouse or touchpad
+use (0 never; the General tab of the settings app has it). Any input wakes them: a key press, click or scroll that
+wakes the display is swallowed (it must not type or click into what you could not see), while moving the pointer wakes
+it and carries on. A program holding an idle inhibitor (`zwp_idle_inhibit_manager_v1`, which video players and browsers
+playing video use) keeps the displays on. On the DRM backend the monitors are switched off through the kernel (the
+CRTCs are deactivated) and relit by a full modeset on wake; the headless and nested backends only log it. This
+is untested on real DRM hardware by the automated tests.
+
 ## The battery
 
 If the machine has a battery, the toolbar shows a horizontal battery icon that fills in proportion

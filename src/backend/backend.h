@@ -29,6 +29,8 @@ struct rei_backend_impl {
 	void (*config_changed)(struct rei_backend *backend);
 	/* Optional. Switch to virtual terminal `vt` (1-12). */
 	void (*switch_vt)(struct rei_backend *backend, unsigned vt);
+	/* Optional. Turn the displays off (display sleep) or back on. */
+	void (*set_display_power)(struct rei_backend *backend, bool on);
 };
 
 struct rei_backend {
@@ -53,6 +55,9 @@ void rei_backend_output_params(struct rei_server *server, size_t index,
 			       const char *fallback_prefix,
 			       char *name_buf, size_t name_buf_len,
 			       struct rei_output_params *p);
+
+/* Display sleep: turns the displays off or on, if the backend can (otherwise nothing happens). */
+void rei_backend_set_display_power(struct rei_server *server, bool on);
 
 /* Number of outputs a backend should create (at least one). */
 size_t rei_backend_output_count(struct rei_server *server);

@@ -40,6 +40,7 @@ struct rei_config {
 	char *xresources;          /* [general] xresources: loaded into Xwayland with xrdb ("" = no). */
 	bool xwayland;             /* Run Xwayland so X11 programs work. */
 	bool session_bus_private;  /* [general] session_bus = "private": launched programs get their own D-Bus session bus. */
+	int display_sleep_minutes;  /* The displays go to sleep after this long without input; 0 = never. */
 	bool focus_follows_mouse;  /* Moving the pointer onto a window focuses it. */
 
 	enum rei_volume_target { REI_VOLUME_AUTO, REI_VOLUME_SINK, REI_VOLUME_MPD, REI_VOLUME_BOTH } volume_target;   /* [audio] volume_target */
