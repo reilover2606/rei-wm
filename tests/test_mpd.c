@@ -580,7 +580,7 @@ int main(int argc, char **argv)
 	settle_all();
 	wait_cmd("setvol 85", 2);          /* 80 + 5: the keys know what mpc did */
 	/* Stopped or paused, the keys are the sound system's again: MPD is left alone. */
-	int sv = count_cmd("setvol 85");
+	int sv = count_cmd("setvol 85"), sv90 = count_cmd("setvol 90");   /* (how many there were, under any load) */
 	inject("key 57 1");                /* Space: pause */
 	inject("key 57 0");
 	settle_all();
@@ -590,7 +590,7 @@ int main(int argc, char **argv)
 	inject("key 115 0");
 	settle_all();
 	sleep_ms(300);
-	CHECK(count_cmd("setvol 85") == sv && count_cmd("setvol 90") == 2);
+	CHECK(count_cmd("setvol 85") == sv && count_cmd("setvol 90") == sv90);   /* nothing was sent to MPD */
 	inject("key 57 1");                /* and play again */
 	inject("key 57 0");
 	settle_all();
