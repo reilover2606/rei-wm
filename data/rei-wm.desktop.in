@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=rei-wm
+Comment=Wayland compositor, window manager and small desktop
+Exec=@bindir@/rei-wm-session
+TryExec=@bindir@/rei-wm
+Type=Application
+DesktopNames=rei-wm
+Keywords=wayland;compositor;wm;tiling;

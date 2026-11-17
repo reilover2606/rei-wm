@@ -52,6 +52,44 @@ itself if they are installed and not already running.
 If a feature's libraries are missing, Meson silently builds without it (`auto`); pass
 `-D<feature>=enabled` to make that an error instead.
 
+## Installing, and starting it from a display manager (LXDM)
+
+```bash
+meson setup build --prefix=/usr
+ninja -C build
+sudo ninja -C build install
+```
+
+This installs `rei-wm`, `rei-settings` (if Qt 6 was found), the launcher `rei-wm-session`, a session entry
+`/usr/share/wayland-sessions/rei-wm.desktop` and a menu entry for the settings app. `rei-wm` is then findable by
+the display manager as a session called **rei-wm**. (`--prefix=/usr/local`, Meson's default, puts the entry in
+`/usr/local/share/wayland-sessions`, which display managers do not read: use `/usr` for the session entry.)
+
+`rei-wm-session` is what the entry runs. It reads your login profile (`~/.profile`, `.bash_profile`...), sets
+`XDG_SESSION_TYPE=wayland`, `XDG_CURRENT_DESKTOP=rei-wm`, `MOZ_ENABLE_WAYLAND=1`, `QT_QPA_PLATFORM=wayland;xcb`
+and a few more, checks that the login has a runtime directory, and starts `rei-wm` with its output going to
+`~/.cache/rei-wm/session.log` (the previous run's is `session.log.1`). Extra options for rei-wm, such as `-v`
+for a debug log, go in `REI_WM_ARGS`, set in `~/.profile` or in `~/.config/rei-wm/session-env`. Everything else
+(backend, the keyboard, the wallpaper, autostart, `[general] session_bus = "private"` if programs need a D-Bus
+session bus) is the usual config file, created on first run.
+
+What has to be in place:
+
+- **A login session with seat access.** rei-wm opens the screen and the input devices through libseat, which
+  asks elogind (or systemd-logind) for them. LXDM must log you in through PAM with `pam_elogind` (Gentoo's
+  `/etc/pam.d/lxdm` includes `system-login`, which has it when elogind is the session provider), and elogind
+  must be running (`rc-update add elogind boot`). `loginctl session-status` in the session shows it.
+- **A display manager that lists `wayland-sessions`.** The entry follows the freedesktop convention. If yours
+  only reads `xsessions`, `meson configure build -Dxsession_entry=true` also installs one there; but the
+  display manager then starts an X server first and rei-wm cannot take the screen from it, so this is only worth
+  trying with a display manager that hands the VT over itself.
+- If the session returns to the login screen at once, `~/.cache/rei-wm/session.log` says why (and
+  `journalctl`/`/var/log/messages` for the launcher's own complaint about a missing `XDG_RUNTIME_DIR`).
+
+I could not run a display manager where this was written: the entry and launcher are tested (the launcher runs,
+sets the environment, starts the compositor and writes its log; the entry is well-formed), but picking it in
+LXDM itself is untested.
+
 ## USE flags worth knowing about
 
 Learned the hard way, for the programs you want to run *inside* rei-wm:
