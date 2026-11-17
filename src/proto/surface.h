@@ -38,8 +38,10 @@ enum rei_surface_role {
 struct rei_frame_cb {
 	struct wl_list link;
 	struct wl_resource *resource;
-	/* Fire only once a frame showing snapshot >= this serial reaches a screen,
-	 * so a callback never reports a frame that predates the commit. */
+	/* The serial of the first snapshot that carries the commit this callback came with (informational).
+	 * A callback is answered by the next frame that reaches a screen, whether or not that frame already shows the
+	 * commit, as other compositors do: waiting for the frame that does made a client whose commit landed while
+	 * another frame was in flight (a moving pointer is enough) wait a whole extra refresh, halving its frame rate. */
 	uint64_t min_serial;
 };
 

@@ -1,5 +1,6 @@
 #include "proto/surface.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wayland-server-protocol.h>
@@ -331,6 +332,35 @@ static void apply_state(struct rei_surface *s, struct rei_surface_state *st)
 }
 
 /* Turns the attached wl_buffer into pixels and releases it. */
+/* Says once per program how it draws: through GPU buffers (linux-dmabuf) or by copying pixels through shared
+ * memory, which costs a copy of the whole window on every frame (see the README, "Smooth browsers"). */
+static void note_buffer_kind(struct rei_surface *s, bool dmabuf, int32_t w, int32_t h)
+{
+	if ((int64_t)w * h < 400 * 300)   /* cursors, icons, small popups */
+		return;
+	pid_t pid = 0;
+	wl_client_get_credentials(wl_resource_get_client(s->resource), &pid, NULL, NULL);
+	static struct { pid_t pid; bool dmabuf; } seen[64];
+	static int n_seen;
+	for (int i = 0; i < n_seen; i++)
+		if (seen[i].pid == pid && seen[i].dmabuf == dmabuf)
+			return;
+	if (n_seen < 64) {
+		seen[n_seen].pid = pid;
+		seen[n_seen++].dmabuf = dmabuf;
+	}
+	char path[64], comm[64] = "?";
+	snprintf(path, sizeof path, "/proc/%d/comm", (int)pid);
+	FILE *f = fopen(path, "r");
+	if (f) {
+		if (fgets(comm, sizeof comm, f))
+			comm[strcspn(comm, "\n")] = '\0';
+		fclose(f);
+	}
+	rei_info("client pid %d (%s) draws a %dx%d window with %s", (int)pid, comm, w, h,
+		 dmabuf ? "GPU buffers (dmabuf)" : "shared memory: every frame is copied by the CPU");
+}
+
 static bool latch_buffer(struct rei_surface *s)
 {
 	struct rei_surface_state *p = &s->pending;
@@ -350,6 +380,7 @@ static bool latch_buffer(struct rei_surface *s)
 
 	struct rei_dmabuf *gpu = rei_dmabuf_from_buffer(p->buffer);
 	if (gpu) {
+		note_buffer_kind(s, true, gpu->width, gpu->height);
 		/* The client keeps the buffer until we release it, which waits for
 		 * the frame that stops showing it. */
 		p->dmabuf = rei_dmabuf_ref(gpu);
@@ -373,6 +404,7 @@ static bool latch_buffer(struct rei_surface *s)
 	int32_t h = wl_shm_buffer_get_height(shm);
 	int32_t stride = wl_shm_buffer_get_stride(shm);
 	uint32_t format = wl_shm_buffer_get_format(shm);
+	note_buffer_kind(s, false, w, h);
 	(void)scale;   /* see the rounding in apply (buffer sizes need not be multiples of the scale) */
 
 	if ((size_t)w * (size_t)h * 4 >= ((size_t)32 << 20)) {   /* 32 MiB and up: worth knowing about */
@@ -964,10 +996,9 @@ bool rei_surface_pick(const struct rei_surface *s, double ox, double oy,
 
 void rei_surface_fire_frames(struct rei_surface *s, uint64_t serial, uint32_t time_ms)
 {
+	(void)serial;   /* (see rei_frame_cb: every frame callback already committed is answered by the next frame shown) */
 	struct rei_frame_cb *cb, *tmp;
 	wl_list_for_each_safe(cb, tmp, &s->frames, link) {
-		if (cb->min_serial > serial)
-			continue;
 		struct wl_resource *res = cb->resource;
 		wl_list_remove(&cb->link);
 		wl_resource_set_user_data(res, NULL);
