@@ -261,6 +261,11 @@ backend ─ button ─► popup dismissal ─► click-to-focus/raise ─► cli
   Themes are XCursor files read by our own parser (`rei_xcursor_parse`), found via
   `index.theme` `Inherits=` and the older cursor names as aliases (`hand2` for `pointer`...). The decision
   is re-run after every batch of events, so a hover change needs no special hook.
+- **Wallpapers** (`wallpapers.c`). The scene asks, per output, for the picture of the workspace it shows: the
+  workspace's group, else the `any` group, else nothing (the clear colour). Groups keep their position in the cycle
+  across a config reload by name; one timer moves every due group on and has the scene redrawn. A picture is decoded
+  and rendered at the output's size on first use and cached (by picture, size, fit mode and colour; 256 MB, least
+  recently used out), so a workspace flip is a lookup.
 - **The top layer.** The message stack view (Mod+n) is the topmost thing: the snapshot carries `blur_from` (the index
   of its first drawable), and the renderer, on reaching it, copies what it has drawn, blurs that (mipmapped down
   to a quarter, four separable Gaussian passes) and draws it back darkened before the layer goes on top. While it

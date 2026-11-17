@@ -13,6 +13,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QSpinBox>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -246,6 +247,120 @@ int main(int argc, char **argv)
 		QString t = slurp(path);
 		CHECK(t.contains("[messages]\nposition = \"left\"\nduration = 4.5\n"));
 		CHECK(t.contains("sysinfo = false\n") && t.contains("autostart = false\n"));
+	}
+
+	/* The Wallpaper tab: groups of pictures, one "any" group, groups for particular workspaces. */
+	{
+		QString wpath = dir.path() + "/wall.toml";
+		QDir().mkpath(dir.path() + "/pics/folder");
+		for (const char *n : { "pics/one.png", "pics/two.png", "pics/folder/a.png", "pics/folder/b.jpg" }) {
+			QFile pf(dir.path() + "/" + n);
+			CHECK(pf.open(QIODevice::WriteOnly));
+			pf.write("x");
+		}
+		{
+			QFile wf(wpath);
+			CHECK(wf.open(QIODevice::WriteOnly));
+			wf.write(QString("# my wallpapers\n[wallpaper]\nmode = \"fit\"\n\n"
+					 "[[wallpaper_group]]\nname = \"Forest\"\npaths = [\"%1/pics/folder\"]\ninterval = 120\nany = true\n\n"
+					 "[[wallpaper_group]]\nname = \"Desk\"\npaths = [\n    \"%1/pics/one.png\",   # the first\n    \"%1/pics/two.png\",\n]\nworkspaces = [2, 5]\n")
+					 .arg(dir.path()).toUtf8());
+		}
+		MainWindow ww(wpath, wm);
+		auto *tabs = ww.findChild<QTabWidget *>("tabs");
+		bool has_tab = false, has_look = false;
+		for (int i = 0; i < tabs->count(); i++) {
+			has_tab |= tabs->tabText(i) == "Wallpaper";
+			has_look |= tabs->tabText(i) == "Look";
+		}
+		CHECK(has_tab && !has_look);   /* (it used to be called Look) */
+		auto *table = field<QTableWidget>(ww, "wallpaper_groups");
+		auto any = [&](int r) { return table->cellWidget(r, 3)->findChild<QRadioButton *>()->isChecked(); };
+		auto spin = [&](int r) { return qobject_cast<QSpinBox *>(table->cellWidget(r, 2))->value(); };
+		CHECK(table->rowCount() == 2);
+		CHECK(table->item(0, 0)->text() == "Forest" && any(0) && !any(1) && spin(0) == 120 && spin(1) == 600);
+		CHECK(table->item(0, 1)->text().contains("Folder folder") && table->item(0, 1)->text().contains("2"));
+		CHECK(table->item(1, 1)->text().contains("2 picture"));   /* the multi-line array was read */
+		CHECK(table->item(1, 4)->text() == "2, 5");
+		CHECK(field<QComboBox>(ww, "wallpaper.mode")->currentText() == "fit");
+		CHECK(!ww.dirty());
+		QString before = slurp(wpath);
+		CHECK(ww.save(&err));
+		CHECK(slurp(wpath) == before);   /* opening and saving changes nothing */
+
+		/* One picture is a group of one; several pictures, or a folder, are a group of those. */
+		ww.addWallpapers({ dir.path() + "/pics/one.png" });
+		CHECK(table->rowCount() == 3 && table->item(2, 0)->text() == "one" && table->item(2, 1)->text() == "one.png");
+		ww.addWallpapers({ dir.path() + "/pics/one.png", dir.path() + "/pics/two.png" });
+		CHECK(table->item(3, 1)->text().contains("2 picture") && table->item(3, 0)->text() == "pics");
+		ww.addWallpapers({ dir.path() + "/pics/folder" });
+		CHECK(table->item(4, 0)->text() == "folder" && table->item(4, 1)->text().contains("2 picture"));
+		CHECK(ww.dirty());
+		/* Only one group can be the any group: choosing another one moves it. */
+		table->cellWidget(2, 3)->findChild<QRadioButton *>()->setChecked(true);
+		CHECK(!any(0) && any(2));
+		qobject_cast<QSpinBox *>(table->cellWidget(3, 2))->setValue(45);
+		table->item(3, 4)->setText("3");
+		table->item(2, 4)->setText("1");
+		CHECK(ww.save(&err));
+		QString wt = slurp(wpath);
+		CHECK(wt.startsWith("# my wallpapers\n"));   /* the comment is still there */
+		CHECK(wt.contains("name = \"one\"\npaths = [\"" + dir.path() + "/pics/one.png\"]\nany = true\nworkspaces = [1]\n"));
+		CHECK(wt.contains("interval = 45\nworkspaces = [3]\n"));
+		CHECK(!wt.contains("# the first"));   /* the Desk group was rewritten with the rest */
+		{
+			MainWindow again(wpath, wm);   /* and it reads back the same */
+			auto *t2 = field<QTableWidget>(again, "wallpaper_groups");
+			CHECK(t2->rowCount() == 5 && t2->item(2, 0)->text() == "one" && t2->item(2, 4)->text() == "1");
+			CHECK(t2->cellWidget(2, 3)->findChild<QRadioButton *>()->isChecked() && !t2->cellWidget(0, 3)->findChild<QRadioButton *>()->isChecked());
+			CHECK(qobject_cast<QSpinBox *>(t2->cellWidget(3, 2))->value() == 45);
+		}
+
+		/* A workspace for two groups, or something that is not a workspace, is refused, with the file left alone. */
+		QString saved = slurp(wpath);
+		table->item(4, 4)->setText("3");   /* the "pics" group has it */
+		QString problem;
+		CHECK(!ww.save(&problem) && problem.contains("Workspace 3 is given to two groups"));
+		table->item(4, 4)->setText("two");
+		CHECK(!ww.save(&problem) && problem.contains("must be numbers from 1 to 99"));
+		table->item(4, 4)->setText("100");
+		CHECK(!ww.save(&problem) && problem.contains("1 to 99"));
+		CHECK(slurp(wpath) == saved);
+		table->item(4, 4)->setText("");
+
+		/* No any group, and removing groups. */
+		field<QPushButton>(ww, "wallpaper_no_any")->click();
+		CHECK(!any(2));
+		table->selectRow(4);
+		field<QPushButton>(ww, "wallpaper_remove")->click();
+		CHECK(table->rowCount() == 4);
+		CHECK(ww.save(&err));
+		CHECK(!slurp(wpath).contains("any = true"));
+		CHECK(slurp(wpath).count("[[wallpaper_group]]") == 4);
+		/* All the groups removed: no [[wallpaper_group]] left. */
+		table->selectAll();
+		field<QPushButton>(ww, "wallpaper_remove")->click();
+		CHECK(table->rowCount() == 0);
+		CHECK(ww.save(&err));
+		CHECK(!slurp(wpath).contains("wallpaper_group") && slurp(wpath).contains("mode = \"fit\""));
+
+		/* The old single [wallpaper] path shows as a group that shows everywhere; saving as it is leaves the file alone. */
+		QString lpath = dir.path() + "/legacy.toml";
+		{
+			QFile lf(lpath);
+			CHECK(lf.open(QIODevice::WriteOnly));
+			lf.write(QString("[wallpaper]\npath = \"%1/pics/one.png\"\nmode = \"fill\"\n").arg(dir.path()).toUtf8());
+		}
+		MainWindow lw(lpath, wm);
+		auto *lt = field<QTableWidget>(lw, "wallpaper_groups");
+		CHECK(lt->rowCount() == 1 && lt->item(0, 0)->text() == "one" && lt->cellWidget(0, 3)->findChild<QRadioButton *>()->isChecked());
+		QString lbefore = slurp(lpath);
+		CHECK(!lw.dirty() && lw.save(&err) && slurp(lpath) == lbefore);
+		lw.addWallpapers({ dir.path() + "/pics/folder" });
+		CHECK(lw.save(&err));
+		QString lt2 = slurp(lpath);
+		CHECK(!lt2.contains("path = \"" + dir.path() + "/pics/one.png\"\nmode") && lt2.count("[[wallpaper_group]]") == 2);
+		CHECK(lt2.contains("name = \"one\"\npaths = [\"" + dir.path() + "/pics/one.png\"]\nany = true\n"));
 	}
 
 	/* Wifi and brightness settings. */

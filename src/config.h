@@ -127,6 +127,18 @@ struct rei_config {
 	/* [decoration] */
 	int32_t notch_height;  /* Pixels; 0 turns the window notches off. */
 
+	/* [[wallpaper_group]]: sets of wallpapers (see wallpapers.h). */
+	struct rei_wallpaper_group {
+		char *name;
+		char **paths;              /* image files and/or directories (their images, in name order) */
+		size_t n_paths;
+		int32_t interval;          /* seconds between pictures, for a group with more than one */
+		bool any;                  /* shown on every workspace that has no group of its own (at most one group) */
+		int32_t *workspaces;       /* the workspaces that show this group */
+		size_t n_workspaces;
+	} *wallpaper_groups;
+	size_t n_wallpaper_groups;
+
 	/* [wallpaper] */
 	char *wallpaper_path;     /* NULL: no image, just the background colour. */
 	char *wallpaper_mode;     /* "fill", "fit", "stretch", "center" or "tile". */

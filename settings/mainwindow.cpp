@@ -4,6 +4,9 @@
 #include "themeeditor.h"
 
 #include <QApplication>
+#include <QButtonGroup>
+#include <QRadioButton>
+#include <QRegularExpression>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
@@ -47,7 +50,7 @@ MainWindow::MainWindow(const QString &configPath, const QString &compositorBinar
 	tabs->addTab(buildLayoutTab(), tr("Windows"));
 	tabs->addTab(buildInputTab(), tr("Input"));
 	tabs->addTab(buildToolbarTab(), tr("Toolbar"));
-	tabs->addTab(buildLookTab(), tr("Look"));
+	tabs->addTab(buildWallpaperTab(), tr("Wallpaper"));
 	tabs->addTab(buildCursorTab(), tr("Cursor"));
 	tabs->addTab(buildStartMenuTab(), tr("Start menu"));
 	tabs->addTab(buildKeysTab(), tr("Keybindings"));
@@ -320,15 +323,268 @@ QWidget *MainWindow::buildToolbarTab()
 	return w;
 }
 
-QWidget *MainWindow::buildLookTab()
+static QTableWidget *makeTable(const QStringList &headers);
+
+/* ---- The wallpaper tab: groups of pictures ---- */
+
+static const char *kImageFilter = "*.png *.jpg *.jpeg *.bmp *.tga *.gif";
+enum { WpName, WpPictures, WpInterval, WpAny, WpWorkspaces, WpColumns };
+
+/* How many pictures a path stands for: a folder's images, or the file itself. */
+static int pictureCount(const QString &path)
+{
+	QFileInfo fi(path);
+	if (fi.isDir())
+		return (int)QDir(path).entryList(QString(kImageFilter).split(' '), QDir::Files).size();
+	return fi.exists() ? 1 : 0;
+}
+
+static QString pictures(int n)
+{
+	return n == 1 ? QObject::tr("1 picture") : QObject::tr("%1 pictures").arg(n);
+}
+
+static QString summaryOf(const QStringList &paths)
+{
+	if (paths.size() == 1) {
+		QFileInfo fi(paths[0]);
+		if (fi.isDir()) {
+			int n = pictureCount(paths[0]);
+			return QObject::tr("Folder %1 (%2)").arg(fi.fileName().isEmpty() ? paths[0] : fi.fileName(), pictures(n));
+		}
+		return fi.fileName();
+	}
+	int total = 0;
+	for (const QString &p : paths)
+		total += pictureCount(p);
+	return pictures(total);
+}
+
+QWidget *MainWindow::buildWallpaperTab()
 {
 	auto *w = new QWidget;
-	auto *f = new QFormLayout(w);
-	addField(f, tr("Wallpaper image"), "wallpaper", "path", Path, "");
-	addField(f, tr("Wallpaper fit"), "wallpaper", "mode", Choice, "fill",
-		 { "fill", "fit", "stretch", "center", "tile" });
+	auto *v = new QVBoxLayout(w);
+	auto *hint = new QLabel(tr("A wallpaper group is one picture, or many that take turns. Choose which group shows on every workspace "
+				   "(the “any” column; only one group can be it), and give a group to particular workspaces if they "
+				   "should look different (write their numbers, like 2, 5). A workspace with no group of its own shows "
+				   "the “any” group. Add a single picture to make a group of one; add several pictures, or a folder, "
+				   "for a group that changes by itself."));
+	hint->setWordWrap(true);
+	v->addWidget(hint);
+	auto *f = new QFormLayout;
+	addField(f, tr("Fit"), "wallpaper", "mode", Choice, "fill", { "fill", "fit", "stretch", "center", "tile" });
 	addField(f, tr("Background colour"), "wallpaper", "color", Color, "#1b2733");
+	v->addLayout(f);
+
+	wallpapers_ = makeTable({ tr("Group"), tr("Wallpapers"), tr("Change every"), tr("Any"), tr("Workspaces") });
+	wallpapers_->setObjectName("wallpaper_groups");
+	wallpapers_->horizontalHeader()->setSectionResizeMode(WpPictures, QHeaderView::Stretch);
+	wallpapers_->horizontalHeader()->setStretchLastSection(false);
+	wallpapers_->horizontalHeader()->setSectionResizeMode(WpWorkspaces, QHeaderView::ResizeToContents);
+	v->addWidget(wallpapers_, 1);
+	anyGroup_ = new QButtonGroup(this);
+	anyGroup_->setExclusive(true);
+
+	auto *row = new QHBoxLayout;
+	auto *addImages = new QPushButton(tr("Add picture(s)…"));
+	addImages->setObjectName("wallpaper_add_images");
+	addImages->setToolTip(tr("One picture makes a group of one; select several (Shift or Ctrl) for a group that cycles."));
+	auto *addFolder = new QPushButton(tr("Add folder…"));
+	addFolder->setObjectName("wallpaper_add_folder");
+	addFolder->setToolTip(tr("Every picture in the folder is the group; the folder is looked at again each time it moves on."));
+	auto *none = new QPushButton(tr("No “any” group"));
+	none->setObjectName("wallpaper_no_any");
+	none->setToolTip(tr("Workspaces without a group of their own then show the plain background colour."));
+	auto *del = new QPushButton(tr("Remove"));
+	del->setObjectName("wallpaper_remove");
+	row->addWidget(addImages);
+	row->addWidget(addFolder);
+	row->addStretch(1);
+	row->addWidget(none);
+	row->addWidget(del);
+	v->addLayout(row);
+
+	connect(addImages, &QPushButton::clicked, this, [this] {
+		QString start = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+		QStringList files = QFileDialog::getOpenFileNames(this, tr("Choose pictures"), start,
+								  tr("Pictures (%1)").arg(kImageFilter));
+		if (!files.isEmpty())
+			addWallpapers(files);
+	});
+	connect(addFolder, &QPushButton::clicked, this, [this] {
+		QString start = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+		QString dir = QFileDialog::getExistingDirectory(this, tr("Choose a folder of pictures"), start);
+		if (!dir.isEmpty())
+			addWallpapers({ dir });
+	});
+	connect(none, &QPushButton::clicked, this, [this] {
+		anyGroup_->setExclusive(false);
+		for (QAbstractButton *b : anyGroup_->buttons())
+			b->setChecked(false);
+		anyGroup_->setExclusive(true);
+		markDirty();
+	});
+	connect(del, &QPushButton::clicked, this, [this] {
+		auto rows = wallpapers_->selectionModel()->selectedRows();
+		for (int i = rows.size() - 1; i >= 0; i--) {
+			QWidget *cell = wallpapers_->cellWidget(rows[i].row(), WpAny);
+			if (cell)
+				for (QRadioButton *rb : cell->findChildren<QRadioButton *>())
+					anyGroup_->removeButton(rb);
+			wallpapers_->removeRow(rows[i].row());
+		}
+		markDirty();
+	});
+	connect(wallpapers_, &QTableWidget::itemChanged, this, &MainWindow::markDirty);
 	return w;
+}
+
+void MainWindow::setWallpaperRow(int r, const QString &name, const QStringList &paths, int interval, bool any,
+				 const QString &workspaces)
+{
+	bool was = loading_;
+	loading_ = true;   /* (the cells being filled are not edits) */
+	auto *nameItem = new QTableWidgetItem(name);
+	wallpapers_->setItem(r, WpName, nameItem);
+	auto *pics = new QTableWidgetItem(summaryOf(paths));
+	pics->setFlags(pics->flags() & ~Qt::ItemIsEditable);
+	pics->setData(Qt::UserRole, paths);
+	pics->setToolTip(paths.join('\n'));
+	wallpapers_->setItem(r, WpPictures, pics);
+	auto *spin = new QSpinBox;
+	spin->setRange(5, 86400);
+	spin->setSuffix(tr(" s"));
+	spin->setValue(interval);
+	spin->setToolTip(tr("How long each picture stays, for a group with more than one. 600 s is ten minutes."));
+	connect(spin, &QSpinBox::valueChanged, this, &MainWindow::markDirty);
+	wallpapers_->setCellWidget(r, WpInterval, spin);
+	auto *holder = new QWidget;
+	auto *hl = new QHBoxLayout(holder);
+	hl->setContentsMargins(0, 0, 0, 0);
+	hl->setAlignment(Qt::AlignCenter);
+	auto *radio = new QRadioButton;
+	radio->setObjectName("wallpaper_any");
+	anyGroup_->addButton(radio);
+	radio->setChecked(any);
+	connect(radio, &QRadioButton::toggled, this, &MainWindow::markDirty);
+	hl->addWidget(radio);
+	wallpapers_->setCellWidget(r, WpAny, holder);
+	auto *ws = new QTableWidgetItem(workspaces);
+	ws->setToolTip(tr("Workspace numbers that show this group, like 2, 5. Empty: only through the “any” group."));
+	wallpapers_->setItem(r, WpWorkspaces, ws);
+	loading_ = was;
+}
+
+void MainWindow::addWallpapers(const QStringList &paths)
+{
+	if (paths.isEmpty())
+		return;
+	QFileInfo first(paths[0]);
+	QString name;
+	if (paths.size() == 1 && first.isDir())
+		name = first.fileName().isEmpty() ? paths[0] : first.fileName();
+	else if (paths.size() == 1)
+		name = first.completeBaseName();
+	else
+		name = first.dir().dirName();
+	if (name.isEmpty())
+		name = tr("Wallpapers");
+	int r = wallpapers_->rowCount();
+	wallpapers_->insertRow(r);
+	setWallpaperRow(r, name, paths, 600, false, QString());
+	markDirty();
+}
+
+void MainWindow::loadWallpapers()
+{
+	wallpapers_->setRowCount(0);
+	for (QAbstractButton *b : anyGroup_->buttons())
+		anyGroup_->removeButton(b);
+	QList<QVariantMap> tables = doc_.tables("wallpaper_group");
+	for (const QVariantMap &t : tables) {
+		QStringList paths;
+		for (const QVariant &p : t.value("paths").toList())
+			paths << p.toString();
+		if (t.contains("path"))
+			paths << t.value("path").toString();
+		QStringList ws;
+		for (const QVariant &n : t.value("workspaces").toList())
+			ws << QString::number(n.toLongLong());
+		int r = wallpapers_->rowCount();
+		wallpapers_->insertRow(r);
+		setWallpaperRow(r, t.value("name").toString(), paths, t.contains("interval") ? t.value("interval").toInt() : 600,
+				t.value("any").toBool(), ws.join(", "));
+	}
+	/* The old single [wallpaper] path is shown as a group of one that shows everywhere. */
+	QString legacy = doc_.get("wallpaper", "path").toString();
+	if (tables.isEmpty() && !legacy.isEmpty()) {
+		wallpapers_->insertRow(0);
+		setWallpaperRow(0, QFileInfo(legacy).completeBaseName(), { legacy }, 600, true, QString());
+	}
+}
+
+static QList<int> parseWorkspaces(const QString &text, bool *ok)
+{
+	QList<int> out;
+	*ok = true;
+	for (const QString &tok : text.split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts)) {
+		bool n = false;
+		int v = tok.toInt(&n);
+		if (!n || v < 1 || v > 99)
+			*ok = false;
+		else if (!out.contains(v))
+			out << v;
+	}
+	return out;
+}
+
+QList<QVariantMap> MainWindow::wallpaperTable() const
+{
+	QList<QVariantMap> list;
+	for (int r = 0; r < wallpapers_->rowCount(); r++) {
+		QVariantMap t;
+		QTableWidgetItem *name = wallpapers_->item(r, WpName);
+		t["name"] = name ? name->text().trimmed() : QString();
+		t["paths"] = wallpapers_->item(r, WpPictures)->data(Qt::UserRole).toStringList();
+		auto *spin = qobject_cast<QSpinBox *>(wallpapers_->cellWidget(r, WpInterval));
+		if (spin && spin->value() != 600)
+			t["interval"] = (qlonglong)spin->value();
+		QWidget *cell = wallpapers_->cellWidget(r, WpAny);
+		auto *radio = cell ? cell->findChild<QRadioButton *>() : nullptr;
+		if (radio && radio->isChecked())
+			t["any"] = true;
+		bool ok;
+		QVariantList ws;
+		QTableWidgetItem *wi = wallpapers_->item(r, WpWorkspaces);
+		for (int n : parseWorkspaces(wi ? wi->text() : QString(), &ok))
+			ws << (qlonglong)n;
+		if (!ws.isEmpty())
+			t["workspaces"] = ws;
+		list << t;
+	}
+	return list;
+}
+
+/* What is wrong with the workspaces column, if anything: not numbers, out of range, or given to two groups. */
+QString MainWindow::wallpaperProblem() const
+{
+	QMap<int, QString> owner;
+	for (int r = 0; r < wallpapers_->rowCount(); r++) {
+		QTableWidgetItem *name = wallpapers_->item(r, WpName);
+		QString who = name && !name->text().trimmed().isEmpty() ? name->text().trimmed() : tr("group %1").arg(r + 1);
+		QTableWidgetItem *wi = wallpapers_->item(r, WpWorkspaces);
+		bool ok;
+		QList<int> ws = parseWorkspaces(wi ? wi->text() : QString(), &ok);
+		if (!ok)
+			return tr("The workspaces of “%1” must be numbers from 1 to 99, like 2, 5.").arg(who);
+		for (int n : ws) {
+			if (owner.contains(n))
+				return tr("Workspace %1 is given to two groups (“%2” and “%3”); a workspace shows one group.")
+					.arg(n).arg(owner[n], who);
+			owner[n] = who;
+		}
+	}
+	return QString();
 }
 
 static QTableWidget *makeTable(const QStringList &headers)
@@ -820,6 +1076,8 @@ bool MainWindow::load(QString *error)
 	loadedShortcuts_ = shortcutTable();
 	loadOutputs();
 	loadedOutputs_ = outputTable();  /* In the table's own normal form, to compare against. */
+	loadWallpapers();
+	loadedWallpapers_ = wallpaperTable();
 	loading_ = false;
 	dirty_ = false;
 	status_->setText(QFile::exists(path_) ? tr("Loaded %1").arg(path_)
@@ -947,6 +1205,12 @@ TomlDoc MainWindow::buildDoc() const
 		doc.setTables("output", outs);
 	}
 
+	QList<QVariantMap> groups = wallpaperTable();
+	if (groups != loadedWallpapers_) {
+		doc.setTables("wallpaper_group", groups);
+		doc.remove("wallpaper", "path");   /* the old single picture is one of the groups now */
+	}
+
 	if (theme_)
 		theme_->apply(doc);
 	return doc;
@@ -954,6 +1218,13 @@ TomlDoc MainWindow::buildDoc() const
 
 bool MainWindow::save(QString *error)
 {
+	QString problem = wallpaperProblem();
+	if (!problem.isEmpty()) {
+		if (error)
+			*error = problem;
+		status_->setText(tr("Not saved: %1").arg(problem));
+		return false;
+	}
 	TomlDoc doc = buildDoc();
 	QList<QVariantMap> shorts = shortcutTable();
 	QList<QVariantMap> outs = outputTable();
@@ -986,6 +1257,7 @@ bool MainWindow::save(QString *error)
 	loadedKeys_ = keyTable();
 	loadedOutputs_ = outs;
 	loadedShortcuts_ = shorts;
+	loadedWallpapers_ = wallpaperTable();
 	theme_->markSaved();
 	loading_ = false;
 	dirty_ = false;

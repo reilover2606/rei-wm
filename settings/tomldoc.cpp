@@ -52,6 +52,14 @@ QString TomlDoc::format(const QVariant &v)
 			s += ".0";
 		return s;
 	}
+	case QMetaType::QStringList:
+	case QMetaType::QVariantList: {
+		QStringList parts;
+		const QVariantList list = v.typeId() == QMetaType::QStringList ? QVariant(v.toStringList()).toList() : v.toList();
+		for (const QVariant &e : list)
+			parts << format(e);
+		return "[" + parts.join(", ") + "]";
+	}
 	default: {
 		QString s = v.toString();
 		s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t");
@@ -73,6 +81,56 @@ TomlDoc TomlDoc::parse(const QString &text)
 QString TomlDoc::text() const
 {
 	return lines_.join('\n') + "\n";
+}
+
+/* A flat array whose '[' is at lines_[line][col]: its items, and where its ']' is. False if it never closes or holds
+ * anything but strings, numbers and booleans. */
+bool TomlDoc::parseArray(int line, int col, QVariantList *out, int *endLine, int *endCol) const
+{
+	out->clear();
+	int i = line, c = col + 1;
+	while (i < lines_.size()) {
+		const QString &l = lines_[i];
+		while (c < l.size()) {
+			QChar ch = l[c];
+			if (ch == ' ' || ch == '\t' || ch == ',') {
+				c++;
+			} else if (ch == '#') {
+				c = l.size();   /* a comment inside the array */
+			} else if (ch == ']') {
+				*endLine = i;
+				*endCol = c + 1;
+				return true;
+			} else if (ch == '"') {
+				int e = c + 1;
+				while (e < l.size() && l[e] != '"')
+					e += l[e] == '\\' ? 2 : 1;
+				if (e >= l.size())
+					return false;
+				*out << unescape(l.mid(c + 1, e - c - 1));
+				c = e + 1;
+			} else {
+				int e = c;
+				while (e < l.size() && l[e] != ',' && l[e] != ']' && l[e] != ' ' && l[e] != '#')
+					e++;
+				QString tok = l.mid(c, e - c);
+				bool ok = false;
+				if (tok == "true" || tok == "false") {
+					*out << (tok == "true");
+				} else if (qlonglong n = tok.toLongLong(&ok); ok) {
+					*out << n;
+				} else if (double d = tok.toDouble(&ok); ok) {
+					*out << d;
+				} else {
+					return false;   /* nested arrays, tables, dates: not something this editor can keep */
+				}
+				c = e;
+			}
+		}
+		i++;
+		c = 0;
+	}
+	return false;
 }
 
 void TomlDoc::scan()
@@ -105,6 +163,22 @@ void TomlDoc::scan()
 			li.section = section;
 			li.key = unquoteKey(m.captured(1));
 			int start = m.capturedEnd(0), end = start;
+			li.endLine = i;
+			QVariantList list;
+			int aEndLine = i, aEndCol = 0;
+			if (start < l.size() && l[start] == '[' && parseArray(i, start, &list, &aEndLine, &aEndCol)) {
+				li.value = list;
+				li.valueStart = start;
+				li.endLine = aEndLine;
+				li.endCol = aEndCol;
+				li.valueEnd = aEndLine == i ? aEndCol : l.size();
+				for (int k = i + 1; k <= aEndLine; k++) {   /* the rest of a multi-line array belongs to this key */
+					info_[k].kind = Line::Cont;
+					info_[k].section = section;
+				}
+				i = aEndLine;
+				continue;
+			}
 			if (start < l.size() && l[start] == '"') {
 				end = start + 1;
 				while (end < l.size() && l[end] != '"')
@@ -129,6 +203,7 @@ void TomlDoc::scan()
 			}
 			li.valueStart = start;
 			li.valueEnd = end;
+			li.endCol = end;
 		}
 	}
 }
@@ -163,7 +238,7 @@ int TomlDoc::lastLineOfSection(const QString &section) const
 		if ((li.kind == Line::Table || li.kind == Line::ArrayTable) && li.section == section && last < i)
 			last = i;
 		if (li.kind == Line::Key && li.section == section)
-			last = i;
+			last = li.endLine > i ? li.endLine : i;   /* (after the end of a multi-line array) */
 	}
 	return last;
 }
@@ -173,7 +248,11 @@ void TomlDoc::set(const QString &section, const QString &key, const QVariant &va
 	for (int i = 0; i < info_.size(); i++) {
 		const Line &li = info_[i];
 		if (li.kind == Line::Key && li.section == section && li.key == key) {
-			lines_[i] = lines_[i].left(li.valueStart) + format(value) + lines_[i].mid(li.valueEnd);
+			QString tail = li.endLine > i ? lines_[li.endLine].mid(li.endCol) : lines_[i].mid(li.valueEnd);
+			QString head = lines_[i].left(li.valueStart) + format(value) + tail;
+			for (int k = li.endLine; k > i; k--)
+				lines_.removeAt(k);   /* the array's other lines */
+			lines_[i] = head;
 			scan();
 			return;
 		}
@@ -204,7 +283,8 @@ void TomlDoc::remove(const QString &section, const QString &key)
 	for (int i = 0; i < info_.size(); i++) {
 		const Line &li = info_[i];
 		if (li.kind == Line::Key && li.section == section && li.key == key) {
-			lines_.removeAt(i);
+			for (int k = li.endLine > i ? li.endLine : i; k >= i; k--)
+				lines_.removeAt(k);
 			scan();
 			return;
 		}
@@ -256,7 +336,8 @@ void TomlDoc::setTables(const QString &name, const QList<QVariantMap> &tables)
 	QString prefix = name + "#";
 	for (int i = info_.size() - 1; i >= 0; i--) {
 		const Line &li = info_[i];
-		bool mine = li.section.startsWith(prefix) && (li.kind == Line::ArrayTable || li.kind == Line::Key);
+		bool mine = li.section.startsWith(prefix) &&
+			    (li.kind == Line::ArrayTable || li.kind == Line::Key || li.kind == Line::Cont);
 		if (!mine)
 			continue;
 		lines_.removeAt(i);
@@ -270,7 +351,7 @@ void TomlDoc::setTables(const QString &name, const QList<QVariantMap> &tables)
 		lines_ << "" << "[[" + name + "]]";
 		/* A readable order: identity first, then geometry, then the rest. */
 		static const QStringList preferred = { "name", "mode", "width", "height", "refresh", "scale",
-						       "x", "y", "enabled" };
+						       "x", "y", "enabled", "paths", "interval", "any", "workspaces" };
 		QStringList order = preferred;
 		for (const QString &k : t.keys())
 			if (!order.contains(k))
