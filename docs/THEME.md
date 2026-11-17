@@ -23,10 +23,10 @@ opacity = 0.85
 
 | key | meaning |
 |---|---|
-| `color` | the normal fill |
-| `active_color` | the fill when active/highlighted: the focused window's tile, the focused workspace, the hovered row of a list |
-| `inactive_color` | the fill when dimmed: a tile whose windows are all minimized; a workspace shown on a monitor that is not focused |
-| `text_color`, `active_text_color`, `inactive_text_color` | text in those same three states |
+| `color` | the fill (for most elements the only one) |
+| `active_color` | only for things that show a state: the focused window's tile, the focused workspace, the hovered row of a list, a lit button, a charging battery |
+| `inactive_color` | only for those too: a tile whose windows are all minimized; a workspace shown on a monitor that is not focused; a low battery |
+| `text_color`, `active_text_color`, `inactive_text_color` | text in the same states; `text_color` is the only one most elements use |
 | `border_color`, `border_width` | an outline, in pixels (0 = none) |
 | `shape` | `square`, `rounded`, `pill` (fully rounded ends) or `bevel` (corners cut at 45 degrees) |
 | `radius` | corner size in pixels, for `rounded` and `bevel` |
@@ -111,13 +111,15 @@ the file are picked up when the config is next reloaded.
 | `workspace_button` | a workspace number: `color` (a workspace with windows, not showing), `active_color` (the focused one), `inactive_color` (showing on another monitor) | everything |
 | `tray_tile` | an application in the tray; the stack of tiles behind it is derived from these colours | everything |
 | `tray_overflow` | the "+N" tile that holds what no longer fits | everything |
-| `tooltip` | the hover tooltip | `color`, `text_color`, shape, border, `opacity`, shadow |
+| `tooltip` | the hover tooltip (the battery and clock too) | `color`, `text_color`, shape, border, `opacity`, shadow |
 | `sysinfo` | the CPU/RAM box left of the clock | `color`, `text_color`, shape, border |
-| `dialog` | confirmation dialogs | `color`, `text_color`, shape, border, `opacity`, shadow, glow |
+| `dialog` | confirmation dialogs: the box; its buttons are `dialog_buttons` | `color`, `text_color`, shape, border, `opacity`, shadow, glow |
 | `menu` | the pop-up window list | `color`, border, shape, `opacity`, shadow |
 | `wifi` | the wifi icon in the toolbar: `color` when connected, `inactive_color` (red) when not, struck through | `color`, `inactive_color` |
-| `mpd` | the music controls in the Mod+n view (box; their buttons use `start_button`) | `color`, `text_color`, shape, border, `opacity`, shadow, glow |
-| `battery` | the battery icon: `color` is the level fill, `active_color` the fill while charging (with a bolt), `inactive_color` the fill and text at 15% or less; `border_color`/`border_width` the outline, `shape`/`radius` the cell's corners | `color`, `active_color`, `inactive_color`, `text_color`, border, `shape`, `radius` |
+| `mpd` | the music controls in the Mod+n view: the box | `color`, `text_color`, shape, border, `opacity`, shadow, glow |
+| `mpd_transport`, `mpd_modes` | its two groups of buttons: previous / play-pause / skip, and shuffle / loop all / loop one | `mode` and everything (see *Button groups*) |
+| `dialog_buttons` | the buttons of confirmation dialogs | `mode` and everything |
+| `battery` | the battery icon (its three colours mean what is shown, not a hover state): `color` is the level fill, `active_color` the fill while charging (with a bolt), `inactive_color` the fill and text at 15% or less; `border_color`/`border_width` the outline, `shape`/`radius` the cell's corners | `color`, `active_color`, `inactive_color`, `text_color`, border, `shape`, `radius` |
 | `window_text` | not rei-wm's own: the windows of the listed programs (terminals), through a window shader | `apps`, `shader`, `text_glow_*`, `glow_threshold`, `text_blink` (see below) |
 | `menu_row` | one row of a list | `active_color` (hovered row), `text_color`, `active_text_color`, `inactive_text_color` (minimized windows) |
 
@@ -134,6 +136,35 @@ Elements and properties are added in `src/theme.h` (the `rei_style` and `rei_ele
 `src/theme.c` (names, defaults, parsing); the drawing helpers that apply a style
 (`draw_box` and friends in `src/toolbar_render.c`) are the model for how a new element is wired in.
 
+## Button groups
+
+An element that contains buttons has its buttons in **groups** that are styled as a unit: the music controls
+(`mpd`) have `mpd_transport` (the top row) and `mpd_modes` (the bottom row), and a dialog has `dialog_buttons`. Each
+group has a `mode` that says what it takes from the element it is in (its *parent*, for example `mpd`):
+
+| `mode` | colours | style (shape, fill, border; text effects; glow; shadow) |
+|---|---|---|
+| `custom` (the default) | the group's own | the group's own |
+| `color` | the parent's: its `color` for the buttons, its `text_color` for text and icons | the group's own |
+| `inherit` | the parent's | the parent's |
+| `text` | `text_color`, and `active_color` for a lit or hovered button | none: no fill, border, shadow or glow, only the button's text or icon, like a link |
+
+By default the groups look as the Start button does (their values start as copies of `start_button`), but they no
+longer follow it: styling `start_button` changes the Start button only. A *lit* button is the play/pause button
+while playing, a shuffle/loop mode that is on, and the confirm button of a dialog; with `color` or `inherit` it is
+drawn with the parent's colour moved 30% toward its text colour.
+
+```toml
+[theme.mpd_modes]
+mode = "text"                 # shuffle / loop as plain text-and-icon links
+active_color = "#7aa2f7"      # lit and hovered
+
+[theme.mpd_transport]
+mode = "color"                # the box's colours, but its own shape
+shape = "pill"
+border_width = 1
+```
+
 ## Icons (the iconable elements)
 
 `tray_tile`, `start_button` and `menu_row` are *iconable*. Their style also takes `icon` (true/false) and
@@ -141,6 +172,12 @@ Elements and properties are added in `src/theme.h` (the `rei_style` and `rei_ele
 from that directory of PNGs; files that are not square or are larger than 64x64 are rejected (logged).
 
 ## The theme editor
+
+Each element's page shows only the colours it really has, named for what they mean there (the battery's are
+*Level*, *Charging* and *Low*; most elements have just a colour and a text colour). Shape, fill and border, text
+effects, glow and shadow are in a **Style…** window with a tab for each, opened from the page. An element with
+buttons (the music controls, dialogs) lists its button groups on the page, each with a *Look* (the four modes
+above); its colours and Style window appear as the mode needs them.
 
 The settings app's **Theme** tab edits every value above for every element, with a preview that rei-wm itself
 draws (`rei-wm --theme-preview out.png`: the toolbar with its Start button, tray, CPU/RAM box, battery and volume;

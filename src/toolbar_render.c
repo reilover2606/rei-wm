@@ -661,6 +661,26 @@ static void draw_box(cairo_t *cr, const struct rei_style *st, double x, double y
 	}
 }
 
+/* A button of a group (rei_theme_button_style gave `b`): its box (none in text mode), the glow while hovered or lit,
+ * and the colour its text or icon is to be drawn in, which is set on `cr`. */
+static void draw_button(cairo_t *cr, const struct rei_style *b, double x, double y, double w, double h, bool lit,
+			bool hover)
+{
+	bool plain = b->button_mode == REI_BUTTON_TEXT;
+	if ((hover || lit) && b->glow.size > 0)
+		draw_glow(cr, b, x, y, w, h, 1.0);
+	if (!plain) {
+		uint32_t fill = lit ? b->active_color : b->color;
+		if (hover)
+			fill = rei_bar_mix(fill, b->text_color, 0.15);
+		draw_box(cr, b, x, y, w, h, fill, 1.0);
+	}
+	uint32_t tc = lit ? b->active_text_color : b->text_color;
+	if (plain && hover && !lit)
+		tc = b->active_text_color;   /* a link lights up under the pointer */
+	set_color(cr, tc);
+}
+
 static void resolve_theme(const struct rei_bar_state *st, struct rei_theme *t)
 {
 	if (st->styled)
@@ -1552,18 +1572,15 @@ struct rei_pixbuf *rei_bar_mpd_render(const struct rei_mpd_panel_state *st, int 
 		/* Lit: the play/pause button while playing; a toggle while it is on. */
 		bool lit = st->running && ((i == 1 && st->mode == 1) || (i == 3 && st->shuffle) ||
 					   (i == 4 && st->loop_all) || (i == 5 && st->loop_one));
-		uint32_t fill = lit ? st->button.active_color : st->button.color;
-		if (st->hover == i)
-			fill = rei_bar_mix(fill, st->button.text_color, 0.15);
-		draw_box(cr, &st->button, m + b[i].x, m + b[i].y, b[i].w, b[i].h, fill, 1.0);
-		set_color(cr, lit ? st->button.active_text_color : st->button.text_color);
+		const struct rei_style *bs = i >= 3 ? &st->button2 : &st->button;
+		draw_button(cr, bs, m + b[i].x, m + b[i].y, b[i].w, b[i].h, lit, st->hover == i);
 		if (st->running) {
 			static const int icon_of[REI_MPD_BUTTONS] = { 0, 1, 3, 4, 5, 6 };
 			int icon = i == 1 && st->mode == 1 ? 2 : icon_of[i];   /* playing: it shows pause, what a press does */
 			mpd_icon(cr, icon, m + b[i].x + b[i].w / 2.0, m + b[i].y + b[i].h / 2.0);
 		}
 		else
-			draw_centered(cr, font, "Start MPD", m + b[i].x + b[i].w / 2.0, m + b[i].y + b[i].h / 2.0, &st->button);
+			draw_centered(cr, font, "Start MPD", m + b[i].x + b[i].w / 2.0, m + b[i].y + b[i].h / 2.0, bs);
 	}
 	pango_font_description_free(font);
 
@@ -1618,7 +1635,7 @@ struct rei_pixbuf *rei_bar_confirm_render(const struct rei_confirm_state *st, in
 	PangoLayout *msg = make_layout(cr, font, st->message);
 	pango_layout_set_width(msg, (REI_DIALOG_W - 48) * PANGO_SCALE);
 	pango_layout_set_wrap(msg, PANGO_WRAP_WORD_CHAR);
-	set_color(cr, st->box.inactive_text_color ? st->box.inactive_text_color : st->box.text_color);
+	set_color(cr, rei_bar_mix(st->box.color, st->box.text_color, 0.55));   /* the message, a little dimmer than the title */
 	cairo_move_to(cr, m + 24, m + 62);
 	show_text(cr, msg, &st->box);
 	g_object_unref(msg);
@@ -1627,17 +1644,12 @@ struct rei_pixbuf *rei_bar_confirm_render(const struct rei_confirm_state *st, in
 	rei_bar_confirm_buttons(b);
 	const char *labels[2] = { "Cancel", st->confirm_label };
 	for (int i = 0; i < 2; i++) {
-		uint32_t fill = i == 1 ? st->button.active_color : st->button.color;
-		if (st->hover == i)
-			fill = rei_bar_mix(fill, st->button.text_color, 0.15);
-		draw_box(cr, &st->button, m + b[i].x, m + b[i].y, b[i].w, b[i].h, fill, 1.0);
+		draw_button(cr, &st->button, m + b[i].x, m + b[i].y, b[i].w, b[i].h, i == 1, st->hover == i);
 		if (st->selected == i) {   /* The button Enter will press gets a ring. */
-			set_color(cr, i == 1 ? st->button.active_text_color : st->button.text_color);
 			cairo_set_line_width(cr, 1.5);
 			cairo_rectangle(cr, m + b[i].x + 3.5, m + b[i].y + 3.5, b[i].w - 7, b[i].h - 7);
 			cairo_stroke(cr);
 		}
-		set_color(cr, i == 1 ? st->button.active_text_color : st->button.text_color);
 		draw_centered(cr, font, labels[i], m + b[i].x + b[i].w / 2.0, m + b[i].y + b[i].h / 2.0, &st->button);
 	}
 	pango_font_description_free(big);

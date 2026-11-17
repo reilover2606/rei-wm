@@ -10,11 +10,75 @@
 #include "util/util.h"
 
 static const char *const element_names[REI_ELEM_COUNT] = {
-	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "start_button", "run_prompt", "messages", "sysinfo", "dialog", "battery", "wifi", "mpd", "window_text",
+	"toolbar", "workspace_button", "tray_tile", "tray_overflow", "tooltip", "menu", "menu_row", "start_button", "run_prompt", "messages", "sysinfo", "dialog", "battery", "wifi", "mpd", "mpd_transport", "mpd_modes", "dialog_buttons", "window_text",
 };
 bool rei_element_iconable(enum rei_element e)
 {
 	return e == REI_ELEM_TRAY_TILE || e == REI_ELEM_START_BUTTON || e == REI_ELEM_MENU_ROW;
+}
+
+int rei_element_button_parent(enum rei_element e)
+{
+	switch (e) {
+	case REI_ELEM_MPD_TRANSPORT:
+	case REI_ELEM_MPD_MODES:
+		return REI_ELEM_MPD;
+	case REI_ELEM_DIALOG_BUTTONS:
+		return REI_ELEM_DIALOG;
+	default:
+		return -1;
+	}
+}
+
+static const char *const button_mode_names[] = { "custom", "color", "inherit", "text" };
+
+const char *rei_button_mode_name(enum rei_button_mode m)
+{
+	return (unsigned)m < REI_ARRAY_LEN(button_mode_names) ? button_mode_names[m] : "?";
+}
+
+int rei_button_mode_parse(const char *name)
+{
+	for (size_t i = 0; i < REI_ARRAY_LEN(button_mode_names); i++)
+		if (strcmp(name, button_mode_names[i]) == 0)
+			return (int)i;
+	return -1;
+}
+
+void rei_theme_button_style(const struct rei_theme *t, enum rei_element group, struct rei_style *out)
+{
+	const struct rei_style *g = &t->e[group];
+	int pe = rei_element_button_parent(group);
+	if (pe < 0) {
+		*out = *g;
+		return;
+	}
+	const struct rei_style *p = &t->e[pe];
+	switch (g->button_mode) {
+	case REI_BUTTON_INHERIT:
+	case REI_BUTTON_COLOR: {
+		*out = g->button_mode == REI_BUTTON_INHERIT ? *p : *g;
+		out->button_mode = g->button_mode;
+		out->color = p->color;
+		out->text_color = p->text_color;
+		out->active_text_color = p->text_color;
+		out->active_color = rei_color_mix(p->color, p->text_color, 0.30);   /* lit: the fill moves toward the text */
+		out->inactive_color = out->color;
+		break;
+	}
+	case REI_BUTTON_TEXT:
+		*out = *g;
+		out->border_width = 0;
+		out->opacity = 0;
+		out->shadow.opacity = 0;
+		out->glow.size = 0;
+		out->active_text_color = g->active_color;   /* lit (and hovered): the "lit colour" */
+		break;
+	case REI_BUTTON_CUSTOM:
+	default:
+		*out = *g;
+		break;
+	}
 }
 
 static const char *const shape_names[] = { "square", "rounded", "pill", "bevel" };
@@ -170,6 +234,16 @@ void rei_theme_defaults(struct rei_theme *t, uint32_t bg, uint32_t fg, uint32_t 
 	bat->border_width = 1.2f;
 	bat->shape = REI_SHAPE_ROUNDED;
 	bat->radius = 2.5f;
+
+	/* The button groups: each their own, looking as the Start button does. */
+	for (int e = 0; e < REI_ELEM_COUNT; e++) {
+		if (rei_element_button_parent((enum rei_element)e) < 0)
+			continue;
+		t->e[e] = t->e[REI_ELEM_START_BUTTON];
+		t->e[e].icon = false;
+		t->e[e].icon_size = 0;
+		t->e[e].button_mode = REI_BUTTON_CUSTOM;
+	}
 }
 
 /* ------------------------------------------------------------------------ */
@@ -225,7 +299,7 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				idx = e;
 		if (idx < 0) {
 			snprintf(err, errlen, "theme.%s: unknown element (known: toolbar, workspace_button, "
-				 "tray_tile, tray_overflow, tooltip, menu, menu_row, start_button, run_prompt, messages, sysinfo, dialog, battery, wifi, mpd, window_text)", el->key);
+				 "tray_tile, tray_overflow, tooltip, menu, menu_row, start_button, run_prompt, messages, sysinfo, dialog, battery, wifi, mpd, mpd_transport, mpd_modes, dialog_buttons, window_text)", el->key);
 			return false;
 		}
 		if (el->val->type != TOML_TABLE) {
@@ -314,6 +388,20 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 					return false;
 				}
 				st->icon = v->u.b;
+				continue;
+			}
+			if (strcmp(key, "mode") == 0) {
+				int mode = v->type == TOML_STRING ? rei_button_mode_parse(v->u.s) : -1;
+				if (rei_element_button_parent((enum rei_element)idx) < 0) {
+					snprintf(err, errlen, "%s: only groups of buttons have a mode (mpd_transport, mpd_modes, "
+						 "dialog_buttons)", where);
+					return false;
+				}
+				if (mode < 0) {
+					snprintf(err, errlen, "%s: expected one of: custom, color, inherit, text", where);
+					return false;
+				}
+				st->button_mode = (enum rei_button_mode)mode;
 				continue;
 			}
 			if (strcmp(key, "shape") == 0) {

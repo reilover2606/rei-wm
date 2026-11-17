@@ -5,6 +5,7 @@
  */
 #include <QApplication>
 #include <QCheckBox>
+#include <QDialog>
 #include <QComboBox>
 #include <QDir>
 #include <QDoubleSpinBox>
@@ -437,8 +438,46 @@ int main(int argc, char **argv)
 		CHECK(field<QCheckBox>(wt, "theme.menu_row.icon")->isChecked());          /* iconable elements have an icon switch */
 		CHECK(wt.findChild<QDoubleSpinBox *>("theme.tooltip.icon_size") == nullptr);   /* others do not */
 		CHECK(field<QDoubleSpinBox>(wt, "theme.menu_row.glow_size")->value() > 0);
-		CHECK(!wt.dirty());
 		QString before2 = slurp(path);
+		/* Things that do not change to show a state have one colour, not three; battery and wifi name theirs for
+		 * what they show; shape, glow, shadow and text effects are in a Style window of their own, with tabs. */
+		CHECK(wt.findChild<QWidget *>("theme.tooltip.active_color") == nullptr);
+		CHECK(wt.findChild<QWidget *>("theme.tooltip.inactive_text_color") == nullptr);
+		CHECK(wt.findChild<QWidget *>("theme.mpd.active_color") == nullptr && wt.findChild<QWidget *>("theme.messages.inactive_color") == nullptr);
+		CHECK(wt.findChild<QWidget *>("theme.tray_tile.inactive_color") != nullptr);   /* a button has its states */
+		{
+			auto *dlg = wt.findChild<QDialog *>("theme_style.tooltip");
+			CHECK(dlg != nullptr);
+			auto *tabs = dlg->findChild<QTabWidget *>();
+			CHECK(tabs && tabs->count() == 4);
+			CHECK(tabs->tabText(0).contains("Shape") && tabs->tabText(1) == "Text effects" && tabs->tabText(2) == "Glow" &&
+			      tabs->tabText(3) == "Shadow");
+			CHECK(dlg->findChild<QWidget *>("theme.tooltip.shadow_blur") != nullptr);
+			CHECK(wt.findChild<QPushButton *>("style_button.tooltip") != nullptr);
+			bool charging = false;
+			for (QLabel *l : wt.findChildren<QLabel *>())
+				charging = charging || l->text() == "Charging";
+			CHECK(charging);
+		}
+		/* Button groups: the music controls have two rows, dialogs one; each has a look. */
+		{
+			auto *mode = field<QComboBox>(wt, "theme.mpd_transport.mode");
+			CHECK(field<QComboBox>(wt, "theme.mpd_modes.mode") && field<QComboBox>(wt, "theme.dialog_buttons.mode"));
+			CHECK(mode->currentData().toString() == "custom");
+			CHECK(wt.findChild<QDialog *>("theme_style.mpd_transport") != nullptr);
+			QWidget *colour = field<QWidget>(wt, "theme.mpd_transport.color");
+			mode->setCurrentIndex(mode->findData("text"));   /* only the text and the lit colour remain */
+			CHECK(colour->parentWidget()->isHidden());
+			CHECK(!field<QWidget>(wt, "theme.mpd_transport.text_color")->parentWidget()->isHidden());
+			mode->setCurrentIndex(mode->findData("inherit"));
+			CHECK(wt.findChild<QPushButton *>("style_button.mpd_transport")->isHidden());
+			mode->setCurrentIndex(mode->findData("custom"));
+			CHECK(!colour->parentWidget()->isHidden());
+			CHECK(wt.dirty());
+			CHECK(wt.save(&err));
+			CHECK(slurp(path) == before2);   /* back to what it was: nothing to write */
+			CHECK(!wt.dirty());
+		}
 		CHECK(wt.save(&err));
 		CHECK(slurp(path) == before2);   /* nothing changed, nothing written */
 
@@ -447,16 +486,21 @@ int main(int argc, char **argv)
 			for (int i = 0; i < tabs->count(); i++)
 				if (tabs->tabText(i) == "Theme")
 					tabs->setCurrentIndex(i);
-			wt.findChild<ThemeEditor *>("theme_editor")->findChild<QListWidget *>("theme_elements")->setCurrentRow(6);   /* Menu rows */
+			wt.findChild<ThemeEditor *>("theme_editor")->findChild<QListWidget *>("theme_elements")->setCurrentRow(14);   /* Music controls */
 			wt.resize(1040, 900);
 			wt.show();
 			QString e;
 			CHECK(wt.findChild<ThemeEditor *>("theme_editor")->refreshPreviewNow(&e));
 			CHECK(wt.grab().save(qEnvironmentVariable("REI_SHOT_DIR") + "/settings-theme.png"));
+			auto *sd = wt.findChild<QDialog *>("theme_style.mpd_transport");
+			sd->show();
+			CHECK(sd->grab().save(qEnvironmentVariable("REI_SHOT_DIR") + "/settings-theme-style.png"));
+			sd->hide();
 		}
 
 		radius->setValue(9);
 		field<QComboBox>(wt, "theme.dialog.shape")->setCurrentText("bevel");
+		field<QComboBox>(wt, "theme.mpd_modes.mode")->setCurrentIndex(field<QComboBox>(wt, "theme.mpd_modes.mode")->findData("text"));
 		field<QDoubleSpinBox>(wt, "theme.menu_row.glow_size")->setValue(0);
 		field<QWidget>(wt, "theme.messages.shadow_color");
 		CHECK(wt.dirty());
@@ -470,10 +514,12 @@ int main(int argc, char **argv)
 		CHECK(tt.contains("[theme.tray_tile]\nradius = 9.0\n"));
 		CHECK(tt.contains("[theme.dialog]\nshape = \"bevel\"\n"));
 		CHECK(tt.contains("[theme.menu_row]\nglow_size = 0.0\n"));
+		CHECK(tt.contains("[theme.mpd_modes]\nmode = \"text\"\n"));
 		CHECK(!tt.contains("[theme.toolbar]"));   /* untouched elements are not written */
 		MainWindow wt2(path, wm);
 		CHECK(field<QDoubleSpinBox>(wt2, "theme.tray_tile.radius")->value() == 9);
 		CHECK(field<QComboBox>(wt2, "theme.dialog.shape")->currentText() == "bevel");
+		CHECK(field<QComboBox>(wt2, "theme.mpd_modes.mode")->currentData().toString() == "text");
 		/* Text effects are part of every element's page; terminal windows have a page of their own. */
 		CHECK(field<QDoubleSpinBox>(wt2, "theme.toolbar.text_glow_size")->value() == 0);
 		CHECK(field<QDoubleSpinBox>(wt2, "theme.toolbar.text_glow_strength")->value() == 1);

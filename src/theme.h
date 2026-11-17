@@ -57,6 +57,15 @@ struct rei_text_fx {
 	uint32_t shine_color;
 };
 
+/* The groups of buttons inside an element (the music controls' two rows, a dialog's buttons) each take their look from
+ * `mode`; see rei_theme_button_style. */
+enum rei_button_mode {
+	REI_BUTTON_CUSTOM,   /* everything is the group's own (the default: the look the Start button has) */
+	REI_BUTTON_COLOR,    /* the colours of the element the buttons are in; shape, border, shadow, glow and text effects are the group's own */
+	REI_BUTTON_INHERIT,  /* colours and style both those of that element */
+	REI_BUTTON_TEXT,     /* no fill, border, shadow or glow: only the button's text or icon, like a link */
+};
+
 struct rei_style {
 	uint32_t color, active_color, inactive_color;                  /* 0xRRGGBB */
 	uint32_t text_color, active_text_color, inactive_text_color;
@@ -70,6 +79,7 @@ struct rei_style {
 	float icon_size;      /* ...this many pixels square, at most 64; 0 = fit the element */
 	struct rei_glow glow;  /* a soft halo outside the element (hovered rows, dialogs, the Run prompt) */
 	struct rei_text_fx text_fx;
+	enum rei_button_mode button_mode;   /* button-group elements only (rei_element_button_parent) */
 };
 
 enum rei_element {
@@ -84,14 +94,22 @@ enum rei_element {
 	REI_ELEM_RUN_PROMPT,        /* the floating command prompt: a transparent box with large text */
 	REI_ELEM_MESSAGES,          /* the message column: text_color, shadow (the text's halo), and color/opacity/shape for the stack view's backdrop */
 	REI_ELEM_SYSINFO,           /* the CPU/RAM box: color, text_color, shape, border */
-	REI_ELEM_DIALOG,            /* confirmation dialogs: the box (buttons use start_button) */
+	REI_ELEM_DIALOG,            /* confirmation dialogs: the box */
 	REI_ELEM_BATTERY,           /* the battery icon: color (level), active_color (charging), inactive_color (low) */
 	REI_ELEM_WIFI,              /* the wifi icon: color (connected), inactive_color (not connected: struck through) */
-	REI_ELEM_MPD,               /* the music controls in the message stack view (their buttons use start_button) */
+	REI_ELEM_MPD,               /* the music controls in the message stack view */
+	REI_ELEM_MPD_TRANSPORT,     /* a group of buttons in mpd: previous, play/pause, skip (and "Start MPD") */
+	REI_ELEM_MPD_MODES,         /* a group of buttons in mpd: shuffle, loop all, loop one */
+	REI_ELEM_DIALOG_BUTTONS,    /* a group of buttons in dialog: Cancel and the confirm button */
 	REI_ELEM_WINDOW_TEXT,       /* not rei-wm's own: the windows of the programs in `apps` (terminals), shaded by a
 	                             * window shader. Only the text effects (glow, blink), apps, shader and glow threshold apply */
 	REI_ELEM_COUNT,
 };
+
+/* For a button-group element, the element whose buttons they are (its "parent"); -1 for any other. */
+int rei_element_button_parent(enum rei_element e);
+const char *rei_button_mode_name(enum rei_button_mode m);
+int rei_button_mode_parse(const char *name);   /* -1 if unknown */
 
 /* The iconable category: elements that can show a 1:1 icon (at most 64x64) at their front. */
 bool rei_element_iconable(enum rei_element e);
@@ -104,6 +122,11 @@ struct rei_theme {
 	float window_threshold;    /* 0..1: how bright a pixel must be to glow (keeps a dark background dark) */
 	float window_area_limit;   /* 0..1: a row that is bright more than this share of the way (a highlighted line) does not glow; 1 = off */
 };
+
+/* The style a group of buttons is drawn with: its own style combined with its parent's as its `mode` says. In the
+ * result, color/text_color are the normal state and active_color/active_text_color the lit one (a toggle that is on,
+ * playing, the confirm button); in REI_BUTTON_TEXT mode there is no fill (`button_mode` tells the drawing). */
+void rei_theme_button_style(const struct rei_theme *t, enum rei_element group, struct rei_style *out);
 
 /* Whether a window of this application is shaded per [theme.window_text] (and the effect is not all off). */
 bool rei_theme_window_matches(const struct rei_theme *t, const char *app_id);

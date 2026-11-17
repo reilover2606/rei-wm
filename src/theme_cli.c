@@ -44,6 +44,8 @@ static void print_theme(const struct rei_theme *theme)
 		printf("%s.text_blink=%g\n", n, s->text_fx.blink);
 		printf("%s.text_shine=%g\n", n, s->text_fx.shine);
 		printf("%s.text_shine_color=#%06x\n", n, s->text_fx.shine_color);
+		if (rei_element_button_parent((enum rei_element)e) >= 0)
+			printf("%s.mode=%s\n", n, rei_button_mode_name(s->button_mode));
 		if (e == REI_ELEM_WINDOW_TEXT) {
 			printf("%s.apps=%s\n", n, theme->window_apps);
 			printf("%s.shader=%s\n", n, theme->window_shader);
@@ -334,7 +336,7 @@ int rei_theme_preview(const struct rei_config *cfg, const char *png_path)
 	cs.scale = 1;
 	snprintf(cs.font, sizeof cs.font, "%s", cfg->toolbar_font);
 	cs.box = cfg->theme.e[REI_ELEM_DIALOG];
-	cs.button = cfg->theme.e[REI_ELEM_START_BUTTON];
+	rei_theme_button_style(&cfg->theme, REI_ELEM_DIALOG_BUTTONS, &cs.button);
 	int cm;
 	struct rei_pixbuf *dlg = rei_bar_confirm_render(&cs, &cm);
 	blit(cr, dlg, 590 - cm, 66 - cm, 1.0);
@@ -378,7 +380,8 @@ int rei_theme_preview(const struct rei_config *cfg, const char *png_path)
 		ms.scale = 1;
 		snprintf(ms.font, sizeof ms.font, "%s", cfg->messages_font);
 		ms.box = cfg->theme.e[REI_ELEM_MPD];
-		ms.button = cfg->theme.e[REI_ELEM_START_BUTTON];
+		rei_theme_button_style(&cfg->theme, REI_ELEM_MPD_TRANSPORT, &ms.button);
+		rei_theme_button_style(&cfg->theme, REI_ELEM_MPD_MODES, &ms.button2);
 		int mm;
 		struct rei_pixbuf *mp = rei_bar_mpd_render(&ms, &mm);
 		blit(cr, mp, 450 - mm, 566 - mm, 1.0);

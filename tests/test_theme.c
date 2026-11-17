@@ -147,6 +147,33 @@ int main(void)
 	parse_fails("[theme.window_text]\nshader = \"/no/such/shader.glsl\"\n", "theme.window_text.shader: cannot read");
 	parse_fails("[theme.window_text]\napps = 3\n", "theme.window_text.apps: expected a string");
 
+	/* Groups of buttons: by default each looks as the Start button does; `mode` says what they take from the element
+	 * they are in. */
+	c = parse_ok("");
+	CHECK_STR(rei_element_name(REI_ELEM_MPD_MODES), "mpd_modes");
+	CHECK(rei_element_button_parent(REI_ELEM_MPD_TRANSPORT) == REI_ELEM_MPD &&
+	      rei_element_button_parent(REI_ELEM_DIALOG_BUTTONS) == REI_ELEM_DIALOG &&
+	      rei_element_button_parent(REI_ELEM_TOOLTIP) < 0);
+	struct rei_style bs;
+	rei_theme_button_style(&c->theme, REI_ELEM_MPD_TRANSPORT, &bs);
+	CHECK(bs.color == c->theme.e[REI_ELEM_START_BUTTON].color && bs.shape == REI_SHAPE_ROUNDED && bs.button_mode == REI_BUTTON_CUSTOM);
+	rei_config_free(c);
+	c = parse_ok("[theme.mpd]\ncolor = \"#102030\"\ntext_color = \"#aabbcc\"\nradius = 20\n"
+		     "[theme.mpd_transport]\nmode = \"inherit\"\n"
+		     "[theme.mpd_modes]\nmode = \"color\"\nshape = \"pill\"\nborder_width = 2\n"
+		     "[theme.dialog_buttons]\nmode = \"text\"\ntext_color = \"#112233\"\nactive_color = \"#ff0000\"\n"
+		     "border_width = 3\nshadow_opacity = 0.5\n");
+	rei_theme_button_style(&c->theme, REI_ELEM_MPD_TRANSPORT, &bs);   /* inherit: all of the box's */
+	CHECK(bs.color == 0x102030 && bs.text_color == 0xaabbcc && bs.radius == 20 && bs.active_color != bs.color);
+	rei_theme_button_style(&c->theme, REI_ELEM_MPD_MODES, &bs);       /* colour from the box, the rest its own */
+	CHECK(bs.color == 0x102030 && bs.text_color == 0xaabbcc && bs.shape == REI_SHAPE_PILL && bs.border_width == 2);
+	rei_theme_button_style(&c->theme, REI_ELEM_DIALOG_BUTTONS, &bs);  /* text only: no fill, border or shadow */
+	CHECK(bs.button_mode == REI_BUTTON_TEXT && bs.opacity == 0 && bs.border_width == 0 && bs.shadow.opacity == 0 &&
+	      bs.text_color == 0x112233 && bs.active_text_color == 0xff0000);
+	rei_config_free(c);
+	parse_fails("[theme.mpd_modes]\nmode = \"fancy\"\n", "theme.mpd_modes.mode: expected one of");
+	parse_fails("[theme.tooltip]\nmode = \"text\"\n", "theme.tooltip.mode: only groups of buttons");
+
 	/* Typos are errors that say where. */
 	parse_fails("[theme.tray_tyle]\ncolor = \"#000000\"\n", "theme.tray_tyle: unknown element");
 	parse_fails("[theme.tray_tile]\ncolour = \"#000000\"\n", "theme.tray_tile.colour: unknown property");

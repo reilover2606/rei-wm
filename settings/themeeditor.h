@@ -9,7 +9,10 @@
 
 #include "tomldoc.h"
 
+class QDialog;
+class QFormLayout;
 class QLabel;
+class QPushButton;
 class QListWidget;
 class QProcess;
 class QStackedWidget;
@@ -63,6 +66,8 @@ private:
 		QString name;
 		QWidget *widget = nullptr;
 		QToolButton *reset = nullptr;   /* returns it to the built-in value */
+		QWidget *row = nullptr;         /* the widget and its reset arrow, and the label beside them: */
+		QLabel *label = nullptr;        /* shown or hidden together (a group's colours follow its mode) */
 		QString kind;        /* "color", "number", "shape", "bool" */
 		QString loaded;      /* The effective value as text, at load: what the file says now. */
 		QString defaultV;    /* The built-in value (for the current toolbar colours). */
@@ -70,6 +75,10 @@ private:
 	};
 
 	void buildPage(const QString &element, bool iconable);
+	void addProp(QFormLayout *form, const QString &element, const QString &name, const QString &label,
+		     const QString &kind, double lo, double hi, double step, int decimals);
+	QPushButton *buildStyleButton(const QString &element, const QString &title);
+	void updateGroup(const QString &group);
 	QString valueOf(const Prop &p) const;
 	void setValue(Prop &p, const QString &text);
 	void touch(const QString &element, const QString &name);   /* an editor changed */
@@ -90,6 +99,8 @@ private:
 	QProcess *process_ = nullptr;
 	QMap<QString, QMap<QString, Prop>> props_;   /* element -> property -> editor */
 	QMap<QString, int> pageOf_;
+	QMap<QString, QDialog *> styleDialogs_;       /* element or button group -> its Style window */
+	QMap<QString, QPushButton *> styleButtons_;   /* button groups: hidden when they inherit everything */
 	bool loading_ = false;
 	bool pending_ = false;
 	QString previewPath_, previewCfg_;   /* the files of the preview being drawn */

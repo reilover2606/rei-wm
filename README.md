@@ -440,7 +440,7 @@ below it three smaller toggles: **shuffle**, **loop all** (repeat the playlist) 
 song). The two loops exclude each other, and pressing the lit one stops looping. Space also toggles play/pause. If MPD is not running there are no controls, only a
 **Start MPD** button, which runs `[mpd] start_command` (default `mpd`) and picks the server up as soon as it
 answers. When the song changes, `Now playing: Artist - Title` is added to the messages. The panel keeps clear of
-the message column on a narrow screen. The look is the `[theme.mpd]` element (buttons use `start_button`).
+the message column on a narrow screen. The look is the `[theme.mpd]` element (its two rows of buttons are `mpd_transport` and `mpd_modes`, see docs/THEME.md).
 
 ```toml
 [mpd]
