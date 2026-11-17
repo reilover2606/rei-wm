@@ -1,0 +1,61 @@
+#!/bin/sh
+# Starts rei-wm as a login session (what the display manager's "rei-wm" entry runs).
+#
+# It gives the session the environment a Wayland desktop expects, reads the user's login profile (a display
+# manager does not always), and keeps the compositor's log in ~/.cache/rei-wm/session.log, because nothing
+# shows a session's output.
+#
+# Extra options for rei-wm (for example -v for a debug log) go in $REI_WM_ARGS, set in ~/.profile or
+# ~/.config/rei-wm/session-env (a shell file this script sources). REI_SESSION_DRY_RUN=1 prints what would
+# be run and exits (used by the tests).
+
+REI_WM="@bindir@/rei-wm"
+
+# A login shell first, so ~/.profile (or .bash_profile, .zprofile) is read as it is on a text login.
+if [ -z "$REI_SESSION_LOGIN" ] && [ -z "$REI_SESSION_DRY_RUN" ]; then
+	case "${SHELL##*/}" in
+	bash | zsh | sh | dash | ksh)
+		REI_SESSION_LOGIN=1
+		export REI_SESSION_LOGIN
+		exec "$SHELL" -l -c 'exec "$0" "$@"' "$0" "$@"
+		;;
+	esac
+fi
+
+[ -r "${XDG_CONFIG_HOME:-$HOME/.config}/rei-wm/session-env" ] && . "${XDG_CONFIG_HOME:-$HOME/.config}/rei-wm/session-env"
+
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=rei-wm
+export XDG_SESSION_DESKTOP=rei-wm
+export MOZ_ENABLE_WAYLAND=1                  # Firefox: native Wayland, not through Xwayland
+export QT_QPA_PLATFORM="wayland;xcb"         # Qt: Wayland, X11 if that is all a program can do
+export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-wayland,x11}"
+export _JAVA_AWT_WM_NONREPARENTING=1         # Java programs under a window manager that does not reparent
+
+if [ -n "$REI_SESSION_DRY_RUN" ]; then
+	echo "rei-wm: $REI_WM"
+	echo "args: $REI_WM_ARGS"
+	echo "XDG_SESSION_TYPE=$XDG_SESSION_TYPE XDG_CURRENT_DESKTOP=$XDG_CURRENT_DESKTOP"
+	echo "MOZ_ENABLE_WAYLAND=$MOZ_ENABLE_WAYLAND QT_QPA_PLATFORM=$QT_QPA_PLATFORM"
+	exit 0
+fi
+
+# The login session (elogind or systemd-logind, through PAM) creates the runtime directory; without it there is
+# nowhere for the Wayland socket to go and no access to the display.
+if [ -z "$XDG_RUNTIME_DIR" ] || [ ! -d "$XDG_RUNTIME_DIR" ]; then
+	msg="rei-wm: XDG_RUNTIME_DIR is not set: this login has no elogind/systemd-logind session (is pam_elogind enabled for the display manager, and elogind running?)"
+	echo "$msg" >&2
+	logger -t rei-wm-session "$msg" 2>/dev/null
+	exit 1
+fi
+
+log_dir="${XDG_CACHE_HOME:-$HOME/.cache}/rei-wm"
+mkdir -p "$log_dir" 2>/dev/null
+if [ -w "$log_dir" ]; then
+	[ -f "$log_dir/session.log" ] && mv -f "$log_dir/session.log" "$log_dir/session.log.1"
+	exec >"$log_dir/session.log" 2>&1
+fi
+echo "rei-wm session started $(date)"
+
+# shellcheck disable=SC2086   # $REI_WM_ARGS is a list of options
+exec "$REI_WM" $REI_WM_ARGS

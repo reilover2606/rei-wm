@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=rei-wm settings
+Comment=Settings, theme and keybindings of rei-wm
+Exec=@bindir@/rei-settings
+TryExec=@bindir@/rei-settings
+Type=Application
+Categories=Settings;DesktopSettings;
+Icon=preferences-desktop
