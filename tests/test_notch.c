@@ -123,12 +123,18 @@ static void test_hover_and_clicks(struct client *c, struct window *w1)
 	CHECK(!w1->close_requested);
 	CHECK(ev_count(c, EV_PTR_BUTTON) == 0);
 
-	/* The maximize button is still a placeholder: clickable and harmless. (Minimize is tested
-	 * with the tray.) */
+	/* The maximize button: a tiled window pops out of the grid and floats (where it is, as big as it was); a second
+	 * click puts it back into the grid. (Minimize is tested with the tray.) */
 	inject_lines("motion_abs 356 10\nbutton 272 1\nbutton 272 0\n");
 	settle_all();
 	CHECK(!w1->close_requested && w1->activated);
-	expect_size(w1, 394, 574, true, "unchanged after clicking the placeholder");
+	expect_size(w1, 394, 574, false, "floating after the maximize button");
+	inject_lines("motion_abs 356 10\nbutton 272 1\nbutton 272 0\n");   /* (the notches follow the window: same place) */
+	settle_all();
+	expect_size(w1, 394, 574, true, "back in the grid after a second click");
+	img = screenshot();
+	expect_px(&img, 14, 6, TAB, 4, "W1 is back on the left, where it was (its handle is there)");
+	free(img.rgb);
 	inject("motion_abs 200 300");
 	settle_all();
 }

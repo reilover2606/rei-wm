@@ -259,6 +259,9 @@ QWidget *MainWindow::buildLayoutTab()
 	addField(f, tr("New windows"), "layout", "new_windows", Choice, "tile", { "tile", "float" });
 	addField(f, tr("Outer gap (px)"), "layout", "gap_outer", Int, 10, {}, 0, 500);
 	addField(f, tr("Inner gap (px)"), "layout", "gap_inner", Int, 10, {}, 0, 500);
+	addField(f, tr("Show programs' own title bars"), "decoration", "client_titlebars", Bool, true, {}, 0, 0, 1,
+		 tr("Off: programs that honour the xdg-decoration protocol (Qt, SDL, GTK4, many others) leave their title bar out. "
+		    "Programs that never ask (GTK3, Firefox's own bar) and X11 programs are not affected."));
 	addField(f, tr("Window notch height (px, 0 = off)"), "decoration", "notch_height", Int, 22, {}, 0, 64);
 	return w;
 }

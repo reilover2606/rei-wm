@@ -43,6 +43,8 @@ void rei_xdg_toplevel_set_activated(struct rei_xdg_toplevel *tl, bool activated)
 void rei_xdg_toplevel_set_state(struct rei_xdg_toplevel *tl, int32_t width, int32_t height,
 				bool tiled, bool fullscreen);
 void rei_xdg_toplevel_close(struct rei_xdg_toplevel *tl);
+/* Sends a configure now (once the window has had its first), e.g. after a decoration mode was announced. */
+void rei_xdg_toplevel_reconfigure(struct rei_xdg_toplevel *tl);
 
 /* The wl_surface of a toplevel; NULL if it has been destroyed. */
 struct rei_surface *rei_xdg_toplevel_surface(const struct rei_xdg_toplevel *tl);

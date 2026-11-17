@@ -86,6 +86,11 @@ idle_inhibit_server_h = scan_server_header.process(idle_inhibit_xml)
 idle_inhibit_client_h = scan_client_header.process(idle_inhibit_xml)
 idle_inhibit_code = scan_code.process(idle_inhibit_xml)
 
+xdg_decoration_xml = files(protocols_dir / 'unstable' / 'xdg-decoration' / 'xdg-decoration-unstable-v1.xml')
+xdg_decoration_server_h = scan_server_header.process(xdg_decoration_xml)
+xdg_decoration_client_h = scan_client_header.process(xdg_decoration_xml)
+xdg_decoration_code = scan_code.process(xdg_decoration_xml)
+
 viewporter_xml = files(protocols_dir / 'stable' / 'viewporter' / 'viewporter.xml')
 viewporter_server_h = scan_server_header.process(viewporter_xml)
 viewporter_client_h = scan_client_header.process(viewporter_xml)

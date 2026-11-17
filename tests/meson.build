@@ -250,3 +250,9 @@ displaysleep_test = executable('test_display_sleep', 'test_display_sleep.c', idl
   dependencies: [wayland_client, m_dep, rei_core_dep],
 )
 test('display-sleep', displaysleep_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+
+xdgdeco_test = executable('test_xdg_decoration', 'test_xdg_decoration.c', xdg_decoration_client_h, xdg_decoration_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep, rei_core_dep],
+)
+test('xdg-decoration', xdgdeco_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
