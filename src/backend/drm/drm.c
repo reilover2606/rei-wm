@@ -124,6 +124,7 @@ struct drm_backend {
 	struct rei_libinput *libinput;
 	bool session_ready;
 	atomic_bool active;
+	atomic_bool sleeping;   /* display sleep: the monitors are switched off (see set_display_power) */
 
 	int fd, device_id;
 	char *device_path;
@@ -634,8 +635,11 @@ static enum rei_render_result drm_render(void *data, struct rei_gles *gles,
 
 static void drm_set_paused(void *data, bool paused)
 {
-	(void)data;
-	(void)paused;
+	/* Display sleep pauses rendering and then (here, on the render thread, so after any frame in flight) switches
+	 * the monitor off. A VT switch pauses too, but then the kernel has already taken the display away. */
+	struct drm_output *o = data;
+	if (paused && atomic_load(&o->be->sleeping))
+		disable_output(o);
 }
 
 static void drm_render_fini(void *data)
@@ -1123,6 +1127,7 @@ static void session_enable(void *data)
 	if (!be->session_ready)
 		return;
 	atomic_store(&be->active, true);
+	atomic_store(&be->sleeping, false);   /* coming back to the VT lights the monitors again */
 	if (be->libinput)
 		rei_libinput_resume(be->libinput);
 
@@ -1137,6 +1142,34 @@ static void session_enable(void *data)
 			rei_render_set_paused(o->out->render, false);
 	}
 	rei_server_schedule_damage(be->base.server);
+}
+
+/* Display sleep. Off: hide the hardware cursor (a plane on a switched-off CRTC would be refused), stop the render
+ * thread, which then switches the monitor off. On: the first frame after is a full modeset. */
+static void drm_set_display_power(struct rei_backend *b, bool on)
+{
+	struct drm_backend *be = (struct drm_backend *)b;
+	if (!be->session_ready || atomic_load(&be->sleeping) == !on)
+		return;
+	atomic_store(&be->sleeping, !on);
+	struct drm_output *o;
+	wl_list_for_each(o, &be->outputs, link) {
+		if (!o->out)
+			continue;
+		if (!on) {
+			o->crtc_on = false;
+			cursor_hide(o);
+			atomic_store(&o->hw_cursor_active, false);
+			rei_render_set_paused(o->out->render, true);
+		} else {
+			o->current_fb = 0;
+			atomic_store(&o->needs_modeset, true);
+			o->scanout_rejected_id = 0;
+			rei_render_set_paused(o->out->render, false);
+		}
+	}
+	if (on)
+		rei_server_schedule_damage(be->base.server);
 }
 
 static void drm_switch_vt(struct rei_backend *b, unsigned vt)
@@ -1447,6 +1480,7 @@ static const struct rei_backend_impl drm_impl = {
 	.cursor_moved = drm_cursor_moved,
 	.config_changed = drm_config_changed,
 	.switch_vt = drm_switch_vt,
+	.set_display_power = drm_set_display_power,
 };
 
 struct rei_backend *rei_drm_backend_create(struct rei_server *server)

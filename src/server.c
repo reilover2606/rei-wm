@@ -29,6 +29,8 @@
 #include "proto/cursor_shape.h"
 #include "proto/fractional_scale.h"
 #include "proto/viewporter.h"
+#include "proto/idle_inhibit.h"
+#include "idle.h"
 #include "sessionbus.h"
 #include "watchdog.h"
 #include "sysinfo.h"
@@ -590,7 +592,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 
 	if (wl_display_init_shm(s->display) != 0 || !rei_surface_init(s) ||
 	    !rei_xdg_shell_init(s) || !rei_seat_init(s) || !rei_viewporter_init(s) ||
-	    !rei_fractional_scale_init(s) || !rei_cursor_shape_init(s)) {
+	    !rei_fractional_scale_init(s) || !rei_cursor_shape_init(s) || !rei_idle_inhibit_init(s)) {
 		rei_error("cannot register Wayland globals");
 		goto fail;
 	}
@@ -610,6 +612,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 	rei_winfx_configure(s);
 	rei_mpd_configure(s);
 	rei_wifi_configure(s);
+	rei_idle_init(s);
 
 	s->wl_event = event_new(s->base, wl_event_loop_get_fd(s->wl_loop),
 				EV_READ | EV_PERSIST, on_wayland_readable, s);
@@ -719,6 +722,7 @@ void rei_server_destroy(struct rei_server *s)
 		wl_display_destroy_clients(s->display);
 	if (s->display)
 		rei_wl_output_finish(s);
+	rei_idle_finish(s);
 	rei_battery_stop(s);
 	rei_sysinfo_stop(s);
 	rei_sessionbus_stop(s);

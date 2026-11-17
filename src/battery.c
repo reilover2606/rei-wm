@@ -228,12 +228,22 @@ void rei_battery_start(struct rei_server *server)
 	rei_info("battery: %d found, %d%%%s", probe.count, probe.percent, probe.charging ? " (charging)" : "");
 }
 
+void rei_battery_configure(struct rei_server *server)
+{
+	bool want = server->config->toolbar_battery;
+	if (!want && server->battery)
+		rei_battery_stop(server);
+	else if (want && !server->battery)
+		rei_battery_start(server);
+}
+
 void rei_battery_stop(struct rei_server *server)
 {
 	struct rei_battery *b = server->battery;
 	if (!b)
 		return;
 	server->battery = NULL;
+	rei_info("battery: stopped");
 	pthread_mutex_lock(&b->lock);
 	b->stop = true;
 	pthread_cond_signal(&b->cond);

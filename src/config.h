@@ -40,6 +40,7 @@ struct rei_config {
 	char *xresources;          /* [general] xresources: loaded into Xwayland with xrdb ("" = no). */
 	bool xwayland;             /* Run Xwayland so X11 programs work. */
 	bool session_bus_private;  /* [general] session_bus = "private": launched programs get their own D-Bus session bus. */
+	int display_sleep_minutes;  /* The displays go to sleep after this long without input; 0 = never. */
 	bool focus_follows_mouse;  /* Moving the pointer onto a window focuses it. */
 
 	enum rei_volume_target { REI_VOLUME_AUTO, REI_VOLUME_SINK, REI_VOLUME_MPD, REI_VOLUME_BOTH } volume_target;   /* [audio] volume_target */
@@ -92,6 +93,7 @@ struct rei_config {
 	enum rei_tray_mode toolbar_tray;  /* The application tray in the middle of the bar. */
 	bool toolbar_sysinfo;             /* Show CPU and RAM use, left of the clock. */
 	bool toolbar_battery;             /* Show the battery, if the machine has one. */
+	bool toolbar_battery_percent;     /* The battery shows its percentage beside the icon (else the icon alone; a tooltip has it). */
 	bool toolbar_wifi;                /* Show the wifi item, if the machine has a wireless interface. */
 	char *toolbar_wifi_command;       /* Run when it is clicked. */
 	enum rei_tray_scope toolbar_tray_scope;

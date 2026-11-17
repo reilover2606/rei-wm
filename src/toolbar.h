@@ -131,6 +131,7 @@ struct rei_bar_state {
 	int wifi_level;         /* 0..3 arcs lit */
 	bool battery_present;   /* The machine has a battery (the widget shows). */
 	int battery_percent;    /* 0..100 */
+	bool battery_show_percent;   /* the number beside the icon (else the icon alone) */
 	bool battery_charging;
 	char volume[16];  /* "73%", "muted"; empty when there is no audio sink. */
 	bool volume_muted;
@@ -296,6 +297,8 @@ struct rei_pixbuf *rei_bar_letter_icon(const char *name);
 /* An opaque pixbuf of the bar at its physical resolution; NULL on failure. */
 /* The wifi icon's rectangle in the bar (bar-local), if it shows. */
 bool rei_bar_wifi_rect(const struct rei_bar_state *state, struct rei_rect *out);
+bool rei_bar_battery_rect(const struct rei_bar_state *state, struct rei_rect *out);
+bool rei_bar_clock_rect(const struct rei_bar_state *state, struct rei_rect *out);
 struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *state);
 
 /* Releases the font caches Pango, Cairo and fontconfig keep for the life of the
@@ -330,6 +333,13 @@ bool rei_toolbar_hit(struct rei_server *server, double x, double y,
 /* Highlights the button for `workspace` on `output` (0 / NULL for none). */
 /* Whether (x, y) is on the volume text of an output's toolbar. */
 bool rei_toolbar_volume_at(struct rei_server *server, double x, double y);
+/* The bar items that have a tooltip: which one is under (x, y) (REI_BAR_ITEM_*), its output, and its rectangle in global
+ * logical coordinates. */
+enum { REI_BAR_ITEM_BATTERY = 1, REI_BAR_ITEM_CLOCK };
+bool rei_toolbar_item_at(struct rei_server *server, double x, double y, struct rei_output **output, int *item,
+			 struct rei_rect *rect);
+/* The tooltip's text for one of them. The clock's has the exact time to the second, so it is asked again each second. */
+void rei_toolbar_item_tip(struct rei_server *server, int item, char *out, size_t n);
 /* The wifi icon is under (x, y). */
 bool rei_toolbar_wifi_at(struct rei_server *server, double x, double y);
 

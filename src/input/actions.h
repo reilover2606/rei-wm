@@ -1,6 +1,9 @@
 #ifndef REI_ACTIONS_H
 #define REI_ACTIONS_H
 
+#include <stdbool.h>
+#include <sys/types.h>
+
 #include "input/keybindings.h"
 
 struct rei_server;
@@ -14,5 +17,8 @@ void rei_actions_run(struct rei_server *server, const struct rei_action *action)
  * end (non-blocking). stdin is /dev/null. */
 bool rei_spawn_capture(struct rei_server *server, const char *command, int *out_fd);
 bool rei_spawn(struct rei_server *server, const char *command);
+/* Like rei_spawn_capture; `group` gets the id of the session (= process group) the command runs in, to find its
+ * windows and to stop it again. */
+bool rei_spawn_capture_group(struct rei_server *server, const char *command, int *out_fd, pid_t *group);
 
 #endif

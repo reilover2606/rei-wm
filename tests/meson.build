@@ -244,3 +244,9 @@ wallpapers_test = executable('test_wallpapers', 'test_wallpapers.c',
   dependencies: [wayland_client, m_dep, rei_core_dep],
 )
 test('wallpapers', wallpapers_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 120)
+
+displaysleep_test = executable('test_display_sleep', 'test_display_sleep.c', idle_inhibit_client_h, idle_inhibit_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep, rei_core_dep],
+)
+test('display-sleep', displaysleep_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)

@@ -104,6 +104,7 @@ struct rei_server {
 	struct rei_winfx *winfx;
 	struct rei_mpd *mpd;
 	struct rei_wifi *wifi;
+	struct rei_idle *idle;
 	struct rei_wallpapers *wallpapers;
 	const char *window_shaders[16];   /* from the command line (see rei_server_options) */
 	bool window_shader_is_rule[16];

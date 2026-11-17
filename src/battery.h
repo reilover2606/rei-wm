@@ -27,6 +27,11 @@ struct rei_battery_info {
  */
 bool rei_battery_read(const char *dir, struct rei_battery_info *info);
 
+/* Brings the polling in line with [toolbar] battery: starts it if it was turned on, stops it if it was turned off
+ * (a config reload calls this; the thread used to be decided once, at start-up, so the battery could not be disabled
+ * without a restart). */
+void rei_battery_configure(struct rei_server *server);
+
 /* Starts polling (every 30 seconds, on a thread of its own) if [toolbar] battery is on and a battery exists. */
 void rei_battery_start(struct rei_server *server);
 void rei_battery_stop(struct rei_server *server);

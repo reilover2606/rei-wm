@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 struct rei_server;
+struct rei_view;
 
 /*
  * Wifi, for the toolbar: whether the machine has a wireless interface, whether it is connected, and how strong
@@ -28,7 +29,9 @@ bool rei_wifi_read(const char *netdir, const char *procfile, struct rei_wifi_inf
 void rei_wifi_configure(struct rei_server *server);
 void rei_wifi_stop(struct rei_server *server);
 struct rei_wifi_info rei_wifi_state(const struct rei_server *server);
-/* The item was clicked. */
+/* The item was clicked: starts wifi_command, or, if the instance the last click started is still running, closes it. */
 void rei_wifi_click(struct rei_server *server);
+/* Whether `view` is a window of the instance the icon started (it opens floating, like a dialog). */
+bool rei_wifi_owns_view(struct rei_server *server, const struct rei_view *view);
 
 #endif
