@@ -29,6 +29,7 @@
 #include "proto/cursor_shape.h"
 #include "proto/fractional_scale.h"
 #include "proto/viewporter.h"
+#include "proto/xdg_decoration.h"
 #include "proto/idle_inhibit.h"
 #include "idle.h"
 #include "sessionbus.h"
@@ -592,7 +593,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 
 	if (wl_display_init_shm(s->display) != 0 || !rei_surface_init(s) ||
 	    !rei_xdg_shell_init(s) || !rei_seat_init(s) || !rei_viewporter_init(s) ||
-	    !rei_fractional_scale_init(s) || !rei_cursor_shape_init(s) || !rei_idle_inhibit_init(s)) {
+	    !rei_fractional_scale_init(s) || !rei_cursor_shape_init(s) || !rei_idle_inhibit_init(s) || !rei_xdg_decoration_init(s)) {
 		rei_error("cannot register Wayland globals");
 		goto fail;
 	}

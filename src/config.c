@@ -294,6 +294,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->toolbar_highlight = 0x3c6ebe;
 	rei_theme_defaults(&cfg->theme, cfg->toolbar_background, cfg->toolbar_foreground, cfg->toolbar_highlight);
 	cfg->notch_height = 22;
+	cfg->decoration_client_titlebars = true;
 	cfg->repeat_rate = 25;
 	cfg->repeat_delay = 600;
 	cfg->tap_to_click = true;
@@ -575,8 +576,12 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 	}
 
 	const struct toml_table *deco = get_table(&r, root, "decoration");
-	if (deco)
+	if (deco) {
 		read_int(&r, deco, "decoration.", "notch_height", &cfg->notch_height, 0, 64);
+		const struct toml_value *ctb = get(&r, deco, "decoration.", "client_titlebars", TOML_BOOL);
+		if (ctb)
+			cfg->decoration_client_titlebars = ctb->u.b;
+	}
 
 	const struct toml_table *wp = get_table(&r, root, "wallpaper");
 	if (wp) {

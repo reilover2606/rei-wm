@@ -128,6 +128,7 @@ struct rei_config {
 	struct rei_theme theme;
 
 	/* [decoration] */
+	bool decoration_client_titlebars;   /* programs draw their own title bars (true) or are asked to leave them out */
 	int32_t notch_height;  /* Pixels; 0 turns the window notches off. */
 
 	/* [[wallpaper_group]]: sets of wallpapers (see wallpapers.h). */

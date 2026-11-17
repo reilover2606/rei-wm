@@ -734,6 +734,8 @@ void rei_wm_move_direction(struct rei_server *s, enum rei_direction dir)
 	}
 }
 
+static void remember_slot(struct rei_view *v);
+
 /* Takes a tiled window out of the grid, keeping its size and place. */
 static void make_floating(struct rei_view *v)
 {
@@ -741,16 +743,18 @@ static void make_floating(struct rei_view *v)
 	struct rei_rect r = rei_view_rect(v);
 	v->float_rect = (struct rei_rect){ r.x - ws->output->x, r.y - ws->output->y, r.w, r.h };
 	v->float_sized = true;
+	remember_slot(v);
 	rei_tree_remove_leaf(ws->tree, v->node);
 	v->node = NULL;
 	v->floating = true;
 	wl_list_insert(ws->floating.prev, &v->float_link);
 }
 
-void rei_wm_toggle_floating(struct rei_server *s)
+/* A tiled window pops out of the grid where it is (the others close up); a floating one goes back into it: next to
+ * the window it was beside if `to_old_slot` (and that is still there), else beside the focused one. */
+static void toggle_view_floating(struct rei_view *v, bool to_old_slot)
 {
-	struct rei_view *v = rei_wm_active_view(s);
-	if (!v || v->fullscreen)
+	if (!v || v->fullscreen || !v->ws)
 		return;
 	struct rei_workspace *ws = v->ws;
 
@@ -758,12 +762,22 @@ void rei_wm_toggle_floating(struct rei_server *s)
 		wl_list_remove(&v->float_link);
 		wl_list_init(&v->float_link);
 		v->floating = false;
-		v->node = rei_tree_add_leaf(ws->tree, insertion_point(ws), v);
+		struct rei_view *a = v->restore_anchor;   /* back where it came from, if that is still there */
+		if (to_old_slot && a && a != v && a->ws == ws && a->node && !a->minimized && !a->floating)
+			v->node = rei_tree_insert_beside(ws->tree, a->node, v, v->restore_side);
+		else
+			v->node = rei_tree_add_leaf(ws->tree, insertion_point(ws), v);
+		v->restore_anchor = NULL;
 	} else {
 		make_floating(v);
 	}
 	arrange_ws(ws);
 	rei_wm_focus_view(v);
+}
+
+void rei_wm_toggle_floating(struct rei_server *s)
+{
+	toggle_view_floating(rei_wm_active_view(s), false);
 }
 
 void rei_wm_set_fullscreen(struct rei_view *v, bool on)
@@ -874,6 +888,30 @@ static void drop_interaction(struct rei_view *v)
 	s->drop_hint.active = false;
 }
 
+/* Remembers a neighbour of a tiled window and the side it is on, so that the window can go back to the same spot
+ * (after being minimized, or popped out to float). */
+static void remember_slot(struct rei_view *v)
+{
+	v->restore_anchor = NULL;
+	if (!v->node)
+		return;
+	struct rei_node *n = v->node, *p = n->parent, *sib = NULL;
+	bool before = false;
+	if (p && n->link.prev != &p->children) {
+		sib = wl_container_of(n->link.prev, sib, link);
+		before = true;
+	} else if (p && n->link.next != &p->children) {
+		sib = wl_container_of(n->link.next, sib, link);
+	}
+	struct rei_node *leaf = sib ? edge_leaf(sib, before) : NULL;
+	if (leaf && leaf->data) {
+		v->restore_anchor = leaf->data;
+		bool horizontal = p->layout == REI_LAYOUT_SPLIT_H;
+		v->restore_side = horizontal ? (before ? REI_DIR_RIGHT : REI_DIR_LEFT)
+					     : (before ? REI_DIR_DOWN : REI_DIR_UP);
+	}
+}
+
 void rei_wm_minimize_view(struct rei_view *v)
 {
 	struct rei_server *s = v->server;
@@ -882,26 +920,10 @@ void rei_wm_minimize_view(struct rei_view *v)
 	struct rei_workspace *ws = v->ws;
 	drop_interaction(v);
 
-	v->restore_anchor = NULL;
 	v->restore_tiled = v->node != NULL;
+	remember_slot(v);
 	if (v->node) {
-		/* Remember a neighbour and the side, so the window can go back to the same spot. */
-		struct rei_node *n = v->node, *p = n->parent, *sib = NULL;
-		bool before = false;
-		if (p && n->link.prev != &p->children) {
-			sib = wl_container_of(n->link.prev, sib, link);
-			before = true;
-		} else if (p && n->link.next != &p->children) {
-			sib = wl_container_of(n->link.next, sib, link);
-		}
-		struct rei_node *leaf = sib ? edge_leaf(sib, before) : NULL;
-		if (leaf && leaf->data) {
-			v->restore_anchor = leaf->data;
-			bool horizontal = p->layout == REI_LAYOUT_SPLIT_H;
-			v->restore_side = horizontal ? (before ? REI_DIR_RIGHT : REI_DIR_LEFT)
-						     : (before ? REI_DIR_DOWN : REI_DIR_UP);
-		}
-		rei_tree_remove_leaf(ws->tree, n);
+		rei_tree_remove_leaf(ws->tree, v->node);
 		v->node = NULL;
 	}
 	if (ws->fullscreen == v) {
@@ -1071,7 +1093,7 @@ void rei_wm_notch_activate(struct rei_server *s, struct rei_view *v, enum rei_no
 		rei_wm_minimize_view(v);
 		break;
 	case REI_NOTCH_MAXIMIZE:
-		rei_debug("notch: maximize is not implemented yet");
+		toggle_view_floating(v, true);   /* tiled: pops out and floats; floating: back into the grid, to where it was */
 		break;
 	default:
 		break;

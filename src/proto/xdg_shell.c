@@ -423,6 +423,12 @@ static void toplevel_set_min_size(struct wl_client *c, struct wl_resource *r, in
 	tl->min_h = h;
 }
 
+void rei_xdg_toplevel_reconfigure(struct rei_xdg_toplevel *tl)
+{
+	if (tl->xs && tl->xs->initial_sent)
+		send_toplevel_configure(tl, true);
+}
+
 /* Maximize is a placeholder until the window decorations exist (milestone 6).
  * A client that asks must still get a configure back, or it may wait forever. */
 static void toplevel_state_request(struct wl_client *c, struct wl_resource *r)

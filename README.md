@@ -184,7 +184,9 @@ In the headless backend nothing is visible, so ask rei-wm for a screenshot:
 its top edge: a drag handle on the left, and minimize, maximize and close on the
 right. They are drawn over the space above the window, so showing or hiding them
 never resizes anything. Click a button (press and release on it) to use it:
-close works; minimize and maximize are placeholders for now. Press and hold the
+close closes, minimize puts the window in the tray, and **maximize** pops a tiled window out of the grid to float
+(where it is, the others close up) and, on a floating window, puts it back into the grid next to the window it was
+beside. Press and hold the
 handle to drag: a floating window just moves, and a tiled one lifts out of the
 grid. Drop it on another window to join the grid on the side nearest the pointer
 (a blue hint shows where it will land), or on empty space to leave it floating.
@@ -192,6 +194,12 @@ Because the tabs hover above the window, tiled windows always keep that much roo
 above them (the top gap, and the gap between stacked windows, is at least the notch
 height), and a floating window can't be dragged so high that its tabs leave the
 screen. `notch_height` in `[decoration]` sets the size; 0 turns them off.
+
+Programs that draw their **own title bar** (client-side decorations) can be asked to leave it out:
+`client_titlebars = false` in `[decoration]` (the Windows tab of the settings app) answers "server side" to every
+program that asks through the xdg-decoration protocol. Qt, SDL, GTK4 and many others honour it; programs that never
+ask (GTK3 headerbars, Firefox's own title bar, which Firefox has its own setting for) and X11 programs are not
+affected. The change reaches windows that are already open when the config is reloaded.
 
 **The toolbar** is a strip along one edge of every output (`position` = top, bottom,
 left or right): workspace buttons at its start and a clock at its end. Each output's
