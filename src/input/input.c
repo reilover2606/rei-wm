@@ -738,6 +738,7 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 			in->bar_press_output = NULL;
 
 			rei_volpop_release(s);   /* ends a slider drag */
+			rei_msg_stack_release(s);   /* ...and the music controls' */
 
 			/* The volume text: a click opens the volume popup (slider and mute button). */
 			if (bar_clicked && volume_press && rei_toolbar_volume_at(s, s->cursor_x, s->cursor_y))

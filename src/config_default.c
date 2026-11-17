@@ -155,6 +155,7 @@ const char *rei_config_default_text(void)
 "port = 6600\n"
 "start_command = \"mpd\"  # what the \"Start MPD\" button runs\n"
 "announce = true         # announce a new song in the messages\n"
+"album_art = true        # the song's cover, in a square above the music controls (MPD 0.21 or newer)\n"
 "\n"
 "[start_menu]\n"
 "# A Start button at the left end of the toolbar. Its menu has your shortcuts (below), then \"Run\"\n"

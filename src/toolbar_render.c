@@ -1447,6 +1447,11 @@ struct rei_pixbuf *rei_bar_volpop_render(const struct rei_volpop_state *st, int 
 
 /* ---- The music controls ---- */
 
+struct rei_rect rei_bar_mpd_seek_track(void)
+{
+	return (struct rei_rect){ 18, 14, REI_MPDP_W - 36, 6 };
+}
+
 int rei_bar_mpd_buttons(bool running, struct rei_rect out[REI_MPD_BUTTONS])
 {
 	if (!running) {
@@ -1454,11 +1459,11 @@ int rei_bar_mpd_buttons(bool running, struct rei_rect out[REI_MPD_BUTTONS])
 		return 1;
 	}
 	/* The main row: previous, play/pause, skip. */
-	const int bw = 86, gap = 12, total = 3 * bw + 2 * gap, y = 44, bh = 36;
+	const int bw = 86, gap = 12, total = 3 * bw + 2 * gap, y = 74, bh = 36;
 	for (int i = 0; i < 3; i++)
 		out[i] = (struct rei_rect){ (REI_MPDP_W - total) / 2 + i * (bw + gap), y, bw, bh };
 	/* Below it, smaller: shuffle, loop all, loop one. */
-	const int sw = 62, sgap = 10, stotal = 3 * sw + 2 * sgap, sy = 92, sh = 28;
+	const int sw = 62, sgap = 10, stotal = 3 * sw + 2 * sgap, sy = 122, sh = 28;
 	for (int i = 0; i < 3; i++)
 		out[3 + i] = (struct rei_rect){ (REI_MPDP_W - stotal) / 2 + i * (sw + sgap), sy, sw, sh };
 	return 6;
@@ -1562,9 +1567,28 @@ struct rei_pixbuf *rei_bar_mpd_render(const struct rei_mpd_panel_state *st, int 
 	pango_layout_set_single_paragraph_mode(l, TRUE);
 	int tw, th;
 	pango_layout_get_pixel_size(l, &tw, &th);
-	cairo_move_to(cr, m + 16, m + 14);
+	cairo_move_to(cr, m + 16, m + (st->running ? 34 : 14));
 	show_text(cr, l, &st->box);
 	g_object_unref(l);
+
+	/* The seek slider, like the volume popup's: a track, the played part, a knob. */
+	if (st->running) {
+		struct rei_rect tr = rei_bar_mpd_seek_track();
+		double f = st->progress < 0 ? 0 : st->progress > 1 ? 1 : st->progress;
+		uint32_t fg = st->box.text_color;
+		double tx = m + tr.x, ty = m + tr.y;
+		set_rgba(cr, rei_bar_mix(st->box.color, fg, st->seekable ? 0.22 : 0.12), 1.0);
+		rounded_rect(cr, tx, ty, tr.w, tr.h, tr.h / 2.0);
+		cairo_fill(cr);
+		if (st->seekable) {
+			set_rgba(cr, st->button.active_color, 1.0);
+			rounded_rect(cr, tx, ty, fmax(tr.h, tr.w * f), tr.h, tr.h / 2.0);
+			cairo_fill(cr);
+			set_rgba(cr, fg, 1.0);
+			cairo_arc(cr, tx + tr.w * f, ty + tr.h / 2.0, st->seek_hover || st->seek_drag ? 8 : 7, 0, 6.2831853);
+			cairo_fill(cr);
+		}
+	}
 
 	struct rei_rect b[REI_MPD_BUTTONS];
 	int n = rei_bar_mpd_buttons(st->running, b);
@@ -1591,6 +1615,52 @@ struct rei_pixbuf *rei_bar_mpd_render(const struct rei_mpd_panel_state *st, int 
 	int stride = cairo_image_surface_get_stride(surface);
 	for (int y = 0; y < pb->height; y++)
 		memcpy(pb->data + (size_t)y * (size_t)pb->width * 4, src + (size_t)y * (size_t)stride,
+		       (size_t)pb->width * 4);
+	cairo_surface_destroy(surface);
+	return pb;
+}
+
+struct rei_pixbuf *rei_bar_mpd_art_render(const struct rei_pixbuf *art, const struct rei_style *box, int scale,
+					  int *margin_out)
+{
+	const int side = REI_MPD_ART_SIDE;
+	int m = shadow_margin(box);
+	*margin_out = m;
+	if (scale < 1)
+		scale = 1;
+	int pw = (side + 2 * m) * scale, ph = (side + 2 * m) * scale;
+	struct rei_pixbuf *pb = rei_pixbuf_create(pw, ph, false);
+	if (!pb)
+		return NULL;
+	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pw, ph);
+	cairo_t *cr = cairo_create(surface);
+	cairo_scale(cr, scale, scale);
+	draw_glow(cr, box, m, m, side, side, 1.0);
+	draw_box(cr, box, m, m, side, side, box->color, 1.0);
+	/* The picture inside the border, cropped to fill the square, with the box's corners. */
+	double bw = box->border_width > 0.01f ? box->border_width : 0;
+	double in = side - 2 * bw;
+	if (art && art->width > 0 && art->height > 0 && in > 1) {
+		cairo_surface_t *src = cairo_image_surface_create_for_data((unsigned char *)art->data, CAIRO_FORMAT_ARGB32,
+									    art->width, art->height, art->width * 4);
+		cairo_save(cr);
+		shape_path(cr, box->shape, m + bw, m + bw, in, in, box->radius - bw);
+		cairo_clip(cr);
+		double s = fmax(in / art->width, in / art->height);
+		cairo_translate(cr, m + bw + (in - art->width * s) / 2, m + bw + (in - art->height * s) / 2);
+		cairo_scale(cr, s, s);
+		cairo_set_source_surface(cr, src, 0, 0);
+		cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_BEST);
+		cairo_paint(cr);
+		cairo_restore(cr);
+		cairo_surface_destroy(src);
+	}
+	cairo_destroy(cr);
+	cairo_surface_flush(surface);
+	const uint8_t *srcd = cairo_image_surface_get_data(surface);
+	int stride = cairo_image_surface_get_stride(surface);
+	for (int y = 0; y < pb->height; y++)
+		memcpy(pb->data + (size_t)y * (size_t)pb->width * 4, srcd + (size_t)y * (size_t)stride,
 		       (size_t)pb->width * 4);
 	cairo_surface_destroy(surface);
 	return pb;

@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 struct rei_server;
+struct rei_pixbuf;
 
 /*
  * A small MPD client, on the event loop (the protocol is plain text; no libmpdclient).
@@ -30,6 +31,8 @@ struct rei_mpd_info {
 	bool loop_all;    /* repeat the playlist */
 	bool loop_one;    /* repeat the current song */
 	char title[256];  /* "Artist - Title" (or the title, or the file name); "" when nothing is loaded */
+	int elapsed_ms;   /* how far into the song (moves on by itself while playing); -1 when stopped or unknown */
+	int duration_ms;  /* the song's length; -1 when unknown (a stream) */
 };
 
 /* (Re)reads the [mpd] settings: connects, or disconnects when disabled. Cheap when nothing changed. */
@@ -56,6 +59,15 @@ void rei_mpd_set_volume(struct rei_server *server, int percent);
 void rei_mpd_toggle_mute(struct rei_server *server);
 /* Runs [mpd] start_command (default "mpd") and keeps looking for it for a few seconds. */
 void rei_mpd_launch(struct rei_server *server);
+
+/* Jumps to `seconds` in the song being played or paused (no-op otherwise, or when its length is unknown). The new
+ * position shows at once, before MPD has answered. */
+void rei_mpd_seek(struct rei_server *server, double seconds);
+
+/* The cover of the current song (from MPD's readpicture, else the cover file next to it), shrunk to at most 640 pixels;
+ * NULL when there is none, or [mpd] album_art is off. Owned by the client: use it before returning to the event
+ * loop, or take a reference. */
+struct rei_pixbuf *rei_mpd_album_art(const struct rei_server *server);
 
 /* The song's text from an MPD "currentsong" answer. Exposed for tests. */
 void rei_mpd_format_song(const char *artist, const char *title, const char *name, const char *file,

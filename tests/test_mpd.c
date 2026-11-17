@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+#include "pngw.h"
 #include "toolbar.h"
 
 /* ---- the fake MPD ---- */
@@ -65,7 +66,28 @@ static int fake_mpd(const char *path, const char *logpath)
 		cl[i].fd = -1;
 	int state = 0 /* 0 stop 1 play 2 pause */, song = 0, id = 100, volume = 80;
 	int rnd = 0, rep = 0, single = 0;
+	double el = 0;   /* seconds into the song */
+	struct timespec last;
+	clock_gettime(CLOCK_MONOTONIC, &last);
+	/* The covers: Ada's red, Cyd's green; Bob's file has none. */
+	crc_init();
+	static uint8_t *pic[3];
+	static size_t pic_len[3];
+	for (int i = 0; i < 3; i += 2) {
+		char pp[460];
+		snprintf(pp, sizeof pp, "%s.art%d.png", path, i);
+		write_png(pp, 64, 64, i == 0 ? 255 : 0, i == 0 ? 0 : 255, 0, 255);
+		FILE *f = fopen(pp, "rb");
+		pic[i] = malloc(70000);
+		pic_len[i] = fread(pic[i], 1, 70000, f);
+		fclose(f);
+	}
 	for (;;) {
+		struct timespec now_ts;
+		clock_gettime(CLOCK_MONOTONIC, &now_ts);
+		if (state == 1)
+			el += (double)(now_ts.tv_sec - last.tv_sec) + (double)(now_ts.tv_nsec - last.tv_nsec) / 1e9;
+		last = now_ts;
 		struct pollfd p[5];
 		int n = 0;
 		p[n++] = (struct pollfd){ ls, POLLIN, 0 };
@@ -78,6 +100,7 @@ static int fake_mpd(const char *path, const char *logpath)
 			g_advance = 0;
 			song = (song + 1) % 3;
 			id++;
+			el = 0;
 			state = 1;
 			change = true;
 		}
@@ -124,7 +147,7 @@ static int fake_mpd(const char *path, const char *logpath)
 					say(c->fd, "volume: %d\nrandom: %d\nrepeat: %d\nsingle: %d\nstate: %s\n", volume, rnd, rep, single,
 					    state == 1 ? "play" : state == 2 ? "pause" : "stop");
 					if (state)
-						say(c->fd, "songid: %d\n", id);
+						say(c->fd, "songid: %d\nelapsed: %.3f\nduration: 200.000\n", id, el);
 					say(c->fd, "OK\n");
 				} else if (!strcmp(line, "currentsong")) {
 					if (state)
@@ -142,7 +165,19 @@ static int fake_mpd(const char *path, const char *logpath)
 					if (c->idle)
 						say(c->fd, "OK\n");
 					c->idle = false;
+				} else if (!strncmp(line, "readpicture ", 12) || !strncmp(line, "albumart ", 9)) {
+					size_t off = (size_t)strtoul(strrchr(line, ' ') + 1, NULL, 10);
+					if (line[0] == 'a' || !pic[song]) {
+						say(c->fd, line[0] == 'a' ? "ACK [50@0] {albumart} No file exists\n" : "OK\n");
+					} else {
+						size_t n = pic_len[song] - off < 4096 ? pic_len[song] - off : 4096;
+						say(c->fd, "size: %zu\ntype: image/png\nbinary: %zu\n", pic_len[song], n);
+						CHECK(write(c->fd, pic[song] + off, n) == (ssize_t)n);
+						say(c->fd, "\nOK\n");
+					}
 				} else {
+					if (!strncmp(line, "seekcur ", 8))
+						el = atof(line + 8), change = true;
 					if (!strcmp(line, "pause 1") && state == 1)
 						state = 2, change = true;
 					else if (!strcmp(line, "pause 0") && state == 2)
@@ -150,6 +185,7 @@ static int fake_mpd(const char *path, const char *logpath)
 					else if (!strcmp(line, "previous") && state) {
 						song = (song + 2) % 3;
 						id++;
+						el = 0;
 						change = true;
 					} else if (!strncmp(line, "random ", 7))
 						rnd = atoi(line + 7), change = true;
@@ -164,6 +200,7 @@ static int fake_mpd(const char *path, const char *logpath)
 					else if (!strcmp(line, "next") && state) {
 						song = (song + 1) % 3;
 						id++;
+						el = 0;
 						change = true;
 					}
 					say(c->fd, "OK\n");
@@ -392,6 +429,44 @@ int main(int argc, char **argv)
 	wait_log("message: Now playing: Ada - One", 4000);
 	settle_all();
 	keep("mpd-controls-playing");
+
+	/* ---- The cover: a square above the controls, 3/5 of their width, centred; its picture is Ada's red one. ---- */
+	{
+		int side = REI_MPD_ART_SIDE;
+		CHECK(side == 216);
+		int cx = g_w / 2 + g_panel_dx, cy = g_h - 10 - REI_MPDP_H - REI_MPD_ART_GAP - side / 2;
+		struct ppm img = screenshot();
+		bool red = near_px(&img, cx, cy, 255, 0, 0, 12);
+		/* the gap between its bottom and the controls' top shows no cover; just above the square doesn't either */
+		bool gap_clear = !near_px(&img, cx, cy + side / 2 + REI_MPD_ART_GAP / 2, 255, 0, 0, 12);
+		bool outside = !near_px(&img, cx + side / 2 + 8, cy, 255, 0, 0, 12);
+		free(img.rgb);
+		CHECK(red && gap_clear && outside);
+		keep("mpd-art");
+	}
+
+	/* ---- The seek slider: a click jumps there; a drag shows the time and seeks when let go. ---- */
+	{
+		struct rei_rect tr = rei_bar_mpd_seek_track();
+		int x0 = (g_w - REI_MPDP_W) / 2 + g_panel_dx + tr.x, y0 = g_h - 10 - REI_MPDP_H + tr.y + tr.h / 2;
+		click(x0 + tr.w / 2, y0);                       /* the middle: 100 of 200 seconds */
+		wait_cmd("seekcur 100.000", 1);
+		inject("motion_abs %d %d", x0 + tr.w / 4, y0);
+		inject("button 272 1");
+		inject("motion_abs %d %d", x0 + tr.w * 3 / 4, y0);   /* dragging to three quarters: 150 s = 2:30 */
+		settle_all();
+		sleep_ms(100);
+		wait_log("seek tooltip: 2:30", 2000);
+		CHECK(count_cmd("seekcur 150.000") == 0);       /* nothing is sent while the knob is held */
+		keep("mpd-seek-drag");
+		inject("button 272 0");
+		settle_all();
+		wait_cmd("seekcur 150.000", 1);
+		sleep_ms(300);
+		keep("mpd-seek-after");
+		struct ppm img = screenshot();   /* the knob and the played part moved there: the tooltip is gone */
+		free(img.rgb);
+	}
 	button_center(true, 1, &px, &py);   /* the same button now pauses */
 	click(px, py);
 	wait_cmd("pause 1", 1);
@@ -405,13 +480,25 @@ int main(int argc, char **argv)
 	click(px, py);
 	wait_cmd("next", 1);
 	wait_log("message: Now playing: Bob - Two", 4000);
-	sleep_ms(200);
+	sleep_ms(300);
+	{   /* Bob's file has no cover: the square is gone (and not left showing Ada's) */
+		struct ppm img = screenshot();
+		bool gone = !near_px(&img, g_w / 2 + g_panel_dx, g_h - 10 - REI_MPDP_H - REI_MPD_ART_GAP - REI_MPD_ART_SIDE / 2, 255, 0, 0, 40);
+		free(img.rgb);
+		CHECK(gone);
+	}
 	button_center(true, 0, &px, &py);   /* previous */
 	click(px, py);
 	wait_cmd("previous", 1);
 	wait_log("message: Now playing: Ada - One", 4000);   /* (Bob - Two back to Ada - One: announced again, it is new) */
 	CHECK(log_count("message: Now playing: Ada - One") == 2);
-	sleep_ms(200);
+	sleep_ms(400);
+	{   /* back on Ada: her cover is fetched again */
+		struct ppm img = screenshot();
+		bool red = near_px(&img, g_w / 2 + g_panel_dx, g_h - 10 - REI_MPDP_H - REI_MPD_ART_GAP - REI_MPD_ART_SIDE / 2, 255, 0, 0, 12);
+		free(img.rgb);
+		CHECK(red);
+	}
 	button_center(true, 2, &px, &py);   /* skip again, to where it was */
 	click(px, py);
 	wait_cmd("next", 2);

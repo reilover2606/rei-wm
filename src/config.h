@@ -56,6 +56,7 @@ struct rei_config {
 	int32_t mpd_port;
 	char *mpd_start_command;   /* run by the controls' "Start MPD" button */
 	bool mpd_announce;         /* a new song is announced in the message stack */
+	bool mpd_album_art;        /* the song's cover is fetched from MPD and shown above the controls */
 
 	/* [cursor] */
 	char *cursor_theme;        /* An XCursor theme's name; "" = the system's default. */
