@@ -6,7 +6,7 @@
 #include <wayland-server-core.h>
 
 struct rei_server;
-struct rei_data_source;
+struct rei_selection_source;
 
 /*
  * The one seat ("seat0"): protocol objects and event delivery. Which surface
@@ -28,8 +28,12 @@ struct rei_seat {
 
 	/* The clipboard. Delivery to the focused client arrives with keyboard
 	 * focus in milestone 4. */
-	struct rei_data_source *selection;
+	struct rei_selection_source *selection;
 	struct wl_listener selection_destroy;
+	/* The primary selection: what is highlighted (zwp_primary_selection, proto/primary_selection.c). */
+	struct wl_list primary_devices;
+	struct rei_selection_source *primary;
+	struct wl_listener primary_destroy;
 };
 
 bool rei_seat_init(struct rei_server *server);

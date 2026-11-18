@@ -231,6 +231,12 @@ QWidget *MainWindow::buildGeneralTab()
 		 tr("Hovering a window focuses it; leaving every window focuses nothing. Off: click to focus."));
 	addField(f, tr("Turn the display off after (minutes)"), "general", "display_sleep", Int, 5, {}, 0, 1440, 1,
 		 tr("Without keyboard or mouse use. Any input wakes it. 0 means never. Programs playing video keep it awake."));
+	addField(f, tr("Highlighted text in a terminal is also the clipboard"), "clipboard", "terminal_selection_to_clipboard",
+		 Bool, true, {}, 0, 0, 1,
+		 tr("Terminals copy by highlighting (paste with a middle click). With this on, what you highlight in one of the "
+		    "terminals below can also be pasted with Ctrl+V in other programs."));
+	addField(f, tr("Terminals (app names, comma separated)"), "clipboard", "terminals", String, "URxvt, XTerm, foot, kitty, Alacritty",
+		 {}, 0, 0, 1, tr("Windows of these programs count as terminals. Case does not matter; the X11 class or Wayland app id."));
 	addField(f, tr("Run Xwayland (X11 programs)"), "general", "xwayland", Bool, true,
 		 {}, 0, 0, 1, tr("Needs a restart of rei-wm to change."));
 	addField(f, tr("X resources file"), "general", "xresources", String, "~/.Xresources", {}, 0, 0, 1,

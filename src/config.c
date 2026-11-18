@@ -295,6 +295,11 @@ struct rei_config *rei_config_defaults(void)
 	rei_theme_defaults(&cfg->theme, cfg->toolbar_background, cfg->toolbar_foreground, cfg->toolbar_highlight);
 	cfg->notch_height = 22;
 	cfg->decoration_client_titlebars = true;
+	cfg->clipboard_terminals = rei_xstrdup("URxvt, XTerm, UXTerm, rxvt, Eterm, mlterm, st, st-256color, foot, footclient, "
+					       "kitty, Alacritty, org.wezfurlong.wezterm, wezterm, konsole, org.kde.konsole, "
+					       "xfce4-terminal, gnome-terminal, gnome-terminal-server, org.gnome.Terminal, "
+					       "terminator, tilix, lxterminal, qterminal, sakura, termite, cool-retro-term, Guake");
+	cfg->clipboard_terminal_to_clipboard = true;
 	cfg->repeat_rate = 25;
 	cfg->repeat_delay = 600;
 	cfg->tap_to_click = true;
@@ -575,6 +580,14 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 			fail(&r, "%s", theme_err);
 	}
 
+	const struct toml_table *clip = get_table(&r, root, "clipboard");
+	if (clip) {
+		read_string(&r, clip, "clipboard.", "terminals", &cfg->clipboard_terminals);
+		const struct toml_value *t2c = get(&r, clip, "clipboard.", "terminal_selection_to_clipboard", TOML_BOOL);
+		if (t2c)
+			cfg->clipboard_terminal_to_clipboard = t2c->u.b;
+	}
+
 	const struct toml_table *deco = get_table(&r, root, "decoration");
 	if (deco) {
 		read_int(&r, deco, "decoration.", "notch_height", &cfg->notch_height, 0, 64);
@@ -826,6 +839,7 @@ void rei_config_free(struct rei_config *cfg)
 	free(cfg->brightness_device);
 	free(cfg->brightness_command);
 	free(cfg->mpd_host);
+	free(cfg->clipboard_terminals);
 	free(cfg->mpd_start_command);
 	free(cfg->start_run_font);
 	free(cfg->messages_font);

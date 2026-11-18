@@ -4,6 +4,7 @@
 
 #include "check.h"
 #include "config.h"
+#include "util/util.h"
 
 static struct rei_config *parse_ok(const char *text)
 {
@@ -219,8 +220,26 @@ static void test_first_run_creates_default_file(void)
 	rmdir(root);
 }
 
+static void test_clipboard(void)
+{
+	struct rei_config *c = parse_ok("");
+	CHECK(c->clipboard_terminal_to_clipboard);
+	CHECK(rei_app_list_matches(c->clipboard_terminals, "URxvt") && rei_app_list_matches(c->clipboard_terminals, "foot"));
+	CHECK(rei_app_list_matches(c->clipboard_terminals, "xterm"));   /* case does not matter */
+	CHECK(!rei_app_list_matches(c->clipboard_terminals, "firefox"));
+	rei_config_free(c);
+	c = parse_ok("[clipboard]\nterminal_selection_to_clipboard = false\nterminals = \"mine, Other\"\n");
+	CHECK(!c->clipboard_terminal_to_clipboard);
+	CHECK(rei_app_list_matches(c->clipboard_terminals, "MINE") && rei_app_list_matches(c->clipboard_terminals, "other"));
+	CHECK(!rei_app_list_matches(c->clipboard_terminals, "foot"));
+	rei_config_free(c);
+	parse_fails("[clipboard]\nterminal_selection_to_clipboard = 3\n", "clipboard.terminal_selection_to_clipboard");
+	CHECK(rei_app_list_matches("*", "anything"));
+}
+
 int main(void)
 {
+	test_clipboard();
 	test_defaults();
 	test_shipped_default_text_parses();
 	test_overrides();

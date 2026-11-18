@@ -128,6 +128,8 @@ struct rei_config {
 	struct rei_theme theme;
 
 	/* [decoration] */
+	char *clipboard_terminals;                  /* app ids (comma separated) whose highlighted text also becomes the clipboard */
+	bool clipboard_terminal_to_clipboard;
 	bool decoration_client_titlebars;   /* programs draw their own title bars (true) or are asked to leave them out */
 	int32_t notch_height;  /* Pixels; 0 turns the window notches off. */
 

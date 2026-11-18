@@ -23,7 +23,7 @@ in 2023, for instance).
 | libinput | `dev-libs/libinput` | |
 | libudev | `virtual/libudev` (`sys-fs/udev` or `sys-fs/eudev`) | |
 | **Xwayland** | | `-Dxwayland=enabled` |
-| libxcb | `x11-libs/libxcb` | build |
+| libxcb | `x11-libs/libxcb` | build (its XFixes part, `xcb-xfixes`, is used for copy and paste with X11 programs) |
 | Xwayland binary | `x11-base/xwayland` | run time |
 | **PipeWire volume** | | `-Daudio=enabled` |
 | PipeWire | `media-video/pipewire` (provides libpipewire) | build and run |

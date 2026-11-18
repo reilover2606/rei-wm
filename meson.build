@@ -42,7 +42,8 @@ endif
 
 # Xwayland support: rei-wm is Xwayland's window manager, speaking X11 through libxcb.
 xcb = dependency('xcb', required: get_option('xwayland'))
-have_xwayland = xcb.found()
+xcb_xfixes = dependency('xcb-xfixes', required: get_option('xwayland'))
+have_xwayland = xcb.found() and xcb_xfixes.found()
 if have_xwayland
   add_project_arguments('-DREI_HAVE_XWAYLAND=1', language: 'c')
 endif
@@ -90,6 +91,11 @@ xdg_decoration_xml = files(protocols_dir / 'unstable' / 'xdg-decoration' / 'xdg-
 xdg_decoration_server_h = scan_server_header.process(xdg_decoration_xml)
 xdg_decoration_client_h = scan_client_header.process(xdg_decoration_xml)
 xdg_decoration_code = scan_code.process(xdg_decoration_xml)
+
+primary_selection_xml = files(protocols_dir / 'unstable' / 'primary-selection' / 'primary-selection-unstable-v1.xml')
+primary_selection_server_h = scan_server_header.process(primary_selection_xml)
+primary_selection_client_h = scan_client_header.process(primary_selection_xml)
+primary_selection_code = scan_code.process(primary_selection_xml)
 
 viewporter_xml = files(protocols_dir / 'stable' / 'viewporter' / 'viewporter.xml')
 viewporter_server_h = scan_server_header.process(viewporter_xml)

@@ -15,6 +15,8 @@
 #include "input/keybindings.h"
 #include "input/xkb.h"
 #include "proto/data_device.h"
+#include "proto/primary_selection.h"
+#include "xwayland.h"
 #include "proto/seat.h"
 #include "proto/surface.h"
 #include "proto/xdg_shell.h"
@@ -192,8 +194,11 @@ static void set_keyboard_focus(struct rei_input *in, struct rei_surface *surface
 
 	/* The clipboard follows keyboard focus between clients. */
 	struct wl_client *client = wl_resource_get_client(surface->resource);
-	if (client != old_client)
+	if (client != old_client) {
 		rei_data_device_send_selection(in->server, client);
+		rei_primary_selection_send(in->server, client);
+		rei_xsel_focus_changed(in->server);
+	}
 }
 
 void rei_input_refocus(struct rei_server *server)

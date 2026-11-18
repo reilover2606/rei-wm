@@ -1,4 +1,5 @@
 #include "xwayland.h"
+#include "xwayland_sel.h"
 
 #include <errno.h>
 #include <event2/event.h>
@@ -91,6 +92,7 @@ struct rei_xwayland {
 	struct wl_list windows;   /* rei_xwindow */
 	struct wl_list surfaces;  /* rei_xsurface */
 	xcb_window_t focused;
+	struct rei_xsel *sel;   /* copy and paste between X11 programs and the rest (xwayland_sel.c) */
 	bool running;
 };
 
@@ -601,6 +603,8 @@ static void on_client_message(struct rei_xwayland *x, const xcb_client_message_e
 
 static void handle_event(struct rei_xwayland *x, xcb_generic_event_t *ev)
 {
+	if (x->sel && rei_xsel_handle_event(x->sel, ev))
+		return;
 	switch (ev->response_type & ~0x80) {
 	case XCB_CREATE_NOTIFY: on_create_notify(x, (void *)ev); break;
 	case XCB_MAP_REQUEST: on_map_request(x, (void *)ev); break;
@@ -922,6 +926,8 @@ static void teardown(struct rei_xwayland *x, const char *why)
 {
 	if (!x->running && !x->conn)
 		return;
+	rei_xsel_destroy(x->sel);
+	x->sel = NULL;
 	rei_warn("xwayland: stopped (%s); X11 programs can no longer run", why);
 	x->running = false;
 	if (x->xcb_event) {
@@ -1070,6 +1076,7 @@ static void become_window_manager(struct rei_xwayland *x)
 	xcb_set_selection_owner(x->conn, x->wm_window, wm_s0, XCB_CURRENT_TIME);
 	xcb_set_selection_owner(x->conn, x->wm_window, cm_s0, XCB_CURRENT_TIME);
 	xcb_flush(x->conn);
+	x->sel = rei_xsel_create(x->server, x->conn, x->wm_window, x->screen->root);
 
 	x->xcb_event = event_new(x->server->base, xcb_get_file_descriptor(x->conn), EV_READ | EV_PERSIST,
 				 on_xcb_readable, x);
@@ -1248,6 +1255,8 @@ void rei_xwayland_stop(struct rei_server *server)
 	if (!x)
 		return;
 	server->xwayland = NULL;
+	rei_xsel_destroy(x->sel);   /* (also takes an X11 program's selection out of the seat, which would point into it) */
+	x->sel = NULL;
 
 	x->running = false;
 	if (x->ready_event)
@@ -1274,4 +1283,9 @@ void rei_xwayland_stop(struct rei_server *server)
 	}
 	release_display(x);
 	free(x);
+}
+
+struct rei_xsel *rei_xwayland_selection(const struct rei_server *server)
+{
+	return server->xwayland ? server->xwayland->sel : NULL;
 }
