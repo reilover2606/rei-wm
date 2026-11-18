@@ -66,7 +66,7 @@ This installs `rei-wm`, `rei-settings`, a launcher `rei-wm-session` and the sess
 `/usr/share/wayland-sessions/rei-wm.desktop`, so **rei-wm** is listed by a display manager (LXDM, or any that reads
 `wayland-sessions`) next to your other sessions. The launcher sets up the environment of a Wayland session and logs to
 `~/.cache/rei-wm/session.log`. It needs a login with seat access (elogind or systemd-logind through PAM). See
-[docs/GENTOO.md](docs/GENTOO.md) for the details, what to check if the session drops straight back to the login
+[docs/GENTOO.md](docs/GENTOO.md) (and [docs/VOID.md](docs/VOID.md) for Void Linux) for the details, what to check if the session drops straight back to the login
 screen, and what is untested.
 
 ## The toolbar's application tray

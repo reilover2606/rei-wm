@@ -27,6 +27,18 @@ libevent_pthreads = dependency('libevent_pthreads')
 threads = dependency('threads')
 m_dep = cc.find_library('m', required: false)
 
+# Backtraces in crash reports: glibc has them; musl needs libexecinfo; without either they are left out.
+backtrace_deps = []
+if cc.has_function('backtrace', prefix: '#include <execinfo.h>')
+  add_project_arguments('-DREI_HAVE_BACKTRACE=1', language: 'c')
+else
+  execinfo = cc.find_library('execinfo', required: false)
+  if execinfo.found() and cc.has_function('backtrace', prefix: '#include <execinfo.h>', dependencies: execinfo)
+    add_project_arguments('-DREI_HAVE_BACKTRACE=1', language: 'c')
+    backtrace_deps = [execinfo]
+  endif
+endif
+
 # The DRM/KMS backend, for running on real hardware from a TTY. Optional so the
 # compositor still builds (headless and nested) on machines without the libraries.
 libdrm = dependency('libdrm', version: '>=2.4.109', required: get_option('drm'))
