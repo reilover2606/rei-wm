@@ -223,12 +223,15 @@ static void test_first_run_creates_default_file(void)
 static void test_workspace_and_resize(void)
 {
 	struct rei_config *c = parse_ok("");
-	CHECK(c->workspace_back_and_forth && c->resize_step == 40);
+	CHECK(c->workspace_back_and_forth && c->resize_step == 40 && c->thin_shrink == 30);
 	rei_config_free(c);
 	c = parse_ok("[general]\nworkspace_back_and_forth = false\n[layout]\nresize_step = 25\n");
 	CHECK(!c->workspace_back_and_forth && c->resize_step == 25);
 	rei_config_free(c);
 	parse_fails("[layout]\nresize_step = 2\n", "layout.resize_step");
+	c = parse_ok("[layout]\nthin_shrink = 45\n");
+	CHECK(c->thin_shrink == 45);
+	parse_fails("[layout]\nthin_shrink = 95\n", "layout.thin_shrink");
 	parse_fails("[general]\nworkspace_back_and_forth = 1\n", "general.workspace_back_and_forth");
 }
 

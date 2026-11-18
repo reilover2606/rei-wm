@@ -261,6 +261,7 @@ struct rei_config *rei_config_defaults(void)
 	cfg->drm_explicit_sync = true;
 	cfg->drm_devices = rei_xstrdup("auto");
 	cfg->resize_step = 40;
+	cfg->thin_shrink = 30;
 	cfg->cursor_theme = rei_xstrdup("");
 	cfg->volume_target = REI_VOLUME_AUTO;
 	cfg->brightness_step = 5;
@@ -393,6 +394,7 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		read_int(&r, layout, "layout.", "gap_outer", &cfg->gap_outer, 0, 500);
 		read_int(&r, layout, "layout.", "gap_inner", &cfg->gap_inner, 0, 500);
 		read_int(&r, layout, "layout.", "resize_step", &cfg->resize_step, 5, 500);
+		read_int(&r, layout, "layout.", "thin_shrink", &cfg->thin_shrink, 0, 90);
 		static const char *const modes[] = { "tile", "float", NULL };
 		char *mode = rei_xstrdup("tile");
 		read_choice(&r, layout, "layout.", "new_windows", &mode, modes);

@@ -219,6 +219,9 @@ void rei_actions_run(struct rei_server *s, const struct rei_action *action)
 	case REI_ACTION_FULLSCREEN:
 		rei_wm_toggle_fullscreen(s);
 		break;
+	case REI_ACTION_THIN_MODE:
+		rei_wm_toggle_thin(s);
+		break;
 	case REI_ACTION_RESIZE_MODE:
 		rei_wm_set_resize_mode(s, !s->resize_mode);
 		break;

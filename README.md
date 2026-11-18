@@ -127,6 +127,12 @@ kitty: Ctrl+Shift+V) and, if the program also set the primary selection by highl
 on before, so one key switches between two workspaces, as in i3 (`[general] workspace_back_and_forth`, on by default).
 A workspace that was empty when you left it has gone, and comes back empty.
 
+**Thin mode.** `Mod+t` (the `thin_mode` action) toggles thin mode on the workspace you are looking at: its tiled windows are
+gathered in a narrower column in the middle of the screen and the wallpaper shows at both sides. The grid gets
+`[layout] thin_shrink` percent narrower (30 by default, 0 to 90; also in the settings app's Layout tab). Only tiled windows are
+affected: floating windows, fullscreen windows and the other workspaces keep their place. Press the key again to widen the grid;
+resizing with resize mode works inside the column. The mode belongs to the workspace and is forgotten when an empty workspace goes.
+
 **Resize mode.** `Mod+Shift+r` (the `resize_mode` action) enters resize mode: the mode switch next to the Start button shows
 an **R** instead of its icon. In the mode the keys **i j k l** (or the arrow keys) move a divider of the focused tiled window
 up, left, down and right, **Shift** takes three steps at a time, a held key repeats, and **Escape** or **Enter** leaves it. A key

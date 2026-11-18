@@ -41,6 +41,7 @@ enum rei_action_type {
 	REI_ACTION_MESSAGES,         /* show or hide the whole message stack */
 	REI_ACTION_RUN,              /* open the floating command prompt */
 	REI_ACTION_MINIMIZE,         /* minimize the focused window into the tray */
+	REI_ACTION_THIN_MODE,        /* toggle thin mode on the current workspace */
 	REI_ACTION_RESIZE_MODE,      /* enter or leave resize mode: i j k l (or the arrows) move the focused tile's dividers */
 	REI_ACTION_VOLUME_UP,        /* volume_up [percent] */
 	REI_ACTION_VOLUME_DOWN,      /* volume_down [percent] */

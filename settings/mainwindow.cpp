@@ -272,6 +272,9 @@ QWidget *MainWindow::buildLayoutTab()
 		    "Programs that never ask (GTK3, Firefox's own bar) and X11 programs are not affected."));
 	addField(f, tr("Resize step (px)"), "layout", "resize_step", Int, 40, {}, 5, 500, 1,
 		 tr("How far a key of the resize mode (Mod+Shift+r, then i j k l) moves a divider; Shift is three times as much."));
+	addField(f, tr("Thin mode shrink (%)"), "layout", "thin_shrink", Int, 30, {}, 0, 90, 1,
+		 tr("How much narrower thin mode (Mod+t) makes the tiling grid of a workspace: the windows are gathered in a column "
+		    "in the middle and the wallpaper shows at the sides."));
 	addField(f, tr("Window notch height (px, 0 = off)"), "decoration", "notch_height", Int, 22, {}, 0, 64);
 	return w;
 }
