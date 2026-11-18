@@ -50,6 +50,9 @@ have_drm = libdrm.found() and gbm.found() and libseat.found() and libinput.found
 
 if have_drm
   add_project_arguments('-DREI_HAVE_DRM=1', language: 'c')
+  if cc.has_function('drmSyncobjEventfd', dependencies: libdrm, prefix: '#include <xf86drm.h>')
+    add_project_arguments('-DREI_HAVE_SYNCOBJ_EVENTFD=1', language: 'c')
+  endif
 endif
 
 # Xwayland support: rei-wm is Xwayland's window manager, speaking X11 through libxcb.
@@ -88,6 +91,7 @@ xdg_shell_code = scan_code.process(xdg_shell_xml)
 
 linux_dmabuf_xml = files(protocols_dir / 'unstable' / 'linux-dmabuf' / 'linux-dmabuf-unstable-v1.xml')
 linux_dmabuf_server_h = scan_server_header.process(linux_dmabuf_xml)
+linux_dmabuf_client_h = scan_client_header.process(linux_dmabuf_xml)
 linux_dmabuf_code = scan_code.process(linux_dmabuf_xml)
 
 xwayland_shell_xml = files(protocols_dir / 'staging' / 'xwayland-shell' / 'xwayland-shell-v1.xml')
@@ -108,6 +112,11 @@ primary_selection_xml = files(protocols_dir / 'unstable' / 'primary-selection' /
 primary_selection_server_h = scan_server_header.process(primary_selection_xml)
 primary_selection_client_h = scan_client_header.process(primary_selection_xml)
 primary_selection_code = scan_code.process(primary_selection_xml)
+
+linux_drm_syncobj_xml = files(protocols_dir / 'staging' / 'linux-drm-syncobj' / 'linux-drm-syncobj-v1.xml')
+linux_drm_syncobj_server_h = scan_server_header.process(linux_drm_syncobj_xml)
+linux_drm_syncobj_client_h = scan_client_header.process(linux_drm_syncobj_xml)
+linux_drm_syncobj_code = scan_code.process(linux_drm_syncobj_xml)
 
 viewporter_xml = files(protocols_dir / 'stable' / 'viewporter' / 'viewporter.xml')
 viewporter_server_h = scan_server_header.process(viewporter_xml)

@@ -232,6 +232,20 @@ static void test_workspace_and_resize(void)
 	parse_fails("[general]\nworkspace_back_and_forth = 1\n", "general.workspace_back_and_forth");
 }
 
+static void test_drm_section(void)
+{
+	struct rei_config *c = parse_ok("");
+	CHECK(c->drm_explicit_sync);
+	CHECK_STR(c->drm_devices, "auto");
+	rei_config_free(c);
+	c = parse_ok("[drm]\nexplicit_sync = false\ndevices = \"first\"\n");
+	CHECK(!c->drm_explicit_sync);
+	CHECK_STR(c->drm_devices, "first");
+	rei_config_free(c);
+	parse_fails("[drm]\ndevices = \"every\"\n", "drm.devices");
+	parse_fails("[drm]\nexplicit_sync = 1\n", "drm.explicit_sync");
+}
+
 static void test_clipboard(void)
 {
 	struct rei_config *c = parse_ok("");
@@ -252,6 +266,7 @@ static void test_clipboard(void)
 int main(void)
 {
 	test_clipboard();
+	test_drm_section();
 	test_workspace_and_resize();
 	test_defaults();
 	test_shipped_default_text_parses();

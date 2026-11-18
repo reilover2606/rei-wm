@@ -253,6 +253,18 @@ static void wait_log(const char *needle, int timeout_ms)
 	}
 }
 
+/* Waits until the log has `needle` at least `n` times. */
+static void wait_logs(const char *needle, int n, int timeout_ms)
+{
+	for (int t = 0; log_count(needle) < n; t += 20) {
+		if (t >= timeout_ms) {
+			fprintf(stderr, "never logged %d x: %s\n", n, needle);
+			exit(1);
+		}
+		sleep_ms(20);
+	}
+}
+
 static void wait_cmd(const char *cmd, int want)
 {
 	for (int t = 0; count_cmd(cmd) < want; t += 20) {
@@ -431,6 +443,9 @@ int main(int argc, char **argv)
 	keep("mpd-controls-playing");
 
 	/* ---- The cover: a square above the controls, 3/5 of their width, centred; its picture is Ada's red one. ---- */
+	wait_logs("mpd: cover", 1, 4000);   /* (it is fetched after the song is announced) */
+	settle_all();
+	sleep_ms(100);
 	{
 		int side = REI_MPD_ART_SIDE;
 		CHECK(side == 216);
@@ -492,7 +507,9 @@ int main(int argc, char **argv)
 	wait_cmd("previous", 1);
 	wait_log("message: Now playing: Ada - One", 4000);   /* (Bob - Two back to Ada - One: announced again, it is new) */
 	CHECK(log_count("message: Now playing: Ada - One") == 2);
-	sleep_ms(400);
+	wait_logs("mpd: cover", 2, 4000);
+	settle_all();
+	sleep_ms(100);
 	{   /* back on Ada: her cover is fetched again */
 		struct ppm img = screenshot();
 		bool red = near_px(&img, g_w / 2 + g_panel_dx, g_h - 10 - REI_MPDP_H - REI_MPD_ART_GAP - REI_MPD_ART_SIDE / 2, 255, 0, 0, 12);

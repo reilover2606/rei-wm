@@ -84,6 +84,48 @@ scanned out directly. The pointer is a hardware cursor when the monitor's scale 
 - Touchpad gestures, tablets, touch and key-repeat for the compositor itself are not handled.
 - Kinetic touchpad scrolling ends without an `axis_stop`, so some apps may glide.
 
+## NVIDIA, Intel, AMD and more than one GPU
+
+The DRM backend picks nothing by vendor: it asks each GPU what it can do. Three things matter on a machine with an NVIDIA GPU
+(or two GPUs), and all of them are automatic once the system is set up.
+
+**System setup (NVIDIA proprietary driver).**
+
+- The kernel module needs mode setting: `nvidia-drm.modeset=1` on the kernel command line (and `nvidia-drm.fbdev=1` with driver
+  545 and newer, for a working text console). Without it `rei-wm --drm-info` shows `atomic modesetting: NO` for the card and
+  rei-wm skips it.
+- The driver's GBM and EGL pieces must be installed (`libnvidia-egl-gbm`, `libnvidia-egl-wayland`; most distributions
+  install them with the driver).
+- A recent driver is recommended: as far as I know NVIDIA's support for explicit synchronization (which its Wayland and EGL code
+  needs, since the driver has no implicit synchronization) arrived with the 555 series, so 555 or newer, and 560 or newer is
+  safer. This is from memory, not checked. On the kernel side explicit synchronization in rei-wm needs Linux 6.6 or newer
+  (below).
+- `rei-wm --drm-info` shows, per GPU: the driver, atomic mode setting, framebuffer modifiers, timeline sync objects and the
+  sync object eventfd. Send its output with any bug report.
+
+**Explicit synchronization (`wp_linux_drm_syncobj_v1`).** When the kernel has timeline sync objects and their eventfd (Linux 6.6+),
+rei-wm offers the protocol, and clients that use it (Mesa's Wayland support, NVIDIA's, Firefox, games) hand over, with each buffer, a
+sync object point that is signaled when their GPU work on it is done and one rei-wm signals when it has finished reading it.
+rei-wm holds a commit until its acquire point has been signaled (so a buffer is never sampled half drawn) and signals the release
+point when no frame still shows the buffer. Clients that do not use the protocol keep today's implicit synchronization; Intel and AMD
+drivers have it and are not affected, NVIDIA's did not before 555. It is on by default and can be turned off with
+`[drm] explicit_sync = false` to compare. The log says `explicit synchronization (wp_linux_drm_syncobj_v1) is offered`, or why not.
+
+**dmabuf feedback (`zwp_linux_dmabuf_v1` version 4).** Clients are told which GPU is the main one (its render node) and which
+buffer layouts (format and modifier) rei-wm can use, instead of guessing, so a program that renders on one GPU allocates buffers
+the compositor can import. With more than one GPU in use only the layouts all of them can sample are offered, so a window shows
+on every monitor.
+
+**More than one GPU.** `[drm] devices = "auto"` (the default) uses every GPU that has a monitor plugged in, each drawing for
+its own monitors and scanning out from its own memory, so a laptop's panel on the integrated GPU and a monitor on the discrete GPU
+both work, with no frame copied between GPUs. A GPU with no monitor is opened only to look and then closed again (so a sleeping
+discrete GPU is not kept awake); if a monitor is plugged into one later the udev hotplug event makes rei-wm look again.
+`devices = "first"` uses one GPU only. What is not done: rendering on one GPU and showing on another's monitor (a copy between
+GPUs), and per-surface feedback that points a program at the GPU that drives its monitor.
+
+**Measuring.** With `-v`, every five seconds each output logs `frames on <output>: N in 5.0 s, average spacing X ms, worst Y ms,
+Z late`. Compare that line, with the same program doing the same thing, on each GPU or with `explicit_sync` on and off.
+
 ## If rei-wm crashes
 
 rei-wm now prints a backtrace to stderr when it crashes, so run it with the log redirected

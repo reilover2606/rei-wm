@@ -135,6 +135,15 @@ otherwise the opposite edge (it shrinks away), so `l` on the right-hand window o
 `[layout] resize_step` pixels (40); no tile gets smaller than 8% of its container. Other keys are typed as usual while the mode is
 on, and floating windows are not resized by it. (`Mod+r`, i3's key for this, is the Run prompt here, so the mode has its own.)
 
+## GPUs: Intel, AMD, NVIDIA, more than one
+
+The DRM backend decides by what each GPU can do, not by vendor: it offers explicit synchronization (`wp_linux_drm_syncobj_v1`, for
+drivers without implicit synchronization such as NVIDIA's, harmless on the others) and dmabuf feedback (`linux-dmabuf` version 4, so
+programs allocate buffers for the right GPU), and uses every GPU that has a monitor, each drawing for its own. `[drm] explicit_sync` and
+`[drm] devices` control it, `rei-wm --drm-info` shows what each GPU supports, and `-v` logs frame pacing every five seconds.
+See [docs/DRM.md](docs/DRM.md) for the NVIDIA setup (kernel parameter, driver) and what is not done. Untested on real
+hardware: all of this was written without a GPU; the protocol logic is tested against a fake kernel.
+
 ## Display sleep
 
 `[general] display_sleep = 5` turns the displays off after that many minutes without keyboard, mouse or touchpad

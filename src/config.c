@@ -258,6 +258,8 @@ struct rei_config *rei_config_defaults(void)
 	cfg->focus_follows_mouse = true;
 	cfg->display_sleep_minutes = 5;
 	cfg->workspace_back_and_forth = true;
+	cfg->drm_explicit_sync = true;
+	cfg->drm_devices = rei_xstrdup("auto");
 	cfg->resize_step = 40;
 	cfg->cursor_theme = rei_xstrdup("");
 	cfg->volume_target = REI_VOLUME_AUTO;
@@ -586,6 +588,15 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 			fail(&r, "%s", theme_err);
 	}
 
+	const struct toml_table *drm = get_table(&r, root, "drm");
+	if (drm) {
+		const struct toml_value *es = get(&r, drm, "drm.", "explicit_sync", TOML_BOOL);
+		if (es)
+			cfg->drm_explicit_sync = es->u.b;
+		static const char *const dev_modes[] = { "auto", "first", NULL };
+		read_choice(&r, drm, "drm.", "devices", &cfg->drm_devices, dev_modes);
+	}
+
 	const struct toml_table *clip = get_table(&r, root, "clipboard");
 	if (clip) {
 		read_string(&r, clip, "clipboard.", "terminals", &cfg->clipboard_terminals);
@@ -846,6 +857,7 @@ void rei_config_free(struct rei_config *cfg)
 	free(cfg->brightness_command);
 	free(cfg->mpd_host);
 	free(cfg->clipboard_terminals);
+	free(cfg->drm_devices);
 	free(cfg->mpd_start_command);
 	free(cfg->start_run_font);
 	free(cfg->messages_font);

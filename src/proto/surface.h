@@ -35,6 +35,8 @@ enum rei_surface_role {
 	REI_ROLE_XWAYLAND,
 };
 
+struct rei_syncobj_surface;
+
 struct rei_frame_cb {
 	struct wl_list link;
 	struct wl_resource *resource;
@@ -90,6 +92,11 @@ struct rei_surface {
 	struct rei_rects opaque, input;
 	bool input_default;  /* No input region set: the whole surface takes input. */
 	struct wl_list frames;
+
+	/* Explicit synchronization (proto/syncobj.c): its object on this surface, and the commits waiting for their acquire
+	 * points, oldest first. */
+	struct rei_syncobj_surface *sync_surface;
+	struct wl_list blocked;
 
 	enum rei_surface_role role;
 	/* Called after a commit has been applied. */

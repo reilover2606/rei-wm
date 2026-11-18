@@ -2,6 +2,7 @@
 #include <drm_fourcc.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/eventfd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,6 +54,24 @@ static void describe(int fd, const char *path)
 	printf("atomic modesetting: %s\n", atomic ? "yes" : "NO (the DRM backend needs it)");
 	printf("framebuffer modifiers: %s\n",
 	       drmGetCap(fd, DRM_CAP_ADDFB2_MODIFIERS, &cap) == 0 && cap ? "yes" : "no");
+	/* Explicit synchronization: timeline sync objects, and the eventfd for waiting on one (Linux 6.6 and newer). */
+	printf("timeline sync objects: %s\n", drmGetCap(fd, DRM_CAP_SYNCOBJ_TIMELINE, &cap) == 0 && cap ? "yes" : "no");
+#ifdef REI_HAVE_SYNCOBJ_EVENTFD
+	{
+		uint32_t handle = 0;
+		int efd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+		bool ok = efd >= 0 && drmSyncobjCreate(fd, DRM_SYNCOBJ_CREATE_SIGNALED, &handle) == 0 &&
+			  drmSyncobjEventfd(fd, handle, 0, efd, 0) == 0;
+		if (handle)
+			drmSyncobjDestroy(fd, handle);
+		if (efd >= 0)
+			close(efd);
+		printf("sync object eventfd: %s (explicit synchronization %s)\n", ok ? "yes" : "no",
+		       ok ? "can be offered to clients" : "will not be offered: clients use implicit synchronization");
+	}
+#else
+	printf("sync object eventfd: not built in (libdrm too old): explicit synchronization will not be offered\n");
+#endif
 	uint64_t cw = 0, ch = 0;
 	drmGetCap(fd, DRM_CAP_CURSOR_WIDTH, &cw);
 	drmGetCap(fd, DRM_CAP_CURSOR_HEIGHT, &ch);

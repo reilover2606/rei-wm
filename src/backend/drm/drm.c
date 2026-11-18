@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
 #include <xf86drm.h>
@@ -26,6 +27,7 @@
 #include "dmabuf.h"
 #include "input/libinput_input.h"
 #include "proto/linux_dmabuf.h"
+#include "proto/syncobj.h"
 #include "render/gles.h"
 #include "render_thread.h"
 #include "server.h"
@@ -56,6 +58,7 @@
 #define N_SCANOUT_CACHE 6
 
 struct drm_backend;
+struct drm_device;
 
 struct drm_plane {
 	uint32_t id;
@@ -89,6 +92,7 @@ struct scanout_entry {
 struct drm_output {
 	struct wl_list link;
 	struct drm_backend *be;
+	struct drm_device *dev;   /* the GPU the monitor is on (and which draws for it) */
 	struct rei_output *out;  /* Event thread only; NULL while being torn down. */
 
 	char name[32];
@@ -118,17 +122,17 @@ struct drm_output {
 	atomic_bool hw_cursor_active;
 };
 
-struct drm_backend {
-	struct rei_backend base;
-	struct rei_session *session;
-	struct rei_libinput *libinput;
-	bool session_ready;
-	atomic_bool active;
-	atomic_bool sleeping;   /* display sleep: the monitors are switched off (see set_display_power) */
-
+/* One GPU. Each output is drawn by, and scanned out from, the GPU its monitor is plugged into, so a machine with a
+ * monitor on each of two GPUs (a laptop's panel on the integrated one, a monitor on the discrete one) works without
+ * copying frames between them. */
+struct drm_device {
+	struct wl_list link;   /* drm_backend.devices */
+	struct drm_backend *be;
 	int fd, device_id;
 	char *device_path;
 	dev_t devnum;
+	dev_t render_node;     /* what clients open to allocate buffers (linux-dmabuf feedback names it) */
+	bool boot_vga;
 	bool timestamps_monotonic, addfb_modifiers;
 	uint64_t cursor_w, cursor_h;
 	struct gbm_device *gbm;
@@ -139,15 +143,27 @@ struct drm_backend {
 	struct drm_plane *planes;
 	size_t n_planes;
 
-	struct rei_format_mod *egl_formats;  /* What the renderer can draw into and sample. */
+	struct rei_format_mod *egl_formats;  /* What this GPU's renderer can draw into and sample. */
 	size_t n_egl_formats;
+};
+
+struct drm_backend {
+	struct rei_backend base;
+	struct rei_session *session;
+	struct rei_libinput *libinput;
+	bool session_ready;
+	atomic_bool active;
+	atomic_bool sleeping;   /* display sleep: the monitors are switched off (see set_display_power) */
+
+	struct wl_list devices;   /* drm_device, the main one first */
+	struct drm_device *main;  /* the first: the one linux-dmabuf feedback and explicit synchronization are about */
 
 	struct udev *udev;
 	struct udev_monitor *monitor;
 	struct event *monitor_event;
 	struct event *rescan_timer;
 
-	struct wl_list outputs;  /* drm_output */
+	struct wl_list outputs;  /* drm_output, of every device */
 	bool scanout_enabled, hw_cursor_enabled;
 };
 
@@ -186,16 +202,16 @@ static bool add_prop(drmModeAtomicReq *req, uint32_t obj, uint32_t prop, uint64_
 /* Device resources                                                         */
 /* ------------------------------------------------------------------------ */
 
-static void load_plane(struct drm_backend *be, struct drm_plane *pl, uint32_t id)
+static void load_plane(struct drm_device *dev, struct drm_plane *pl, uint32_t id)
 {
 	pl->id = id;
-	drmModePlane *p = drmModeGetPlane(be->fd, id);
+	drmModePlane *p = drmModeGetPlane(dev->fd, id);
 	if (!p)
 		return;
 	pl->possible_crtcs = p->possible_crtcs;
 
 	uint64_t type = REI_DRM_PLANE_OVERLAY;
-	find_prop(be->fd, id, DRM_MODE_OBJECT_PLANE, "type", &type);
+	find_prop(dev->fd, id, DRM_MODE_OBJECT_PLANE, "type", &type);
 	pl->type = (enum rei_drm_plane_type)type;
 
 	const struct { const char *name; uint32_t *dst; } props[] = {
@@ -206,12 +222,12 @@ static void load_plane(struct drm_backend *be, struct drm_plane *pl, uint32_t id
 		{ "CRTC_W", &pl->p_crtc_w }, { "CRTC_H", &pl->p_crtc_h },
 	};
 	for (size_t i = 0; i < REI_ARRAY_LEN(props); i++)
-		*props[i].dst = find_prop(be->fd, id, DRM_MODE_OBJECT_PLANE, props[i].name, NULL);
+		*props[i].dst = find_prop(dev->fd, id, DRM_MODE_OBJECT_PLANE, props[i].name, NULL);
 
 	/* Preferably the IN_FORMATS blob, which also lists modifiers. */
 	uint64_t blob_id = 0;
-	if (find_prop(be->fd, id, DRM_MODE_OBJECT_PLANE, "IN_FORMATS", &blob_id) && blob_id) {
-		drmModePropertyBlobRes *blob = drmModeGetPropertyBlob(be->fd, (uint32_t)blob_id);
+	if (find_prop(dev->fd, id, DRM_MODE_OBJECT_PLANE, "IN_FORMATS", &blob_id) && blob_id) {
+		drmModePropertyBlobRes *blob = drmModeGetPropertyBlob(dev->fd, (uint32_t)blob_id);
 		if (blob) {
 			pl->n_formats = rei_drm_parse_in_formats(blob->data, blob->length, &pl->formats);
 			drmModeFreePropertyBlob(blob);
@@ -228,44 +244,44 @@ static void load_plane(struct drm_backend *be, struct drm_plane *pl, uint32_t id
 	drmModeFreePlane(p);
 }
 
-static bool load_resources(struct drm_backend *be)
+static bool load_resources(struct drm_device *dev)
 {
-	drmModeRes *res = drmModeGetResources(be->fd);
+	drmModeRes *res = drmModeGetResources(dev->fd);
 	if (!res) {
 		rei_error("drm: drmModeGetResources failed: %s", strerror(errno));
 		return false;
 	}
-	be->n_crtcs = (size_t)res->count_crtcs;
-	be->crtcs = rei_xcalloc(be->n_crtcs ? be->n_crtcs : 1, sizeof *be->crtcs);
-	for (size_t i = 0; i < be->n_crtcs; i++) {
-		be->crtcs[i].id = res->crtcs[i];
-		be->crtcs[i].p_active = find_prop(be->fd, res->crtcs[i], DRM_MODE_OBJECT_CRTC, "ACTIVE", NULL);
-		be->crtcs[i].p_mode_id = find_prop(be->fd, res->crtcs[i], DRM_MODE_OBJECT_CRTC, "MODE_ID", NULL);
+	dev->n_crtcs = (size_t)res->count_crtcs;
+	dev->crtcs = rei_xcalloc(dev->n_crtcs ? dev->n_crtcs : 1, sizeof *dev->crtcs);
+	for (size_t i = 0; i < dev->n_crtcs; i++) {
+		dev->crtcs[i].id = res->crtcs[i];
+		dev->crtcs[i].p_active = find_prop(dev->fd, res->crtcs[i], DRM_MODE_OBJECT_CRTC, "ACTIVE", NULL);
+		dev->crtcs[i].p_mode_id = find_prop(dev->fd, res->crtcs[i], DRM_MODE_OBJECT_CRTC, "MODE_ID", NULL);
 	}
 	drmModeFreeResources(res);
 
-	drmModePlaneRes *pres = drmModeGetPlaneResources(be->fd);
+	drmModePlaneRes *pres = drmModeGetPlaneResources(dev->fd);
 	if (!pres) {
 		rei_error("drm: drmModeGetPlaneResources failed: %s", strerror(errno));
 		return false;
 	}
-	be->n_planes = pres->count_planes;
-	be->planes = rei_xcalloc(be->n_planes ? be->n_planes : 1, sizeof *be->planes);
-	for (size_t i = 0; i < be->n_planes; i++)
-		load_plane(be, &be->planes[i], pres->planes[i]);
+	dev->n_planes = pres->count_planes;
+	dev->planes = rei_xcalloc(dev->n_planes ? dev->n_planes : 1, sizeof *dev->planes);
+	for (size_t i = 0; i < dev->n_planes; i++)
+		load_plane(dev, &dev->planes[i], pres->planes[i]);
 	drmModeFreePlaneResources(pres);
 	return true;
 }
 
-static void free_resources(struct drm_backend *be)
+static void free_resources(struct drm_device *dev)
 {
-	for (size_t i = 0; i < be->n_planes; i++)
-		free(be->planes[i].formats);
-	free(be->planes);
-	free(be->crtcs);
-	be->planes = NULL;
-	be->crtcs = NULL;
-	be->n_planes = be->n_crtcs = 0;
+	for (size_t i = 0; i < dev->n_planes; i++)
+		free(dev->planes[i].formats);
+	free(dev->planes);
+	free(dev->crtcs);
+	dev->planes = NULL;
+	dev->crtcs = NULL;
+	dev->n_planes = dev->n_crtcs = 0;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -275,8 +291,8 @@ static void free_resources(struct drm_backend *be)
 static bool build_plane_request(struct drm_output *o, drmModeAtomicReq *req, uint32_t fb_id,
 				bool modeset)
 {
-	struct drm_backend *be = o->be;
-	const struct drm_plane *pl = &be->planes[o->plane_index];
+	struct drm_device *dev = o->dev;
+	const struct drm_plane *pl = &dev->planes[o->plane_index];
 	uint64_t w = o->mode.hdisplay, h = o->mode.vdisplay;
 
 	bool ok = add_prop(req, pl->id, pl->p_fb_id, fb_id) &&
@@ -289,13 +305,13 @@ static bool build_plane_request(struct drm_output *o, drmModeAtomicReq *req, uin
 		return false;
 
 	if (modeset) {
-		const struct drm_crtc *crtc = &be->crtcs[o->crtc_index];
+		const struct drm_crtc *crtc = &dev->crtcs[o->crtc_index];
 		ok = add_prop(req, o->connector_id, o->p_connector_crtc_id, o->crtc_id) &&
 		     add_prop(req, crtc->id, crtc->p_mode_id, o->mode_blob) &&
 		     add_prop(req, crtc->id, crtc->p_active, 1);
 		/* Whatever a previous owner left on other planes of this CRTC goes. */
-		for (size_t i = 0; ok && i < be->n_planes; i++) {
-			const struct drm_plane *other = &be->planes[i];
+		for (size_t i = 0; ok && i < dev->n_planes; i++) {
+			const struct drm_plane *other = &dev->planes[i];
 			if ((int)i == o->plane_index || other->type == REI_DRM_PLANE_CURSOR ||
 			    !(other->possible_crtcs & (1u << o->crtc_index)))
 				continue;
@@ -315,7 +331,7 @@ static bool commit_frame(struct drm_output *o, uint32_t fb_id, bool modeset)
 	if (ok) {
 		uint32_t flags = DRM_MODE_PAGE_FLIP_EVENT;
 		flags |= modeset ? DRM_MODE_ATOMIC_ALLOW_MODESET : DRM_MODE_ATOMIC_NONBLOCK;
-		if (drmModeAtomicCommit(o->be->fd, req, flags, o->be) != 0) {
+		if (drmModeAtomicCommit(o->dev->fd, req, flags, o->dev) != 0) {
 			rei_debug("drm: %s: atomic commit failed: %s", o->name, strerror(errno));
 			ok = false;
 		}
@@ -330,7 +346,7 @@ static bool test_frame(struct drm_output *o, uint32_t fb_id)
 	if (!req)
 		return false;
 	bool ok = build_plane_request(o, req, fb_id, false) &&
-		  drmModeAtomicCommit(o->be->fd, req, DRM_MODE_ATOMIC_TEST_ONLY, NULL) == 0;
+		  drmModeAtomicCommit(o->dev->fd, req, DRM_MODE_ATOMIC_TEST_ONLY, NULL) == 0;
 	drmModeAtomicFree(req);
 	return ok;
 }
@@ -339,10 +355,11 @@ static bool test_frame(struct drm_output *o, uint32_t fb_id)
 static void disable_output(struct drm_output *o)
 {
 	struct drm_backend *be = o->be;
+	struct drm_device *dev = o->dev;
 	if (!atomic_load(&be->active) || o->plane_index < 0)
 		return;
-	const struct drm_plane *pl = &be->planes[o->plane_index];
-	const struct drm_crtc *crtc = &be->crtcs[o->crtc_index];
+	const struct drm_plane *pl = &dev->planes[o->plane_index];
+	const struct drm_crtc *crtc = &dev->crtcs[o->crtc_index];
 	drmModeAtomicReq *req = drmModeAtomicAlloc();
 	if (!req)
 		return;
@@ -351,7 +368,7 @@ static void disable_output(struct drm_output *o)
 	add_prop(req, o->connector_id, o->p_connector_crtc_id, 0);
 	add_prop(req, crtc->id, crtc->p_active, 0);
 	add_prop(req, crtc->id, crtc->p_mode_id, 0);
-	drmModeAtomicCommit(be->fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+	drmModeAtomicCommit(dev->fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
 	drmModeAtomicFree(req);
 }
 
@@ -359,7 +376,7 @@ static void disable_output(struct drm_output *o)
 /* Swapchain and scanout buffers (render thread)                            */
 /* ------------------------------------------------------------------------ */
 
-static uint32_t add_fb(struct drm_backend *be, int32_t w, int32_t h, uint32_t format,
+static uint32_t add_fb(struct drm_device *dev, int32_t w, int32_t h, uint32_t format,
 		       const uint32_t handles[4], const uint32_t strides[4],
 		       const uint32_t offsets[4], uint64_t modifier)
 {
@@ -368,16 +385,16 @@ static uint32_t add_fb(struct drm_backend *be, int32_t w, int32_t h, uint32_t fo
 	for (int i = 0; i < 4; i++)
 		mods[i] = handles[i] ? modifier : 0;  /* Planes that are not used carry no modifier. */
 	int ret;
-	if (be->addfb_modifiers && modifier != REI_MOD_INVALID)
-		ret = drmModeAddFB2WithModifiers(be->fd, (uint32_t)w, (uint32_t)h, format, handles,
+	if (dev->addfb_modifiers && modifier != REI_MOD_INVALID)
+		ret = drmModeAddFB2WithModifiers(dev->fd, (uint32_t)w, (uint32_t)h, format, handles,
 						 strides, offsets, mods, &fb, DRM_MODE_FB_MODIFIERS);
 	else
-		ret = drmModeAddFB2(be->fd, (uint32_t)w, (uint32_t)h, format, handles, strides,
+		ret = drmModeAddFB2(dev->fd, (uint32_t)w, (uint32_t)h, format, handles, strides,
 				    offsets, &fb, 0);
 	if (ret != 0) {
 		rei_warn("drm: AddFB2 failed for %dx%d %.4s modifier 0x%llx (%s): %s", w, h,
 			 (const char *)&format, (unsigned long long)modifier,
-			 be->addfb_modifiers && modifier != REI_MOD_INVALID ? "with modifiers" : "implicit",
+			 dev->addfb_modifiers && modifier != REI_MOD_INVALID ? "with modifiers" : "implicit",
 			 strerror(errno));
 		return 0;
 	}
@@ -388,15 +405,15 @@ static uint32_t add_fb(struct drm_backend *be, int32_t w, int32_t h, uint32_t fo
  * choose. 2: plain linear memory, which everything can scan out. */
 static struct gbm_bo *alloc_bo(struct drm_output *o, int attempt, const uint64_t *mods, unsigned n_mods)
 {
-	struct drm_backend *be = o->be;
+	struct drm_device *dev = o->dev;
 	uint32_t w = (uint32_t)o->mode.hdisplay, h = (uint32_t)o->mode.vdisplay;
 	uint32_t use = GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING;
 	if (attempt == 0)
-		return n_mods ? gbm_bo_create_with_modifiers2(be->gbm, w, h, GBM_FORMAT_XRGB8888, mods,
+		return n_mods ? gbm_bo_create_with_modifiers2(dev->gbm, w, h, GBM_FORMAT_XRGB8888, mods,
 							      n_mods, use) : NULL;
 	if (attempt == 1)
-		return gbm_bo_create(be->gbm, w, h, GBM_FORMAT_XRGB8888, use);
-	return gbm_bo_create(be->gbm, w, h, GBM_FORMAT_XRGB8888, use | GBM_BO_USE_LINEAR);
+		return gbm_bo_create(dev->gbm, w, h, GBM_FORMAT_XRGB8888, use);
+	return gbm_bo_create(dev->gbm, w, h, GBM_FORMAT_XRGB8888, use | GBM_BO_USE_LINEAR);
 }
 
 static void swap_buf_destroy(struct drm_output *o, struct rei_gles *gles, struct swap_buf *b)
@@ -404,7 +421,7 @@ static void swap_buf_destroy(struct drm_output *o, struct rei_gles *gles, struct
 	if (b->glbuf)
 		rei_gles_buffer_destroy(gles, b->glbuf);
 	if (b->fb_id)
-		drmModeRmFB(o->be->fd, b->fb_id);
+		drmModeRmFB(o->dev->fd, b->fb_id);
 	if (b->bo)
 		gbm_bo_destroy(b->bo);
 	*b = (struct swap_buf){ 0 };
@@ -413,7 +430,7 @@ static void swap_buf_destroy(struct drm_output *o, struct rei_gles *gles, struct
 static bool swap_buf_try(struct drm_output *o, struct rei_gles *gles, struct swap_buf *b, int attempt,
 			 const uint64_t *mods, unsigned n_mods)
 {
-	struct drm_backend *be = o->be;
+	struct drm_device *dev = o->dev;
 	b->bo = alloc_bo(o, attempt, mods, n_mods);
 	if (!b->bo)
 		return false;
@@ -438,7 +455,7 @@ static bool swap_buf_try(struct drm_output *o, struct rei_gles *gles, struct swa
 		 attempt == 0 ? "shared-layout" : attempt == 1 ? "driver-chosen" : "linear", n_planes,
 		 (unsigned long long)proto.modifier, strides[0]);
 
-	b->fb_id = add_fb(be, o->mode.hdisplay, o->mode.vdisplay, DRM_FORMAT_XRGB8888, handles, strides,
+	b->fb_id = add_fb(dev, o->mode.hdisplay, o->mode.vdisplay, DRM_FORMAT_XRGB8888, handles, strides,
 			  offsets, proto.modifier);
 	struct rei_dmabuf *d = rei_dmabuf_create(&proto);  /* Takes the fds. */
 	if (d) {
@@ -456,13 +473,13 @@ static bool swap_buf_try(struct drm_output *o, struct rei_gles *gles, struct swa
 
 static bool swapchain_create(struct drm_output *o, struct rei_gles *gles)
 {
-	struct drm_backend *be = o->be;
-	const struct drm_plane *pl = &be->planes[o->plane_index];
+	struct drm_device *dev = o->dev;
+	const struct drm_plane *pl = &dev->planes[o->plane_index];
 
 	/* Layouts both the plane can scan out and the renderer can draw into. */
 	struct rei_format_mod *both = NULL;
-	size_t n_both = rei_format_mod_intersect(pl->formats, pl->n_formats, be->egl_formats,
-						 be->n_egl_formats, &both);
+	size_t n_both = rei_format_mod_intersect(pl->formats, pl->n_formats, dev->egl_formats,
+						 dev->n_egl_formats, &both);
 	uint64_t *mods = rei_xcalloc(n_both + 1, sizeof *mods);
 	unsigned n_mods = 0;
 	for (size_t i = 0; i < n_both; i++) {
@@ -500,9 +517,9 @@ static void scanout_entry_free(struct drm_output *o, struct scanout_entry *e)
 {
 	if (!e->dmabuf_id)
 		return;
-	drmModeRmFB(o->be->fd, e->fb_id);
+	drmModeRmFB(o->dev->fd, e->fb_id);
 	for (int i = 0; i < e->n_handles; i++)
-		drmCloseBufferHandle(o->be->fd, e->handles[i]);
+		drmCloseBufferHandle(o->dev->fd, e->handles[i]);
 	*e = (struct scanout_entry){ 0 };
 }
 
@@ -533,19 +550,19 @@ static uint32_t scanout_fb(struct drm_output *o, const struct rei_dmabuf *d)
 	struct scanout_entry e = { .dmabuf_id = d->id };
 	uint32_t handles[4] = { 0 };
 	for (int i = 0; i < d->n_planes; i++) {
-		if (drmPrimeFDToHandle(o->be->fd, d->fd[i], &handles[i]) != 0) {
+		if (drmPrimeFDToHandle(o->dev->fd, d->fd[i], &handles[i]) != 0) {
 			rei_debug("drm: %s: cannot import a client buffer: %s", o->name, strerror(errno));
 			for (int j = 0; j < i; j++)
-				drmCloseBufferHandle(o->be->fd, handles[j]);
+				drmCloseBufferHandle(o->dev->fd, handles[j]);
 			return 0;
 		}
 		e.handles[i] = handles[i];
 	}
 	e.n_handles = d->n_planes;
-	e.fb_id = add_fb(o->be, d->width, d->height, d->format, handles, d->stride, d->offset, d->modifier);
+	e.fb_id = add_fb(o->dev, d->width, d->height, d->format, handles, d->stride, d->offset, d->modifier);
 	if (!e.fb_id) {
 		for (int i = 0; i < e.n_handles; i++)
-			drmCloseBufferHandle(o->be->fd, e.handles[i]);
+			drmCloseBufferHandle(o->dev->fd, e.handles[i]);
 		return 0;
 	}
 	e.last_used = ++o->scanout_clock;
@@ -567,7 +584,7 @@ static uint32_t try_scanout(struct drm_output *o, const struct rei_scene_snapsho
 	if (!cand || cand->dmabuf->id == o->scanout_rejected_id)
 		return 0;
 
-	const struct drm_plane *pl = &o->be->planes[o->plane_index];
+	const struct drm_plane *pl = &o->dev->planes[o->plane_index];
 	const struct rei_dmabuf *d = cand->dmabuf;
 	uint32_t fb = 0;
 	if (rei_format_mod_supported(pl->formats, pl->n_formats, d->format, d->modifier))
@@ -652,7 +669,7 @@ static void drm_render_fini(void *data)
 		o->buf[i].glbuf = NULL;
 		if (atomic_load(&o->be->active)) {
 			if (o->buf[i].fb_id)
-				drmModeRmFB(o->be->fd, o->buf[i].fb_id);
+				drmModeRmFB(o->dev->fd, o->buf[i].fb_id);
 		}
 		if (o->buf[i].bo)
 			gbm_bo_destroy(o->buf[i].bo);
@@ -669,11 +686,12 @@ static void drm_render_fini(void *data)
 static void cursor_setup(struct drm_output *o)
 {
 	struct drm_backend *be = o->be;
-	if (!be->hw_cursor_enabled || be->cursor_w == 0 || be->cursor_h == 0)
+	struct drm_device *dev = o->dev;
+	if (!be->hw_cursor_enabled || dev->cursor_w == 0 || dev->cursor_h == 0)
 		return;
-	o->cursor_w = (int)be->cursor_w;
-	o->cursor_h = (int)be->cursor_h;
-	o->cursor_bo = gbm_bo_create(be->gbm, (uint32_t)o->cursor_w, (uint32_t)o->cursor_h,
+	o->cursor_w = (int)dev->cursor_w;
+	o->cursor_h = (int)dev->cursor_h;
+	o->cursor_bo = gbm_bo_create(dev->gbm, (uint32_t)o->cursor_w, (uint32_t)o->cursor_h,
 				     GBM_FORMAT_ARGB8888, GBM_BO_USE_CURSOR | GBM_BO_USE_WRITE);
 	o->cursor_img_id = 0;   /* the picture is uploaded when it is first shown, and whenever it changes */
 	if (!o->cursor_bo)
@@ -706,7 +724,7 @@ static bool cursor_upload(struct drm_output *o, const struct rei_cursor_image *i
 static void cursor_hide(struct drm_output *o)
 {
 	if (o->cursor_shown)
-		drmModeSetCursor(o->be->fd, o->crtc_id, 0, 0, 0);
+		drmModeSetCursor(o->dev->fd, o->crtc_id, 0, 0, 0);
 	o->cursor_shown = false;
 }
 
@@ -752,7 +770,7 @@ static bool cursor_update(struct drm_output *o)
 	} else {
 		if (!o->cursor_shown) {
 			uint32_t handle = gbm_bo_get_handle(o->cursor_bo).u32;
-			if (drmModeSetCursor(be->fd, o->crtc_id, handle, (uint32_t)o->cursor_w,
+			if (drmModeSetCursor(o->dev->fd, o->crtc_id, handle, (uint32_t)o->cursor_w,
 					     (uint32_t)o->cursor_h) != 0) {
 				rei_warn("drm: %s: hardware cursor refused (%s); drawing it in software",
 					 o->name, strerror(errno));
@@ -766,7 +784,7 @@ static bool cursor_update(struct drm_output *o)
 			o->cursor_px = o->cursor_py = INT32_MIN;
 		}
 		if (px != o->cursor_px || py != o->cursor_py) {
-			drmModeMoveCursor(be->fd, o->crtc_id, px, py);
+			drmModeMoveCursor(o->dev->fd, o->crtc_id, px, py);
 			o->cursor_px = px;
 			o->cursor_py = py;
 		}
@@ -796,16 +814,16 @@ static void on_page_flip(int fd, unsigned int seq, unsigned int sec, unsigned in
 	(void)fd;
 	(void)seq;
 	(void)data;
-	struct drm_backend *be = data;
+	struct drm_device *dev = data;
 	struct drm_output *o;
-	wl_list_for_each(o, &be->outputs, link) {
-		if (o->crtc_id != crtc_id || !o->out)
+	wl_list_for_each(o, &dev->be->outputs, link) {
+		if (o->dev != dev || o->crtc_id != crtc_id || !o->out)
 			continue;
 		if (!o->crtc_on) {
 			o->crtc_on = true;
 			cursor_update(o);  /* The CRTC is live now: the cursor can be set. */
 		}
-		uint64_t ns = be->timestamps_monotonic
+		uint64_t ns = dev->timestamps_monotonic
 			? (uint64_t)sec * 1000000000ull + (uint64_t)usec * 1000ull : 0;
 		rei_render_notify_vblank(o->out->render, ns);
 		return;
@@ -816,9 +834,9 @@ static void on_drm_readable(evutil_socket_t fd, short what, void *arg)
 {
 	(void)fd;
 	(void)what;
-	struct drm_backend *be = arg;
+	struct drm_device *dev = arg;
 	drmEventContext ctx = { .version = 3, .page_flip_handler2 = on_page_flip };
-	drmHandleEvent(be->fd, &ctx);
+	drmHandleEvent(dev->fd, &ctx);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -840,11 +858,11 @@ static const struct rei_output_config *config_for(const struct rei_server *s, co
 	return unnamed;
 }
 
-static struct drm_output *output_for_connector(struct drm_backend *be, uint32_t connector_id)
+static struct drm_output *output_for_connector(struct drm_device *dev, uint32_t connector_id)
 {
 	struct drm_output *o;
-	wl_list_for_each(o, &be->outputs, link)
-		if (o->connector_id == connector_id)
+	wl_list_for_each(o, &dev->be->outputs, link)
+		if (o->dev == dev && o->connector_id == connector_id)
 			return o;
 	return NULL;
 }
@@ -867,36 +885,38 @@ static void output_destroy(struct drm_output *o)
 	if (o->cursor_bo)
 		gbm_bo_destroy(o->cursor_bo);
 	if (o->mode_blob)
-		drmModeDestroyPropertyBlob(be->fd, o->mode_blob);
+		drmModeDestroyPropertyBlob(o->dev->fd, o->mode_blob);
 	wl_list_remove(&o->link);
 	free(o);
 }
 
-static bool output_create(struct drm_backend *be, drmModeConnector *conn, size_t crtc_index,
+static bool output_create(struct drm_device *dev, drmModeConnector *conn, size_t crtc_index,
 			  const struct rei_drm_mode *modes, int mode_index)
 {
+	struct drm_backend *be = dev->be;
 	struct rei_server *server = be->base.server;
 	struct drm_output *o = rei_xcalloc(1, sizeof *o);
 	o->be = be;
+	o->dev = dev;
 	o->connector_id = conn->connector_id;
 	o->crtc_index = crtc_index;
-	o->crtc_id = be->crtcs[crtc_index].id;
+	o->crtc_id = dev->crtcs[crtc_index].id;
 	o->mode = conn->modes[mode_index];
 	rei_drm_connector_name(o->name, sizeof o->name, conn->connector_type, conn->connector_type_id);
 	atomic_init(&o->needs_modeset, true);
 	atomic_init(&o->hw_cursor_active, false);
 
-	struct rei_drm_plane_info *infos = rei_xcalloc(be->n_planes ? be->n_planes : 1, sizeof *infos);
-	for (size_t i = 0; i < be->n_planes; i++)
-		infos[i] = (struct rei_drm_plane_info){ be->planes[i].type, be->planes[i].possible_crtcs };
-	o->plane_index = rei_drm_pick_plane(infos, be->n_planes, crtc_index, REI_DRM_PLANE_PRIMARY, 0);
+	struct rei_drm_plane_info *infos = rei_xcalloc(dev->n_planes ? dev->n_planes : 1, sizeof *infos);
+	for (size_t i = 0; i < dev->n_planes; i++)
+		infos[i] = (struct rei_drm_plane_info){ dev->planes[i].type, dev->planes[i].possible_crtcs };
+	o->plane_index = rei_drm_pick_plane(infos, dev->n_planes, crtc_index, REI_DRM_PLANE_PRIMARY, 0);
 	free(infos);
-	o->p_connector_crtc_id = find_prop(be->fd, o->connector_id, DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID", NULL);
+	o->p_connector_crtc_id = find_prop(dev->fd, o->connector_id, DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID", NULL);
 	if (o->plane_index < 0 || !o->p_connector_crtc_id ||
-	    drmModeCreatePropertyBlob(be->fd, &o->mode, sizeof o->mode, &o->mode_blob) != 0) {
+	    drmModeCreatePropertyBlob(dev->fd, &o->mode, sizeof o->mode, &o->mode_blob) != 0) {
 		rei_error("drm: %s: cannot set up the output (no primary plane or mode blob)", o->name);
 		if (o->mode_blob)
-			drmModeDestroyPropertyBlob(be->fd, o->mode_blob);
+			drmModeDestroyPropertyBlob(dev->fd, o->mode_blob);
 		free(o);
 		return false;
 	}
@@ -919,7 +939,7 @@ static bool output_create(struct drm_backend *be, drmModeConnector *conn, size_t
 		.x = oc ? oc->x : 0,
 		.y = oc ? oc->y : 0,
 		.render_ops = {
-			.gles = { REI_GLES_GBM, be->gbm },
+			.gles = { REI_GLES_GBM, dev->gbm },
 			.init = drm_render_init,
 			.render = drm_render,
 			.set_paused = drm_set_paused,
@@ -928,25 +948,26 @@ static bool output_create(struct drm_backend *be, drmModeConnector *conn, size_t
 		.render_ops_data = o,
 		.backend_data = o,
 	};
-	rei_info("drm: output %s: %dx%d@%.3f on CRTC %u (primary plane %u)%s", o->name,
-		 p.width, p.height, p.refresh_mhz / 1000.0, o->crtc_id, be->planes[o->plane_index].id,
-		 o->cursor_bo ? ", hardware cursor" : ", software cursor");
+	rei_info("drm: output %s: %dx%d@%.3f on CRTC %u (primary plane %u) of %s%s", o->name,
+		 p.width, p.height, p.refresh_mhz / 1000.0, o->crtc_id, dev->planes[o->plane_index].id,
+		 dev->device_path, o->cursor_bo ? ", hardware cursor" : ", software cursor");
 	o->out = rei_server_add_output(server, &p);
 	if (!o->out) {
 		wl_list_remove(&o->link);
 		if (o->cursor_bo)
 			gbm_bo_destroy(o->cursor_bo);
-		drmModeDestroyPropertyBlob(be->fd, o->mode_blob);
+		drmModeDestroyPropertyBlob(dev->fd, o->mode_blob);
 		free(o);
 		return false;
 	}
 	return true;
 }
 
-/* Brings the set of outputs in line with the connectors that are plugged in. */
-static void scan_connectors(struct drm_backend *be)
+/* Brings the outputs of one GPU in line with the connectors that are plugged into it. */
+static void scan_connectors(struct drm_device *dev)
 {
-	drmModeRes *res = drmModeGetResources(be->fd);
+	struct drm_backend *be = dev->be;
+	drmModeRes *res = drmModeGetResources(dev->fd);
 	if (!res) {
 		rei_warn("drm: cannot read the connector list: %s", strerror(errno));
 		return;
@@ -965,11 +986,13 @@ static void scan_connectors(struct drm_backend *be)
 	/* Drop outputs whose monitor has gone, and note which CRTCs the rest use. */
 	struct drm_output *o, *tmp;
 	wl_list_for_each_safe(o, tmp, &be->outputs, link) {
+		if (o->dev != dev)
+			continue;
 		bool still = false;
 		for (int i = 0; i < res->count_connectors && !still; i++) {
 			if ((uint32_t)res->connectors[i] != o->connector_id)
 				continue;
-			drmModeConnector *c = drmModeGetConnector(be->fd, o->connector_id);
+			drmModeConnector *c = drmModeGetConnector(dev->fd, o->connector_id);
 			still = c && c->connection == DRM_MODE_CONNECTED;
 			const struct rei_output_config *oc = config_for(server, o->name);
 			if (oc && !oc->enabled)
@@ -983,14 +1006,14 @@ static void scan_connectors(struct drm_backend *be)
 	}
 
 	for (int i = 0; i < res->count_connectors; i++) {
-		drmModeConnector *c = drmModeGetConnector(be->fd, res->connectors[i]);
+		drmModeConnector *c = drmModeGetConnector(dev->fd, res->connectors[i]);
 		if (!c)
 			continue;
 		char name[32];
 		rei_drm_connector_name(name, sizeof name, c->connector_type, c->connector_type_id);
 		const struct rei_output_config *oc = config_for(server, name);
 		if (c->connection != DRM_MODE_CONNECTED || c->count_modes == 0 ||
-		    output_for_connector(be, c->connector_id) || (oc && !oc->enabled)) {
+		    output_for_connector(dev, c->connector_id) || (oc && !oc->enabled)) {
 			drmModeFreeConnector(c);
 			continue;
 		}
@@ -1028,20 +1051,20 @@ static void scan_connectors(struct drm_backend *be)
 		drmModeConnector *c = cands[i].conn;
 		current[i] = -1;
 		for (int e = 0; e < c->count_encoders; e++) {
-			drmModeEncoder *enc = drmModeGetEncoder(be->fd, c->encoders[e]);
+			drmModeEncoder *enc = drmModeGetEncoder(dev->fd, c->encoders[e]);
 			if (!enc)
 				continue;
 			possible[i] |= enc->possible_crtcs;
 			if (c->encoders[e] == c->encoder_id) {
-				for (size_t k = 0; k < be->n_crtcs; k++)
-					if (be->crtcs[k].id == enc->crtc_id)
+				for (size_t k = 0; k < dev->n_crtcs; k++)
+					if (dev->crtcs[k].id == enc->crtc_id)
 						current[i] = (int)k;
 			}
 			drmModeFreeEncoder(enc);
 		}
 		possible[i] &= ~taken;
 	}
-	rei_drm_assign_crtcs(possible, current, n_cands, be->n_crtcs, assigned);
+	rei_drm_assign_crtcs(possible, current, n_cands, dev->n_crtcs, assigned);
 
 	for (size_t i = 0; i < n_cands; i++) {
 		char name[32];
@@ -1050,7 +1073,7 @@ static void scan_connectors(struct drm_backend *be)
 		if (assigned[i] < 0)
 			rei_warn("drm: %s: no free CRTC; leaving this monitor off", name);
 		else
-			output_create(be, cands[i].conn, (size_t)assigned[i], cands[i].modes,
+			output_create(dev, cands[i].conn, (size_t)assigned[i], cands[i].modes,
 				      cands[i].mode_index);
 		drmModeFreeConnector(cands[i].conn);
 		free(cands[i].modes);
@@ -1061,14 +1084,24 @@ static void scan_connectors(struct drm_backend *be)
 	free(cands);
 	drmModeFreeResources(res);
 
+	drm_cursor_moved(&be->base);
+}
+
+/* Every GPU's outputs. */
+static void scan_all(struct drm_backend *be)
+{
+	struct drm_device *dev;
+	wl_list_for_each(dev, &be->devices, link)
+		scan_connectors(dev);
 	if (wl_list_empty(&be->outputs))
 		rei_warn("drm: no monitor is connected");
-	drm_cursor_moved(&be->base);
 }
 
 /* ------------------------------------------------------------------------ */
 /* Hotplug                                                                  */
 /* ------------------------------------------------------------------------ */
+
+static void probe_devices(struct drm_backend *be);
 
 static void on_rescan(evutil_socket_t fd, short what, void *arg)
 {
@@ -1078,7 +1111,8 @@ static void on_rescan(evutil_socket_t fd, short what, void *arg)
 	if (!atomic_load(&be->active))
 		return;  /* Picked up when the session comes back. */
 	rei_info("drm: monitors changed; rescanning");
-	scan_connectors(be);
+	probe_devices(be);   /* a GPU that had no monitor when we started may have one now */
+	scan_all(be);
 	rei_server_schedule_damage(be->base.server);
 }
 
@@ -1087,15 +1121,16 @@ static void on_monitor_readable(evutil_socket_t fd, short what, void *arg)
 	(void)fd;
 	(void)what;
 	struct drm_backend *be = arg;
-	struct udev_device *dev;
-	while ((dev = udev_monitor_receive_device(be->monitor))) {
-		const char *hotplug = udev_device_get_property_value(dev, "HOTPLUG");
-		if (udev_device_get_devnum(dev) == be->devnum && hotplug && !strcmp(hotplug, "1")) {
-			/* A monitor takes a moment to settle; coalesce bursts of events. */
+	struct udev_device *ud;
+	while ((ud = udev_monitor_receive_device(be->monitor))) {
+		const char *hotplug = udev_device_get_property_value(ud, "HOTPLUG");
+		if (udev_device_get_devnum(ud) != 0 && hotplug && !strcmp(hotplug, "1")) {
+			/* A monitor takes a moment to settle; coalesce bursts of events. (Any GPU of ours, or one we have
+			 * not opened because it had no monitor: probe_devices looks at those.) */
 			struct timeval tv = { .tv_sec = 0, .tv_usec = 250000 };
 			evtimer_add(be->rescan_timer, &tv);
 		}
-		udev_device_unref(dev);
+		udev_device_unref(ud);
 	}
 }
 
@@ -1132,7 +1167,7 @@ static void session_enable(void *data)
 		rei_libinput_resume(be->libinput);
 
 	/* Monitors may have changed while another session had the display. */
-	scan_connectors(be);
+	scan_all(be);
 	struct drm_output *o;
 	wl_list_for_each(o, &be->outputs, link) {
 		o->current_fb = 0;
@@ -1252,7 +1287,199 @@ static bool device_has_monitor(int fd)
 	return found;
 }
 
-static bool open_gpu(struct drm_backend *be)
+/* The render node of a GPU (what clients open to allocate buffers), else its primary node: the device that
+ * linux-dmabuf feedback names. 0 if unknown. */
+static dev_t render_node_of(int fd)
+{
+	dev_t result = 0;
+	drmDevicePtr dev = NULL;
+	if (drmGetDevice2(fd, 0, &dev) == 0) {
+		struct stat st;
+		if ((dev->available_nodes & (1 << DRM_NODE_RENDER)) && stat(dev->nodes[DRM_NODE_RENDER], &st) == 0)
+			result = st.st_rdev;
+		else if ((dev->available_nodes & (1 << DRM_NODE_PRIMARY)) && stat(dev->nodes[DRM_NODE_PRIMARY], &st) == 0)
+			result = st.st_rdev;
+		drmFreeDevice(&dev);
+	}
+	return result;
+}
+
+/* Opens one GPU through the session and checks that it can do atomic mode setting. NULL if it cannot. */
+static struct drm_device *device_open(struct drm_backend *be, const char *path, bool boot_vga)
+{
+	int id;
+	int fd = rei_session_open(be->session, path, &id);
+	if (fd < 0)
+		return NULL;
+	uint64_t cap = 0;
+	if (drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0 ||
+	    drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1) != 0 ||
+	    drmGetCap(fd, DRM_CAP_ADDFB2_MODIFIERS, &cap) != 0) {
+		rei_warn("drm: %s does not support atomic mode setting; skipping", path);
+		rei_session_close(be->session, id, fd);
+		return NULL;
+	}
+	struct drm_device *dev = rei_xcalloc(1, sizeof *dev);
+	dev->be = be;
+	dev->fd = fd;
+	dev->device_id = id;
+	dev->device_path = rei_xstrdup(path);
+	dev->boot_vga = boot_vga;
+	wl_list_init(&dev->link);
+	uint64_t v = 0;
+	dev->addfb_modifiers = drmGetCap(fd, DRM_CAP_ADDFB2_MODIFIERS, &v) == 0 && v;
+	dev->timestamps_monotonic = drmGetCap(fd, DRM_CAP_TIMESTAMP_MONOTONIC, &v) == 0 && v;
+	if (drmGetCap(fd, DRM_CAP_CURSOR_WIDTH, &dev->cursor_w) != 0)
+		dev->cursor_w = 64;
+	if (drmGetCap(fd, DRM_CAP_CURSOR_HEIGHT, &dev->cursor_h) != 0)
+		dev->cursor_h = 64;
+	struct stat st;
+	if (fstat(fd, &st) == 0)
+		dev->devnum = st.st_rdev;
+	dev->render_node = render_node_of(fd);
+	return dev;
+}
+
+static void device_free(struct drm_device *dev)
+{
+	struct drm_backend *be = dev->be;
+	if (dev->drm_event)
+		event_free(dev->drm_event);
+	free_resources(dev);
+	free(dev->egl_formats);
+	if (dev->gbm)
+		gbm_device_destroy(dev->gbm);
+	if (be->session && dev->fd >= 0)
+		rei_session_close(be->session, dev->device_id, dev->fd);
+	if (!wl_list_empty(&dev->link))
+		wl_list_remove(&dev->link);
+	free(dev->device_path);
+	free(dev);
+}
+
+/* GBM, the planes and CRTCs, what the renderer can use, and the page-flip events. False if the GPU is not usable. */
+static bool device_start(struct drm_device *dev)
+{
+	struct drm_backend *be = dev->be;
+	dev->gbm = gbm_create_device(dev->fd);
+	if (!dev->gbm) {
+		rei_error("drm: cannot create a GBM device on %s", dev->device_path);
+		return false;
+	}
+	if (!load_resources(dev))
+		return false;
+	/* What the renderer can draw into and sample: scanout buffers and client buffers. */
+	struct rei_format_mod *egl = NULL;
+	size_t n_egl = (size_t)rei_gles_query_dmabuf_formats(dev->gbm, &egl);
+	if (n_egl == 0) {
+		rei_error("drm: %s: the OpenGL driver reports no dma-buf formats; cannot use this GPU "
+			  "(GBM/EGL not usable on it?)", dev->device_path);
+		return false;
+	}
+	dev->egl_formats = egl;
+	dev->n_egl_formats = n_egl;
+	dev->drm_event = event_new(be->base.server->base, dev->fd, EV_READ | EV_PERSIST, on_drm_readable, dev);
+	event_add(dev->drm_event, NULL);
+
+	drmVersionPtr ver = drmGetVersion(dev->fd);
+	rei_info("drm: using %s (driver %s%s%s), render node %u:%u, %zu CRTC(s)", dev->device_path,
+		 ver && ver->name ? ver->name : "?", dev->boot_vga ? ", the boot GPU" : "",
+		 dev->addfb_modifiers ? "" : ", no framebuffer modifiers", major(dev->render_node), minor(dev->render_node),
+		 dev->n_crtcs);
+	if (ver)
+		drmFreeVersion(ver);
+	return true;
+}
+
+/* What clients may send us: the 8-bit RGB formats every GPU in use can sample. With several GPUs, only the layouts they all
+ * can sample, so that a client's buffer shows on every monitor (a layout one GPU invented may not import on another). */
+static void advertise_formats(struct drm_backend *be, bool first)
+{
+	static const uint32_t client_formats[] = { REI_FORMAT_ARGB8888, REI_FORMAT_XRGB8888,
+						   REI_FORMAT_ABGR8888, REI_FORMAT_XBGR8888 };
+	struct rei_format_mod *common = NULL, *main_list = NULL;
+	size_t n_common = 0, n_main = 0;
+	bool have = false;
+	size_t n_devs = 0;
+	struct drm_device *dev;
+	wl_list_for_each(dev, &be->devices, link) {
+		struct rei_format_mod *mine = rei_xcalloc(dev->n_egl_formats ? dev->n_egl_formats : 1, sizeof *mine);
+		size_t n_mine = 0;
+		for (size_t i = 0; i < dev->n_egl_formats; i++)
+			for (size_t f = 0; f < REI_ARRAY_LEN(client_formats); f++)
+				if (dev->egl_formats[i].format == client_formats[f])
+					mine[n_mine++] = dev->egl_formats[i];
+		n_devs++;
+		if (dev == be->main) {
+			main_list = rei_xcalloc(n_mine ? n_mine : 1, sizeof *main_list);
+			memcpy(main_list, mine, n_mine * sizeof *mine);
+			n_main = n_mine;
+		}
+		if (!have) {
+			common = mine;
+			n_common = n_mine;
+			have = true;
+		} else {
+			struct rei_format_mod *both = NULL;
+			size_t nb = rei_format_mod_intersect(common, n_common, mine, n_mine, &both);
+			free(common);
+			free(mine);
+			common = both;
+			n_common = nb;
+		}
+	}
+	if (n_common == 0 && n_devs > 1) {
+		rei_warn("drm: the GPUs have no buffer layout in common; windows may not show on all monitors "
+			 "(advertising the main GPU's layouts only)");
+		free(common);
+		common = main_list;
+		n_common = n_main;
+		main_list = NULL;
+	}
+	if (n_devs > 1)
+		rei_info("drm: %zu GPUs: advertising the %zu buffer layouts all of them can use", n_devs, n_common);
+	if (first)
+		rei_linux_dmabuf_init(be->base.server, common, n_common, be->main ? be->main->render_node : 0);
+	else
+		rei_linux_dmabuf_update_formats(be->base.server, common, n_common);
+	free(common);
+	free(main_list);
+}
+
+static struct drm_device *device_by_path(struct drm_backend *be, const char *path)
+{
+	struct drm_device *dev;
+	wl_list_for_each(dev, &be->devices, link)
+		if (!strcmp(dev->device_path, path))
+			return dev;
+	return NULL;
+}
+
+/* A GPU we did not open (it had no monitor) may have one now. */
+static void probe_devices(struct drm_backend *be)
+{
+	struct candidate_dev *list;
+	size_t n = list_gpus(be, &list);
+	bool added = false;
+	for (size_t i = 0; i < n; i++) {
+		if (!device_by_path(be, list[i].path)) {
+			struct drm_device *dev = device_open(be, list[i].path, list[i].boot_vga);
+			if (dev && device_has_monitor(dev->fd) && device_start(dev)) {
+				wl_list_insert(be->devices.prev, &dev->link);
+				rei_info("drm: %s has a monitor now", dev->device_path);
+				added = true;
+			} else if (dev) {
+				device_free(dev);
+			}
+		}
+		free(list[i].path);
+	}
+	free(list);
+	if (added)
+		advertise_formats(be, false);
+}
+
+static bool open_gpus(struct drm_backend *be)
 {
 	struct candidate_dev *list;
 	size_t n = list_gpus(be, &list);
@@ -1261,67 +1488,49 @@ static bool open_gpu(struct drm_backend *be)
 		free(list);
 		return false;
 	}
+	const char *mode = be->base.server->config->drm_devices;
+	bool first_only = mode && !strcmp(mode, "first");
 
-	int fallback_fd = -1, fallback_id = -1;
-	char *fallback_path = NULL;
-	bool chosen = false;
-	for (size_t i = 0; i < n && !chosen; i++) {
-		int id;
-		int fd = rei_session_open(be->session, list[i].path, &id);
-		if (fd < 0)
+	struct drm_device *fallback = NULL;
+	for (size_t i = 0; i < n; i++) {
+		struct drm_device *dev = device_open(be, list[i].path, list[i].boot_vga);
+		if (!dev)
 			continue;
-		uint64_t atomic_ok = 0;
-		if (drmSetClientCap(fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1) != 0 ||
-		    drmSetClientCap(fd, DRM_CLIENT_CAP_ATOMIC, 1) != 0 ||
-		    drmGetCap(fd, DRM_CAP_ADDFB2_MODIFIERS, &atomic_ok) != 0) {
-			rei_warn("drm: %s does not support atomic mode setting; skipping", list[i].path);
-			rei_session_close(be->session, id, fd);
-			continue;
-		}
-		if (device_has_monitor(fd)) {
-			be->fd = fd;
-			be->device_id = id;
-			be->device_path = rei_xstrdup(list[i].path);
-			chosen = true;
-		} else if (fallback_fd < 0) {
-			fallback_fd = fd;
-			fallback_id = id;
-			fallback_path = rei_xstrdup(list[i].path);
+		if (device_has_monitor(dev->fd)) {
+			if (first_only && !wl_list_empty(&be->devices)) {
+				rei_info("drm: [drm] devices = \"first\": not using %s", dev->device_path);
+				device_free(dev);
+			} else {
+				wl_list_insert(be->devices.prev, &dev->link);
+			}
+		} else if (!fallback) {
+			fallback = dev;   /* the first GPU with no monitor: used only if no other has one */
 		} else {
-			rei_session_close(be->session, id, fd);
+			device_free(dev);
 		}
 	}
-	if (!chosen && fallback_fd >= 0) {
-		be->fd = fallback_fd;
-		be->device_id = fallback_id;
-		be->device_path = fallback_path;
-		fallback_path = NULL;
-		chosen = true;
-	} else if (fallback_fd >= 0) {
-		rei_session_close(be->session, fallback_id, fallback_fd);
+	if (wl_list_empty(&be->devices) && fallback) {
+		wl_list_insert(be->devices.prev, &fallback->link);
+		fallback = NULL;
 	}
-	free(fallback_path);
+	if (fallback)
+		device_free(fallback);
 	for (size_t i = 0; i < n; i++)
 		free(list[i].path);
 	free(list);
-	if (!chosen) {
+	if (wl_list_empty(&be->devices)) {
 		rei_error("drm: no usable GPU (atomic KMS required)");
 		return false;
 	}
 
-	uint64_t v = 0;
-	be->addfb_modifiers = drmGetCap(be->fd, DRM_CAP_ADDFB2_MODIFIERS, &v) == 0 && v;
-	be->timestamps_monotonic = drmGetCap(be->fd, DRM_CAP_TIMESTAMP_MONOTONIC, &v) == 0 && v;
-	if (drmGetCap(be->fd, DRM_CAP_CURSOR_WIDTH, &be->cursor_w) != 0)
-		be->cursor_w = 64;
-	if (drmGetCap(be->fd, DRM_CAP_CURSOR_HEIGHT, &be->cursor_h) != 0)
-		be->cursor_h = 64;
-
-	drmDevicePtr dev = NULL;
-	if (drmGetDevice2(be->fd, 0, &dev) == 0) {
-		rei_info("drm: using %s", be->device_path);
-		drmFreeDevice(&dev);
-	}
+	/* Start them; one that cannot be used is dropped. */
+	struct drm_device *dev, *tmp;
+	wl_list_for_each_safe(dev, tmp, &be->devices, link)
+		if (!device_start(dev))
+			device_free(dev);
+	if (wl_list_empty(&be->devices))
+		return false;
+	be->main = wl_container_of(be->devices.next, be->main, link);
 	return true;
 }
 
@@ -1365,51 +1574,21 @@ static bool drm_start(struct rei_backend *b)
 	be->session = rei_session_create(server->base, &cb, be);
 	if (!be->session || !be->udev)
 		return false;
-	if (!open_gpu(be))
+	if (!open_gpus(be))
 		return false;
+	advertise_formats(be, true);
 
-	struct stat st;
-	if (fstat(be->fd, &st) == 0)
-		be->devnum = st.st_rdev;
-
-	be->gbm = gbm_create_device(be->fd);
-	if (!be->gbm) {
-		rei_error("drm: cannot create a GBM device on %s", be->device_path);
-		return false;
-	}
-	if (!load_resources(be))
-		return false;
-
-	/* What the renderer can draw into and sample: scanout buffers and client buffers. */
-	struct rei_format_mod *egl = NULL;
-	size_t n_egl = (size_t)rei_gles_query_dmabuf_formats(be->gbm, &egl);
-	if (n_egl == 0) {
-		rei_error("drm: the OpenGL driver reports no dma-buf formats; cannot continue "
-			  "(GBM/EGL not usable on this GPU?)");
-		return false;
-	}
-	be->egl_formats = egl;
-	be->n_egl_formats = n_egl;
-
-	/* Clients may send these 8-bit RGB formats, if the renderer can sample them. */
-	static const uint32_t client_formats[] = { REI_FORMAT_ARGB8888, REI_FORMAT_XRGB8888,
-						   REI_FORMAT_ABGR8888, REI_FORMAT_XBGR8888 };
-	struct rei_format_mod *advertised = rei_xcalloc(n_egl, sizeof *advertised);
-	size_t n_adv = 0;
-	for (size_t i = 0; i < n_egl; i++)
-		for (size_t f = 0; f < REI_ARRAY_LEN(client_formats); f++)
-			if (egl[i].format == client_formats[f])
-				advertised[n_adv++] = egl[i];
-	rei_linux_dmabuf_init(server, advertised, n_adv);
-	free(advertised);
+	/* Explicit synchronization (clients' sync object points instead of the kernel's implicit ordering), on the main GPU:
+	 * the sync objects clients hand over are imported there. Off with [drm] explicit_sync = false. */
+	if (server->config->drm_explicit_sync)
+		rei_syncobj_init_drm(server, be->main->fd);
+	else
+		rei_info("explicit synchronization: off ([drm] explicit_sync = false)");
 
 	const char *no_scanout = getenv("REI_DRM_NO_SCANOUT");
 	const char *no_hwc = getenv("REI_DRM_NO_HW_CURSOR");
 	be->scanout_enabled = !(no_scanout && no_scanout[0] == '1');
 	be->hw_cursor_enabled = !(no_hwc && no_hwc[0] == '1');
-
-	be->drm_event = event_new(server->base, be->fd, EV_READ | EV_PERSIST, on_drm_readable, be);
-	event_add(be->drm_event, NULL);
 
 	be->monitor = udev_monitor_new_from_netlink(be->udev, "udev");
 	if (be->monitor) {
@@ -1429,7 +1608,7 @@ static bool drm_start(struct rei_backend *b)
 	be->libinput = rei_libinput_create(server, rei_session_seat_name(be->session), &input_ops, be);
 	if (!be->libinput)
 		return false;
-	scan_connectors(be);
+	scan_all(be);
 	if (wl_list_empty(&be->outputs)) {
 		rei_error("drm: no monitor could be started");
 		return false;
@@ -1451,18 +1630,12 @@ static void drm_destroy(struct rei_backend *b)
 		event_free(be->monitor_event);
 	if (be->monitor)
 		udev_monitor_unref(be->monitor);
-	if (be->drm_event)
-		event_free(be->drm_event);
-	free_resources(be);
-	free(be->egl_formats);
-	if (be->gbm)
-		gbm_device_destroy(be->gbm);
-	if (be->session && be->fd > 0)
-		rei_session_close(be->session, be->device_id, be->fd);
+	struct drm_device *dev, *dtmp;
+	wl_list_for_each_safe(dev, dtmp, &be->devices, link)
+		device_free(dev);
 	rei_session_destroy(be->session);
 	if (be->udev)
 		udev_unref(be->udev);
-	free(be->device_path);
 	free(be);
 }
 
@@ -1488,8 +1661,8 @@ struct rei_backend *rei_drm_backend_create(struct rei_server *server)
 	struct drm_backend *be = rei_xcalloc(1, sizeof *be);
 	be->base.impl = &drm_impl;
 	be->base.server = server;
-	be->fd = -1;
 	atomic_init(&be->active, false);
 	wl_list_init(&be->outputs);
+	wl_list_init(&be->devices);
 	return &be->base;
 }
