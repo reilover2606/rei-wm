@@ -105,6 +105,9 @@ struct rei_server {
 	struct rei_mpd *mpd;
 	struct rei_wifi *wifi;
 	struct rei_idle *idle;
+	bool resize_mode;        /* the keys i j k l resize the focused tile (see desktop.c) */
+	int prev_workspace;      /* the workspace that was focused before the current one (0: none) */
+	struct rei_clipboard *clipboard;   /* clipboard.c */
 	struct wl_list xdg_decorations;   /* rei_xdg_decoration (proto/xdg_decoration.c) */
 	struct rei_wallpapers *wallpapers;
 	const char *window_shaders[16];   /* from the command line (see rei_server_options) */

@@ -21,6 +21,8 @@ char *rei_xstrdup(const char *s);
 /* Cuts a string that was truncated by snprintf back to the last whole UTF-8 character, so a
  * title like "Dictionary – é" never ends in half a character (Pango rejects that). */
 void rei_utf8_trim(char *s);
+/* Whether `app_id` is in `list`: names separated by commas, case-insensitive, "*" matching everything. */
+bool rei_app_list_matches(const char *list, const char *app_id);
 /* Copies at most `max` bytes of `s` into `buf` (size >= max + 1), never splitting a character. */
 void rei_utf8_prefix(char *buf, const char *s, size_t max);
 

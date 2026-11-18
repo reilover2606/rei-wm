@@ -369,9 +369,67 @@ static void test_random(int gap)
 	rei_tree_destroy(t);
 }
 
+static void test_resize(void)
+{
+	/* A | B | C in 1000x500, no gaps: 333/334/333. */
+	struct rei_tree *t = rei_tree_create(REI_LAYOUT_SPLIT_H);
+	struct rei_node *a = add(t, NULL, 'A'), *b = add(t, a, 'B'), *c = add(t, b, 'C');
+	rei_tree_layout(t, R(0, 0, 1000, 500), 0);
+	/* "right" on B: its right divider moves 100 px right, B grows, C shrinks. */
+	CHECK(rei_tree_resize(t, b, REI_DIR_RIGHT, 100));
+	rei_tree_layout(t, R(0, 0, 1000, 500), 0);
+	CHECK(a->rect.w == 333 || a->rect.w == 334);
+	CHECK(b->rect.w >= 432 && b->rect.w <= 435);
+	CHECK(c->rect.w >= 232 && c->rect.w <= 235);
+	CHECK(a->rect.w + b->rect.w + c->rect.w == 1000);
+	/* "left" on B: its left divider moves left, B grows again, A shrinks. */
+	int bw = b->rect.w;
+	CHECK(rei_tree_resize(t, b, REI_DIR_LEFT, 100));
+	rei_tree_layout(t, R(0, 0, 1000, 500), 0);
+	CHECK(b->rect.w >= bw + 98 && b->rect.w <= bw + 102);
+	/* The last window has nothing to its right: "right" moves its left divider right, so it shrinks. */
+	int cw = c->rect.w;
+	CHECK(rei_tree_resize(t, c, REI_DIR_RIGHT, 50));
+	rei_tree_layout(t, R(0, 0, 1000, 500), 0);
+	CHECK(c->rect.w >= cw - 52 && c->rect.w <= cw - 48);
+	/* Up or down in a row of windows: no vertical divider anywhere. */
+	CHECK(!rei_tree_resize(t, b, REI_DIR_UP, 50) && !rei_tree_resize(t, b, REI_DIR_DOWN, 50));
+	/* A window never shrinks below its minimum, however often it is pushed. */
+	for (int i = 0; i < 100; i++)
+		rei_tree_resize(t, a, REI_DIR_LEFT, 100);   /* A has no neighbour on its left: its right divider moves left */
+	rei_tree_layout(t, R(0, 0, 1000, 500), 0);
+	CHECK(a->rect.w >= 70 && a->rect.w <= 90);
+	CHECK(rei_tree_check(t));
+	rei_tree_destroy(t);
+
+	/* A | (B over C): "down" on B moves the horizontal divider; "right" on B reaches the outer split. */
+	t = rei_tree_create(REI_LAYOUT_SPLIT_H);
+	a = add(t, NULL, 'A');
+	b = add(t, a, 'B');
+	rei_tree_split(t, b, REI_LAYOUT_SPLIT_V);
+	c = add(t, b, 'C');
+	rei_tree_layout(t, R(0, 0, 1000, 600), 0);
+	int bh = b->rect.h;
+	CHECK(rei_tree_resize(t, b, REI_DIR_DOWN, 60));
+	rei_tree_layout(t, R(0, 0, 1000, 600), 0);
+	CHECK(b->rect.h >= bh + 58 && b->rect.h <= bh + 62 && b->rect.h + c->rect.h == 600);
+	int aw = a->rect.w;
+	CHECK(rei_tree_resize(t, b, REI_DIR_RIGHT, 100));   /* B's container is last: its left divider moves right: A grows */
+	rei_tree_layout(t, R(0, 0, 1000, 600), 0);
+	CHECK(a->rect.w >= aw + 98 && a->rect.w <= aw + 102);
+	rei_tree_destroy(t);
+	/* One window alone: nothing to resize. */
+	t = rei_tree_create(REI_LAYOUT_SPLIT_H);
+	a = add(t, NULL, 'A');
+	rei_tree_layout(t, R(0, 0, 1000, 600), 0);
+	CHECK(!rei_tree_resize(t, a, REI_DIR_RIGHT, 50));
+	rei_tree_destroy(t);
+}
+
 int main(void)
 {
 	test_single_and_two();
+	test_resize();
 	test_three_and_nested();
 	test_weights();
 	test_remove_and_collapse();

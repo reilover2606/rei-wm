@@ -1995,13 +1995,15 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 		struct rei_rect cell = vertical ? (struct rei_rect){ 0, sw, lw, mw } : (struct rei_rect){ sw, 0, mw, lh };
 		double side = fmin(cell.w, cell.h) - 12;
 		double bx = cell.x + (cell.w - side) / 2.0, by = cell.y + (cell.h - side) / 2.0;
-		uint32_t fill = st->mode_float ? sbs->active_color : sbs->color;
+		uint32_t fill = st->mode_float || st->mode_resize ? sbs->active_color : sbs->color;
 		if (st->mode_hover)
 			fill = rei_bar_mix(fill, sbs->text_color, 0.15);
 		draw_box(cr, sbs, bx, by, side, side, fill, 1.0);
-		set_color(cr, st->mode_float ? sbs->active_text_color : sbs->text_color);
+		set_color(cr, st->mode_float || st->mode_resize ? sbs->active_text_color : sbs->text_color);
 		double in = side * 0.22, u = side - 2 * in;
-		if (!st->mode_float) {   /* tiled: a 2x2 grid */
+		if (st->mode_resize) {   /* resize mode: an R, in place of the icon */
+			draw_centered(cr, font, "R", bx + side / 2.0, by + side / 2.0, sbs);
+		} else if (!st->mode_float) {   /* tiled: a 2x2 grid */
 			double g = 1.5, c = (u - g) / 2.0;
 			for (int a = 0; a < 2; a++)
 				for (int b = 0; b < 2; b++) {

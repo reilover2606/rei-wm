@@ -126,6 +126,7 @@ struct rei_bar_state {
 	int mode_w;             /* Width of the tiled/floating switch after the Start button (0: none). */
 	bool mode_float;        /* New windows float. */
 	bool mode_hover;
+	bool mode_resize;       /* Resize mode is on: the switch shows an R instead of its icon. */
 	bool wifi_present;      /* The machine has a wireless interface (the icon shows). */
 	bool wifi_connected;
 	int wifi_level;         /* 0..3 arcs lit */

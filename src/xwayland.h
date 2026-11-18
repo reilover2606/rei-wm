@@ -12,6 +12,8 @@ struct rei_server;
 struct rei_surface;
 struct rei_view;
 struct rei_xwindow;
+struct rei_xsel;
+#include "proto/selection.h"
 
 /*
  * Xwayland support: rei-wm runs Xwayland (the X server that draws into Wayland
@@ -28,6 +30,14 @@ struct rei_xwindow;
 /* Starts Xwayland when the config allows it and the binary exists. */
 void rei_xwayland_start(struct rei_server *server);
 void rei_xwayland_stop(struct rei_server *server);
+
+/* Copy and paste with X11 programs (xwayland_sel.c); both do nothing when Xwayland is not running.
+ * The Wayland clipboard / primary selection changed: follow it in X11. */
+void rei_xsel_wayland_changed(struct rei_server *server, enum rei_selection_kind kind);
+/* The keyboard focus moved to another client: an X11 program's selection made meanwhile is taken up. */
+void rei_xsel_focus_changed(struct rei_server *server);
+/* The bridge (xwayland_sel.c); NULL while Xwayland is not running. */
+struct rei_xsel *rei_xwayland_selection(const struct rei_server *server);
 
 /* "DISPLAY" value for programs we launch (":1"), or NULL while it is not running. */
 const char *rei_xwayland_display_name(const struct rei_server *server);

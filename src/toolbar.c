@@ -128,6 +128,7 @@ static void build_state_for(struct rei_server *s, struct rei_output *o, const st
 	st->mode_w = st->thickness;
 	st->mode_float = s->float_new_set ? s->float_new : cfg->float_new_windows;
 	st->mode_hover = s->mode_hover;
+	st->mode_resize = s->resize_mode;
 	struct rei_wifi_info wifi = rei_wifi_state(s);
 	st->wifi_present = wifi.present;
 	st->wifi_connected = wifi.connected;

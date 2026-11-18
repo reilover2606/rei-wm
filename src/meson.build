@@ -27,6 +27,9 @@ core_sources = files(
   'proto/viewporter.c',
   'proto/idle_inhibit.c',
   'proto/xdg_decoration.c',
+  'proto/selection.c',
+  'proto/primary_selection.c',
+  'clipboard.c',
   'idle.c',
   'proto/fractional_scale.c',
   'volpop.c',
@@ -76,7 +79,7 @@ if have_drm
 endif
 
 if have_xwayland
-  core_sources += files('xwayland.c', 'proto/xwayland_shell.c')
+  core_sources += files('xwayland.c', 'xwayland_sel.c', 'proto/xwayland_shell.c')
 else
   core_sources += files('xwayland_stub.c')
 endif
@@ -95,11 +98,11 @@ stb = static_library('stb',
 
 generated = [xdg_shell_client_h, xdg_shell_server_h, xdg_shell_code,
   linux_dmabuf_server_h, linux_dmabuf_code, xwayland_shell_server_h, xwayland_shell_code,
-  viewporter_server_h, viewporter_code, idle_inhibit_server_h, idle_inhibit_code, xdg_decoration_server_h, xdg_decoration_code, fractional_scale_server_h, fractional_scale_code,
+  viewporter_server_h, viewporter_code, idle_inhibit_server_h, idle_inhibit_code, xdg_decoration_server_h, xdg_decoration_code, primary_selection_server_h, primary_selection_code, fractional_scale_server_h, fractional_scale_code,
   cursor_shape_server_h, cursor_shape_code, tablet_server_h, tablet_code]
 
 drm_deps = have_drm ? [libdrm, gbm, libseat, libinput, libudev] : []
-xcb_deps = have_xwayland ? [xcb] : []
+xcb_deps = have_xwayland ? [xcb, xcb_xfixes] : []
 audio_deps = have_audio ? [libpipewire] : []
 core_deps = drm_deps + xcb_deps + audio_deps + [wayland_server, wayland_client, egl, glesv2, xkbcommon, cairo, pangocairo, fontconfig, libevent, libevent_pthreads, threads, m_dep]
 
@@ -115,7 +118,7 @@ rei_core_dep = declare_dependency(
   include_directories: inc,
   dependencies: core_deps,
   sources: [xdg_shell_client_h, xdg_shell_server_h, linux_dmabuf_server_h, xwayland_shell_server_h,
-    viewporter_server_h, idle_inhibit_server_h, xdg_decoration_server_h, fractional_scale_server_h, cursor_shape_server_h, tablet_server_h],
+    viewporter_server_h, idle_inhibit_server_h, xdg_decoration_server_h, primary_selection_server_h, fractional_scale_server_h, cursor_shape_server_h, tablet_server_h],
 )
 
 rei_wm = executable('rei-wm', 'main.c',

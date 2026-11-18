@@ -126,6 +126,13 @@ void rei_wm_move_direction(struct rei_server *server, enum rei_direction dir);
 void rei_wm_cycle(struct rei_server *server, bool next);
 void rei_wm_split(struct rei_server *server, enum rei_layout layout);
 void rei_wm_toggle_floating(struct rei_server *server);
+/* The workspace key was pressed: goes to workspace `number`, or back to the previous workspace if it is the one
+ * you are on (and [general] workspace_back_and_forth is on). */
+void rei_wm_workspace_command(struct rei_server *server, int number);
+/* Resize mode: the keys i j k l move the focused tile's dividers; the toolbar shows an R. */
+void rei_wm_set_resize_mode(struct rei_server *server, bool on);
+/* One step of resizing the focused tiled window toward `dir` (`big`: three steps). False if nothing moved. */
+bool rei_wm_resize_step(struct rei_server *server, enum rei_direction dir, bool big);
 void rei_wm_set_fullscreen(struct rei_view *view, bool fullscreen);
 void rei_wm_toggle_fullscreen(struct rei_server *server);
 void rei_wm_goto_workspace(struct rei_server *server, int number);

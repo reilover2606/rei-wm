@@ -29,3 +29,5 @@ bool rei_xwayland_pick_unmanaged(struct rei_server *s, double x, double y, struc
 { (void)s; (void)x; (void)y; (void)o; (void)sx; (void)sy; return false; }
 const char *rei_xwindow_title(const struct rei_xwindow *xw) { (void)xw; return NULL; }
 const char *rei_xwindow_class(const struct rei_xwindow *xw) { (void)xw; return NULL; }
+void rei_xsel_wayland_changed(struct rei_server *s, enum rei_selection_kind k) { (void)s; (void)k; }
+void rei_xsel_focus_changed(struct rei_server *s) { (void)s; }

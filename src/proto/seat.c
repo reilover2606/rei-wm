@@ -8,6 +8,8 @@
 #include "input/xkb.h"
 #include "pointer_cursor.h"
 #include "proto/data_device.h"
+#include "proto/primary_selection.h"
+#include "proto/selection.h"
 #include "proto/surface.h"
 #include "server.h"
 #include "util/log.h"
@@ -198,6 +200,7 @@ bool rei_seat_init(struct rei_server *server)
 	seat->server = server;
 	wl_list_init(&seat->resources);
 	wl_list_init(&seat->data_devices);
+	wl_list_init(&seat->primary_devices);
 	wl_list_init(&seat->pointers);
 	wl_list_init(&seat->keyboards);
 	seat->global = wl_global_create(server->display, &wl_seat_interface, 7, seat, seat_bind);
@@ -206,13 +209,24 @@ bool rei_seat_init(struct rei_server *server)
 		return false;
 	}
 	server->seat = seat;
-	return rei_data_device_init(server);
+	return rei_data_device_init(server) && rei_primary_selection_init(server);
 }
 
 void rei_seat_finish(struct rei_server *server)
 {
 	if (!server->seat)
 		return;
+	/* A selection the compositor holds itself (the mirrored terminal text, an X11 program's) has no client to free it. */
+	struct rei_selection_source *held[2] = { server->seat->selection, server->seat->primary };
+	server->seat->selection = server->seat->primary = NULL;
+	for (int i = 0; i < 2; i++) {
+		if (!held[i] || held[i]->resource)
+			continue;
+		if (held[i]->ops)
+			held[i]->ops->cancelled(held[i]);
+		else
+			rei_selection_source_free(held[i]);
+	}
 	free(server->seat);
 	server->seat = NULL;
 }

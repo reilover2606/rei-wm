@@ -256,3 +256,24 @@ xdgdeco_test = executable('test_xdg_decoration', 'test_xdg_decoration.c', xdg_de
   dependencies: [wayland_client, m_dep, rei_core_dep],
 )
 test('xdg-decoration', xdgdeco_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+
+selection_test = executable('test_selection', 'test_selection.c', xdg_shell_client_h, xdg_shell_code,
+  primary_selection_client_h, primary_selection_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('selection', selection_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)
+if have_xwayland
+  xselection_test = executable('test_xselection', 'test_xselection.c', xdg_shell_client_h, xdg_shell_code,
+    primary_selection_client_h, primary_selection_code,
+    include_directories: inc,
+    dependencies: [wayland_client, m_dep, xcb],
+  )
+  test('xselection', xselection_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
+endif
+
+resize_test = executable('test_resize', 'test_resize.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('resize', resize_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)

@@ -32,6 +32,7 @@
 #include "proto/xdg_decoration.h"
 #include "proto/idle_inhibit.h"
 #include "idle.h"
+#include "clipboard.h"
 #include "sessionbus.h"
 #include "watchdog.h"
 #include "sysinfo.h"
@@ -724,6 +725,7 @@ void rei_server_destroy(struct rei_server *s)
 	if (s->display)
 		rei_wl_output_finish(s);
 	rei_idle_finish(s);
+	rei_clipboard_finish(s);
 	rei_battery_stop(s);
 	rei_sysinfo_stop(s);
 	rei_sessionbus_stop(s);

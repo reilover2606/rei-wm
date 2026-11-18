@@ -10,6 +10,10 @@ struct rei_server;
 bool rei_data_device_init(struct rei_server *server);
 
 struct wl_client;
+struct rei_selection_source;
+
+/* Makes `src` the clipboard (a compositor-owned source, when the compositor mirrors a selection into it). */
+void rei_data_device_set_selection(struct rei_server *server, struct rei_selection_source *src);
 
 /*
  * Tells `client`'s data devices about the current clipboard. The keyboard-focus

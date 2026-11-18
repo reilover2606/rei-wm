@@ -93,6 +93,15 @@ void rei_tree_layout_xy(struct rei_tree *tree, struct rei_rect area, int gap_x, 
 struct rei_node *rei_tree_insert_beside(struct rei_tree *tree, struct rei_node *target,
 					void *data, enum rei_direction dir);
 
+/*
+ * Resizing: moves the divider next to `leaf` in direction `dir` by `step_px` pixels (of the container it is in, as laid out). The window's own edge on that side is the one that moves when it has a neighbour there (the
+ * window grows toward `dir`); otherwise the edge on the opposite side is (the window shrinks away from `dir`), so a
+ * key always moves a divider the way it points. Climbs to an enclosing split when the window is alone along that axis.
+ * Needs the rectangles from the last layout. A window never gets less than MIN_SHARE of its container. Returns false
+ * if nothing could move (no divider in that direction, or it is at the limit).
+ */
+bool rei_tree_resize(struct rei_tree *tree, struct rei_node *leaf, enum rei_direction dir, int step_px);
+
 /* The leaf nearest to `from` in a direction (by position on screen), or NULL. */
 struct rei_node *rei_tree_neighbor(struct rei_tree *tree, struct rei_node *from,
 				   enum rei_direction dir);

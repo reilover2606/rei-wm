@@ -30,7 +30,7 @@ Dependencies (Debian/Ubuntu package names):
 ```
 meson ninja-build pkg-config libwayland-dev wayland-protocols libevent-dev
 libegl-dev libgles-dev libxkbcommon-dev xkb-data
-libcairo2-dev libpango1.0-dev fontconfig libxcb1-dev
+libcairo2-dev libpango1.0-dev fontconfig libxcb1-dev libxcb-xfixes0-dev
 ```
 
 For the volume widget and media keys (optional): `libpipewire-0.3-dev`.
@@ -101,6 +101,39 @@ Ctrl+Backspace/Ctrl+W (word) and Ctrl+U (line) edit. Style it with `[theme.run_p
   is `[toolbar] clock_format` (any `strftime` string; default `%H:%M:%S`).
 - **Look:** colours, corner shapes, transparency and shadows of these elements are a theme; see
   [docs/THEME.md](docs/THEME.md).
+
+## Copy and paste, terminals included
+
+Programs copy with Ctrl+C and paste with Ctrl+V (the *clipboard*); terminals copy by highlighting and paste with a
+middle click (the *primary selection*, which most programs also set when you highlight text and paste with a middle
+click). rei-wm connects all of it:
+
+- the primary selection works for Wayland programs (`zwp_primary_selection`), and for X11 programs: rei-wm, as
+  Xwayland's window manager, bridges the X11 `CLIPBOARD` and `PRIMARY` selections to the Wayland ones in both directions
+  (Xwayland does not do that itself, so X11 programs such as urxvt and xterm could neither copy to nor paste from
+  anything else before). Text and anything named like a MIME type is carried; a selection of many megabytes is not.
+- **highlighting text in a terminal also makes it the clipboard**, so Ctrl+V pastes it in any program. The terminals are
+  the apps in `[clipboard] terminals` (urxvt, xterm, foot, kitty, alacritty, konsole... by default; X11 class or
+  Wayland app id, case-insensitive); the text is read from the terminal at once and kept, so it can still be pasted
+  after the terminal is closed. `terminal_selection_to_clipboard = false` turns the mirroring off.
+
+So: highlight in a terminal, then middle-click in the terminal or in another program, or Ctrl+V in another program.
+What you copy with Ctrl+C in a program is pasted with Ctrl+V; a terminal pastes it with its own clipboard key (foot and
+kitty: Ctrl+Shift+V) and, if the program also set the primary selection by highlighting, with a middle click.
+
+## Workspaces and resizing
+
+**Back and forth.** Pressing the key of the workspace you are on (`Mod+3` on workspace 3) goes back to the workspace you were
+on before, so one key switches between two workspaces, as in i3 (`[general] workspace_back_and_forth`, on by default).
+A workspace that was empty when you left it has gone, and comes back empty.
+
+**Resize mode.** `Mod+Shift+r` (the `resize_mode` action) enters resize mode: the mode switch next to the Start button shows
+an **R** instead of its icon. In the mode the keys **i j k l** (or the arrow keys) move a divider of the focused tiled window
+up, left, down and right, **Shift** takes three steps at a time, a held key repeats, and **Escape** or **Enter** leaves it. A key
+moves the divider the way it points: the window's own edge on that side when it has a neighbour there (it grows that way),
+otherwise the opposite edge (it shrinks away), so `l` on the right-hand window of two shrinks it and `j` grows it. A step is
+`[layout] resize_step` pixels (40); no tile gets smaller than 8% of its container. Other keys are typed as usual while the mode is
+on, and floating windows are not resized by it. (`Mod+r`, i3's key for this, is the Run prompt here, so the mode has its own.)
 
 ## Display sleep
 

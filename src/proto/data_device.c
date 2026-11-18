@@ -7,22 +7,17 @@
 
 #include "input/input.h"
 #include "proto/seat.h"
+#include "proto/selection.h"
 #include "proto/surface.h"
+#include "xwayland.h"
 #include "server.h"
 #include "util/log.h"
 #include "util/util.h"
 #include "util/wlsignal.h"
 
-struct rei_data_source {
-	struct wl_resource *resource;
-	struct wl_array mime_types;  /* NUL-terminated strings, concatenated */
-	size_t n_mimes;
-	struct wl_signal destroy_signal;
-};
-
 struct rei_data_offer {
 	struct wl_resource *resource;
-	struct rei_data_source *source;  /* NULL once the source is gone */
+	struct rei_selection_source *source;  /* NULL once the source is gone */
 	struct wl_listener source_destroy;
 };
 
@@ -38,7 +33,7 @@ static void offer_receive(struct wl_client *c, struct wl_resource *r, const char
 	(void)c;
 	struct rei_data_offer *offer = wl_resource_get_user_data(r);
 	if (offer->source)
-		wl_data_source_send_send(offer->source->resource, mime, fd);
+		rei_selection_source_send(offer->source, mime, fd);
 	close(fd);
 }
 
@@ -88,11 +83,8 @@ static void offer_resource_destroy(struct wl_resource *r)
 static void source_offer(struct wl_client *c, struct wl_resource *r, const char *mime)
 {
 	(void)c;
-	struct rei_data_source *src = wl_resource_get_user_data(r);
-	size_t len = strlen(mime) + 1;
-	char *dst = wl_array_add(&src->mime_types, len);
-	memcpy(dst, mime, len);
-	src->n_mimes++;
+	struct rei_selection_source *src = wl_resource_get_user_data(r);
+	rei_selection_source_add_mime(src, mime);
 }
 
 static void source_destroy_request(struct wl_client *c, struct wl_resource *r)
@@ -114,7 +106,7 @@ static const struct wl_data_source_interface source_impl = {
 
 static void source_resource_destroy(struct wl_resource *r)
 {
-	struct rei_data_source *src = wl_resource_get_user_data(r);
+	struct rei_selection_source *src = wl_resource_get_user_data(r);
 	rei_signal_emit(&src->destroy_signal, src);
 	wl_array_release(&src->mime_types);
 	free(src);
@@ -139,6 +131,29 @@ static void selection_on_source_destroyed(struct wl_listener *l, void *data)
 	wl_list_remove(&seat->selection_destroy.link);
 	wl_list_init(&seat->selection_destroy.link);
 	seat->selection = NULL;
+	rei_xsel_wayland_changed(seat->server, REI_SEL_CLIPBOARD);
+}
+
+/* Makes `src` (or nothing) the clipboard: the previous source is told it is no longer wanted, and the client being
+ * typed into learns of the change at once (the others when they next get the focus). */
+static void replace_selection(struct rei_server *server, struct rei_selection_source *src)
+{
+	struct rei_seat *seat = server->seat;
+	if (seat->selection == src)
+		return;
+	if (seat->selection) {
+		struct rei_selection_source *old = seat->selection;
+		wl_list_remove(&seat->selection_destroy.link);
+		wl_list_init(&seat->selection_destroy.link);
+		seat->selection = NULL;
+		rei_selection_source_cancel(old);
+	}
+	seat->selection = src;
+	if (src) {
+		seat->selection_destroy.notify = selection_on_source_destroyed;
+		wl_signal_add(&src->destroy_signal, &seat->selection_destroy);
+	}
+	rei_xsel_wayland_changed(server, REI_SEL_CLIPBOARD);   /* X11 programs follow */
 }
 
 static void device_set_selection(struct wl_client *c, struct wl_resource *r,
@@ -146,7 +161,7 @@ static void device_set_selection(struct wl_client *c, struct wl_resource *r,
 {
 	(void)serial;
 	struct rei_seat *seat = wl_resource_get_user_data(r);
-	struct rei_data_source *src = source_res ? wl_resource_get_user_data(source_res) : NULL;
+	struct rei_selection_source *src = source_res ? wl_resource_get_user_data(source_res) : NULL;
 
 	/* Only the client being typed into may take the clipboard; otherwise any
 	 * background program could silently replace what the user copied. */
@@ -156,22 +171,19 @@ static void device_set_selection(struct wl_client *c, struct wl_resource *r,
 			wl_data_source_send_cancelled(source_res);
 		return;
 	}
-	if (seat->selection == src)
-		return;
-	if (seat->selection) {
-		wl_list_remove(&seat->selection_destroy.link);
-		wl_list_init(&seat->selection_destroy.link);
-		wl_data_source_send_cancelled(seat->selection->resource);
-	}
-	seat->selection = src;
-	if (src) {
-		seat->selection_destroy.notify = selection_on_source_destroyed;
-		wl_signal_add(&src->destroy_signal, &seat->selection_destroy);
-	}
+	replace_selection(seat->server, src);
 	/* Everyone with a data device learns of the change only through focus, so
 	 * tell the focused client (which is the one that set it, and any others it
 	 * shares a connection with) right away. */
 	rei_data_device_send_selection(seat->server, c);
+}
+
+void rei_data_device_set_selection(struct rei_server *server, struct rei_selection_source *src)
+{
+	replace_selection(server, src);
+	struct rei_surface *focus = server->input ? server->input->keyboard_focus : NULL;
+	if (focus)
+		rei_data_device_send_selection(server, wl_resource_get_client(focus->resource));
 }
 
 static void device_resource_destroy(struct wl_resource *r)
@@ -187,7 +199,7 @@ void rei_data_device_send_selection(struct rei_server *server, struct wl_client 
 		if (wl_resource_get_client(dev) != client)
 			continue;
 
-		struct rei_data_source *src = seat->selection;
+		struct rei_selection_source *src = seat->selection;
 		if (!src) {
 			wl_data_device_send_selection(dev, NULL);
 			continue;
@@ -237,7 +249,9 @@ static void manager_create_data_source(struct wl_client *client, struct wl_resou
 		wl_client_post_no_memory(client);
 		return;
 	}
-	struct rei_data_source *src = rei_xcalloc(1, sizeof *src);
+	struct rei_selection_source *src = rei_xcalloc(1, sizeof *src);
+	src->server = wl_resource_get_user_data(mgr);
+	src->kind = REI_SEL_CLIPBOARD;
 	src->resource = r;
 	wl_array_init(&src->mime_types);
 	wl_signal_init(&src->destroy_signal);

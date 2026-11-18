@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -141,5 +142,27 @@ bool rei_wait_child(int pid, int term_ms, const char *what)
 		}
 	}
 	rei_warn("%s (pid %d) cannot be killed (stuck in the kernel?); not waiting for it any longer", what, pid);
+	return false;
+}
+
+bool rei_app_list_matches(const char *list, const char *app_id)
+{
+	if (!app_id)
+		app_id = "";
+	for (const char *p = list ? list : ""; *p;) {
+		while (*p == ' ' || *p == ',')
+			p++;
+		const char *end = p;
+		while (*end && *end != ',')
+			end++;
+		size_t len = (size_t)(end - p);
+		while (len > 0 && p[len - 1] == ' ')
+			len--;
+		if (len == 1 && p[0] == '*')
+			return true;
+		if (len > 0 && strlen(app_id) == len && strncasecmp(app_id, p, len) == 0)
+			return true;
+		p = end;
+	}
 	return false;
 }
