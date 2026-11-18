@@ -41,6 +41,12 @@ public:
 	bool load(const QString &configText, QString *error = nullptr);
 	/* Writes the changed values into `doc`. */
 	void apply(TomlDoc &doc) const;
+	/* Theme files: a theme is the [theme.<element>] tables that differ from the built-in look (for the toolbar colours the
+	 * caller writes beside them), so it stays short and readable, and can be pasted into config.toml. exportTo writes them
+	 * into `doc`; importFrom returns the whole look to the built-in one and then applies the file's tables, returning
+	 * what it had to skip (unknown elements or keys, bad values). */
+	void exportTo(TomlDoc &doc) const;
+	QStringList importFrom(const TomlDoc &doc);
 	/* After a save: what is shown is now the baseline. */
 	void markSaved();
 	/* The toolbar's base colours changed: the built-in look follows them, so every value the user has not
@@ -80,6 +86,7 @@ private:
 	QPushButton *buildStyleButton(const QString &element, const QString &title);
 	void updateGroup(const QString &group);
 	QString valueOf(const Prop &p) const;
+	static QString variantText(const QVariant &v);
 	void setValue(Prop &p, const QString &text);
 	void touch(const QString &element, const QString &name);   /* an editor changed */
 	void updateReset(Prop &p);

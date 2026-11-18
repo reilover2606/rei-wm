@@ -33,6 +33,8 @@ public:
 	/* Removes a [section] header that no longer holds anything (with the blank line before it). */
 	void pruneEmpty(const QString &section);
 	QStringList keys(const QString &section) const;
+	/* The [table] names in the file, in order (not [[arrays of tables]]). */
+	QStringList sections() const;
 
 	/* [[name]] tables, in file order; each is key -> value. */
 	QList<QVariantMap> tables(const QString &name) const;

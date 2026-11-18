@@ -558,6 +558,62 @@ int main(int argc, char **argv)
 		CHECK(slurp(path).contains("flavor_icons = \"/tmp/icons\"\n"));
 	}
 
+	/* Fonts per element, and theme files (export / import). */
+	{
+		QString tpath = dir.path() + "/themefiles/config.toml";
+		QDir().mkpath(dir.path() + "/themefiles");
+		{
+			QFile f(tpath);
+			CHECK(f.open(QIODevice::WriteOnly));
+			f.write("[toolbar]\nenabled = true\n");
+		}
+		MainWindow a(tpath, wm);
+		CHECK(a.themesDir() == dir.path() + "/themefiles/themes");   /* beside config.toml, in rei-wm's config directory */
+		auto *fontEdit = field<QLineEdit>(a, "theme.tooltip.font");
+		CHECK(fontEdit->text().isEmpty());
+		CHECK(a.findChild<QWidget *>("theme.wifi.font") == nullptr);   /* no text there */
+		fontEdit->setText("Serif Bold 14");
+		field<QDoubleSpinBox>(a, "theme.tray_tile.radius")->setValue(11);
+		QString eerr;
+		QString file = dir.path() + "/themefiles/themes/mine.toml";
+		CHECK(a.exportTheme(file, &eerr));
+		QString ex = slurp(file);
+		CHECK(ex.contains("[theme.tooltip]\nfont = \"Serif Bold 14\"\n"));
+		CHECK(ex.contains("[theme.tray_tile]\nradius = 11"));
+		CHECK(ex.contains("[toolbar]") && ex.contains("background = \"#161c26\""));
+		CHECK(!ex.contains("[theme.toolbar]"));   /* only what differs from the built-in look */
+		CHECK(!ex.contains("enabled"));           /* and nothing of the rest of config.toml */
+
+		/* A fresh window, with some other customisation, takes the file's look and drops its own. */
+		MainWindow b(tpath, wm);
+		field<QDoubleSpinBox>(b, "theme.dialog.radius")->setValue(30);
+		QStringList warn;
+		CHECK(b.importTheme(file, &warn, &eerr));
+		CHECK(warn.isEmpty());
+		CHECK(field<QLineEdit>(b, "theme.tooltip.font")->text() == "Serif Bold 14");
+		CHECK(field<QDoubleSpinBox>(b, "theme.tray_tile.radius")->value() == 11);
+		CHECK(field<QDoubleSpinBox>(b, "theme.dialog.radius")->value() != 30);
+		CHECK(b.dirty());
+		CHECK(b.save(&eerr));
+		QString saved = slurp(tpath);
+		CHECK(saved.contains("font = \"Serif Bold 14\""));
+		CHECK(!saved.contains("radius = 30"));
+
+		/* Bad entries are skipped and reported, the rest applies. */
+		QString bad = dir.path() + "/bad-theme.toml";
+		{
+			QFile f(bad);
+			CHECK(f.open(QIODevice::WriteOnly));
+			f.write("[toolbar]\nbackground = \"#102030\"\n\n[theme.nonesuch]\nradius = 3\n\n"
+				"[theme.dialog]\nshape = \"hexagon\"\nbogus = 1\nradius = 7\n");
+		}
+		MainWindow c(tpath, wm);
+		CHECK(c.importTheme(bad, &warn, &eerr));
+		CHECK(warn.size() == 3);
+		CHECK(field<QDoubleSpinBox>(c, "theme.dialog.radius")->value() == 7);
+		CHECK(!c.importTheme(dir.path() + "/missing.toml", &warn, &eerr) && !eerr.isEmpty());
+	}
+
 	/* Reset buttons, and base colours the built-in look follows. */
 	{
 		QString rpath = dir.path() + "/reset.toml";

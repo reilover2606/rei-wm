@@ -390,6 +390,15 @@ bool rei_theme_read(struct rei_theme *t, const struct toml_table *root, char *er
 				st->icon = v->u.b;
 				continue;
 			}
+			if (strcmp(key, "font") == 0) {
+				if (v->type != TOML_STRING || strlen(v->u.s) >= sizeof st->font) {
+					snprintf(err, errlen, "%s: expected a font description string (at most %zu characters), "
+						 "like \"Sans Bold 12\"", where, sizeof st->font - 1);
+					return false;
+				}
+				snprintf(st->font, sizeof st->font, "%s", v->u.s);
+				continue;
+			}
 			if (strcmp(key, "mode") == 0) {
 				int mode = v->type == TOML_STRING ? rei_button_mode_parse(v->u.s) : -1;
 				if (rei_element_button_parent((enum rei_element)idx) < 0) {

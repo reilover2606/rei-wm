@@ -35,6 +35,7 @@ opacity = 0.85
 | `glow_color` (white), `glow_size` (pixels, 0 = none), `glow_opacity` | a halo outside the element. On by default for `menu_row` (when hovered), `dialog` and `run_prompt` |
 
 | `text_glow_size` (pixels, 0 = none), `text_glow_strength` (0 to 4), `text_glow_tint` (0 to 1), `text_glow_color` | light around the letters. With `text_glow_tint = 0` it has each letter's own colour; towards 1 it takes `text_glow_color` |
+| `font` | a Pango font description for this element's text: `"Serif Bold 14"`. Empty (the default) uses the font of the place the element is in. A partial description changes only what it names: `"Bold"`, `"Italic"`, `"14"` or `"Mono"` alone keep the rest, so `font = "Bold"` makes any element bold in whatever font it already has. Applies to every element that shows text (not `wifi`); a button group in `inherit` mode uses its box's font |
 | `text_blink` | seconds per on/off cycle (0 = steady): the text shows for the first half of each cycle |
 | `text_shine` (0 to 1), `text_shine_color` (white) | a metallic shine: the upper half of the letters gleams (strongest at the top), with a hard horizon in the middle and a darker reflection under it |
 
@@ -192,3 +193,27 @@ config (an emptied `[theme.<element>]` table goes too) instead of writing the de
 following the toolbar colours. The three base colours (`[toolbar] background`, `foreground`, `highlight`, which
 every built-in look is derived from) are at the top of the Theme tab; changing one moves every value you have
 not set by hand, and the preview follows.
+
+### Theme files: import and export
+
+The Theme tab has **Export…**, **Import…** and a list of **Saved themes** (with **Load**). A theme file is plain TOML
+holding the three toolbar colours and only the `[theme.*]` values that differ from the built-in look, so it stays
+short, diffs well, and can be pasted straight into `config.toml`:
+
+```toml
+[toolbar]
+background = "#161c26"
+foreground = "#d6dde8"
+highlight = "#3c6ebe"
+
+[theme.tooltip]
+font = "Serif Bold 14"
+
+[theme.tray_tile]
+radius = 11.0
+```
+
+The default folder is `~/.config/rei-wm/themes/` (next to `config.toml`; created when you first export). Importing
+or loading replaces the *whole* current look with the file's: values the file does not mention go back to the
+built-in look, so nothing is left over from the previous theme. Unknown elements or keys and invalid values are
+skipped and listed in the status line; the rest applies. Nothing is written to `config.toml` until you press Save.

@@ -230,6 +230,15 @@ QStringList TomlDoc::keys(const QString &section) const
 	return out;
 }
 
+QStringList TomlDoc::sections() const
+{
+	QStringList out;
+	for (const Line &li : info_)
+		if (li.kind == Line::Table && !out.contains(li.section))
+			out << li.section;
+	return out;
+}
+
 int TomlDoc::lastLineOfSection(const QString &section) const
 {
 	int last = -1;

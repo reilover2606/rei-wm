@@ -4,6 +4,7 @@
 #include <QDialog>
 #include <QTabWidget>
 #include <QDialogButtonBox>
+#include <QFontDialog>
 #include <QCoreApplication>
 #include <QComboBox>
 #include <QDir>
@@ -319,8 +320,10 @@ void ThemeEditor::addProp(QFormLayout *form, const QString &element, const QStri
 			touch(element, name);
 		});
 		w = c;
-	} else if (kind == "string") {
+	} else if (kind == "string" || kind == "font") {
 		auto *e = new QLineEdit;
+		if (kind == "font")
+			e->setPlaceholderText(tr("(the default font)"));
 		connect(e, &QLineEdit::textChanged, this, [this, element, name] { touch(element, name); });
 		w = e;
 	} else {
@@ -336,6 +339,28 @@ void ThemeEditor::addProp(QFormLayout *form, const QString &element, const QStri
 	auto *rowLayout = new QHBoxLayout(rowWidget);
 	rowLayout->setContentsMargins(0, 0, 0, 0);
 	rowLayout->addWidget(w, 1);
+	if (kind == "font") {   /* a font chooser, whose answer is written the way Pango reads it ("Family Bold Italic 12") */
+		auto *choose = new QToolButton;
+		choose->setText(QStringLiteral("…"));
+		choose->setObjectName("choose_font." + element);
+		choose->setToolTip(tr("Choose a font. A partial description also works, e.g. just \"Bold\" or \"14\": it changes only "
+				      "what it names and the rest stays as it is elsewhere."));
+		auto *edit = static_cast<QLineEdit *>(w);
+		connect(choose, &QToolButton::clicked, this, [this, edit] {
+			bool ok = false;
+			QFont f = QFontDialog::getFont(&ok, QFont(), this);
+			if (!ok)
+				return;
+			QStringList words { f.family() };
+			if (f.bold())
+				words << "Bold";
+			if (f.italic())
+				words << "Italic";
+			words << QString::number(f.pointSizeF() > 0 ? f.pointSizeF() : 11, 'g', 4);
+			edit->setText(words.join(' '));
+		});
+		rowLayout->addWidget(choose);
+	}
 	auto *reset = new QToolButton;
 	reset->setText(QStringLiteral("↺"));
 	reset->setObjectName("reset." + element + "." + name);
@@ -413,6 +438,10 @@ void ThemeEditor::updateGroup(const QString &group)
 		else
 			p.label->setText(tr(c.label));
 	}
+	if (props_[group].contains("font")) {   /* an inheriting group has the box's font */
+		props_[group]["font"].row->setVisible(mode != "inherit");
+		props_[group]["font"].label->setVisible(mode != "inherit");
+	}
 	if (styleButtons_.contains(group))
 		styleButtons_[group]->setVisible(mode != "inherit");
 }
@@ -446,6 +475,8 @@ void ThemeEditor::buildPage(const QString &element, bool iconable)
 			auto *form = new QFormLayout(box);
 			for (const ColorSpec &c : colorsFor(key))
 				addProp(form, key, c.name, tr(c.label), "color", 0, 0, 0, 0);
+			if (key != "wifi")   /* (the wifi icon has no text) */
+				addProp(form, key, "font", key == "toolbar" ? tr("Font (clock, volume)") : tr("Font"), "font", 0, 0, 0, 0);
 			v->addWidget(box);
 		};
 		colourBox(element, tr("Colours"));
@@ -462,6 +493,7 @@ void ThemeEditor::buildPage(const QString &element, bool iconable)
 			auto *form = new QFormLayout;
 			for (const ColorSpec &c : colorsFor(key))
 				addProp(form, key, c.name, tr(c.label), "color", 0, 0, 0, 0);
+			addProp(form, key, "font", tr("Font"), "font", 0, 0, 0, 0);
 			gl->addLayout(form);
 			auto *sb = buildStyleButton(key, tr(g.title));
 			styleButtons_[key] = sb;
@@ -545,7 +577,7 @@ QString ThemeEditor::valueOf(const Prop &p) const
 		raw = static_cast<QComboBox *>(p.widget)->currentData().toString();
 	else if (p.kind == "bool")
 		raw = static_cast<QCheckBox *>(p.widget)->isChecked() ? "true" : "false";
-	else if (p.kind == "string")
+	else if (p.kind == "string" || p.kind == "font")
 		raw = static_cast<QLineEdit *>(p.widget)->text();
 	else
 		raw = QString::number(static_cast<QDoubleSpinBox *>(p.widget)->value(), 'g', 6);
@@ -565,7 +597,7 @@ void ThemeEditor::setValue(Prop &p, const QString &text)
 	}
 	else if (p.kind == "bool")
 		static_cast<QCheckBox *>(p.widget)->setChecked(text == "true");
-	else if (p.kind == "string")
+	else if (p.kind == "string" || p.kind == "font")
 		static_cast<QLineEdit *>(p.widget)->setText(text);
 	else
 		static_cast<QDoubleSpinBox *>(p.widget)->setValue(text.toDouble());
@@ -741,6 +773,84 @@ void ThemeEditor::apply(TomlDoc &doc) const
 			doc.set("theme." + e.key(), p->name, v);
 		}
 	}
+}
+
+QString ThemeEditor::variantText(const QVariant &v)
+{
+	if (v.typeId() == QMetaType::Bool)
+		return v.toBool() ? "true" : "false";
+	if (v.typeId() == QMetaType::Double || v.typeId() == QMetaType::Float || v.typeId() == QMetaType::LongLong ||
+	    v.typeId() == QMetaType::Int)
+		return QString::number(v.toDouble(), 'g', 6);
+	return v.toString();
+}
+
+void ThemeEditor::exportTo(TomlDoc &doc) const
+{
+	for (auto e = props_.begin(); e != props_.end(); ++e) {
+		for (auto p = e->begin(); p != e->end(); ++p) {
+			const QString now = valueOf(*p);
+			if (now == p->defaultV)
+				continue;   /* the built-in value: the file need not say it */
+			QVariant v;
+			if (p->kind == "number")
+				v = now.toDouble();
+			else if (p->kind == "bool")
+				v = now == "true";
+			else
+				v = now;
+			doc.set("theme." + e.key(), p->name, v);
+		}
+	}
+}
+
+QStringList ThemeEditor::importFrom(const TomlDoc &doc)
+{
+	QStringList warnings;
+	loading_ = true;   /* one preview and one notice for the lot */
+	/* The file describes a whole look: start from the built-in one (for the toolbar colours now set), so nothing of
+	 * the previous look is left over. */
+	for (auto e = props_.begin(); e != props_.end(); ++e)
+		for (auto p = e->begin(); p != e->end(); ++p) {
+			setValue(*p, p->defaultV);
+			p->touched = true;
+		}
+	static const QStringList shapes { "square", "rounded", "pill", "bevel" };
+	static const QStringList modes { "custom", "color", "inherit", "text" };
+	for (const QString &section : doc.sections()) {
+		if (!section.startsWith("theme."))
+			continue;
+		const QString element = section.mid(6);
+		if (!props_.contains(element)) {
+			warnings << tr("unknown element [%1]").arg(section);
+			continue;
+		}
+		for (const QString &key : doc.keys(section)) {
+			if (!props_[element].contains(key)) {
+				warnings << tr("%1: unknown property").arg(section + "." + key);
+				continue;
+			}
+			Prop &p = props_[element][key];
+			const QString text = variantText(doc.get(section, key));
+			if (p.kind == "color" && !QColor(text).isValid())
+				warnings << tr("%1: \"%2\" is not a colour").arg(section + "." + key, text);
+			else if (p.kind == "shape" && !shapes.contains(text))
+				warnings << tr("%1: \"%2\" is not a shape").arg(section + "." + key, text);
+			else if (p.kind == "mode" && !modes.contains(text))
+				warnings << tr("%1: \"%2\" is not a look").arg(section + "." + key, text);
+			else
+				setValue(p, text);
+		}
+	}
+	for (auto e = props_.begin(); e != props_.end(); ++e)
+		for (auto p = e->begin(); p != e->end(); ++p)
+			updateReset(*p);
+	loading_ = false;
+	for (const GroupInfo &g : kGroups)
+		updateGroup(g.key);
+	emit edited();
+	schedulePreview();
+	return warnings;
 }
 
 void ThemeEditor::markSaved()

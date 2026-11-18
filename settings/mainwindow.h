@@ -7,6 +7,7 @@
 
 #include "tomldoc.h"
 
+class QComboBox;
 class QLabel;
 class QTableWidget;
 class QWidget;
@@ -35,6 +36,13 @@ public:
 	/* Adds a wallpaper group made of these: one picture, several pictures, or a folder (its pictures). The
 	 * Wallpaper tab's buttons call this; it is public for tests. */
 	void addWallpapers(const QStringList &paths);
+
+	/* Theme files: the toolbar colours and the [theme.*] tables that differ from the built-in look, as TOML (the same
+	 * lines config.toml uses). They live in <config dir>/themes by default. Public for tests; the buttons call them. */
+	QString themesDir() const;
+	bool exportTheme(const QString &file, QString *error = nullptr);
+	/* Replaces the whole current look with the file's. `warnings` gets what was skipped. */
+	bool importTheme(const QString &file, QStringList *warnings = nullptr, QString *error = nullptr);
 
 private slots:
 	void onSaveClicked();
@@ -74,6 +82,7 @@ private:
 	QWidget *buildMessagesTab();
 	QWidget *buildMusicTab();
 	QWidget *buildThemeTab();
+	void refreshThemeList();
 	QWidget *buildCursorTab();
 	void updateCursorPreview();
 	QStringList installedCursorThemes() const;
@@ -95,6 +104,8 @@ private:
 	class QButtonGroup *anyGroup_ = nullptr;   /* the "any" radio buttons: at most one group is the any group */
 	QLabel *status_ = nullptr, *cursorPreview_ = nullptr;
 	ThemeEditor *theme_ = nullptr;
+	QWidget *baseColors_[3] = {};   /* toolbar background, foreground, highlight */
+	QComboBox *themeList_ = nullptr;
 	QMap<QString, QString> loadedKeys_;
 	QList<QVariantMap> loadedOutputs_, loadedShortcuts_, loadedWallpapers_;
 	bool loading_ = false;
