@@ -220,6 +220,18 @@ static void test_first_run_creates_default_file(void)
 	rmdir(root);
 }
 
+static void test_workspace_and_resize(void)
+{
+	struct rei_config *c = parse_ok("");
+	CHECK(c->workspace_back_and_forth && c->resize_step == 40);
+	rei_config_free(c);
+	c = parse_ok("[general]\nworkspace_back_and_forth = false\n[layout]\nresize_step = 25\n");
+	CHECK(!c->workspace_back_and_forth && c->resize_step == 25);
+	rei_config_free(c);
+	parse_fails("[layout]\nresize_step = 2\n", "layout.resize_step");
+	parse_fails("[general]\nworkspace_back_and_forth = 1\n", "general.workspace_back_and_forth");
+}
+
 static void test_clipboard(void)
 {
 	struct rei_config *c = parse_ok("");
@@ -240,6 +252,7 @@ static void test_clipboard(void)
 int main(void)
 {
 	test_clipboard();
+	test_workspace_and_resize();
 	test_defaults();
 	test_shipped_default_text_parses();
 	test_overrides();

@@ -500,3 +500,59 @@ bool rei_tree_check(const struct rei_tree *tree)
 		return false;
 	return check_node(tree, tree->root);
 }
+
+#define RESIZE_MIN_SHARE 0.08   /* of the container's size */
+
+/* Moves the divider between `a` and its next sibling `b` toward `b` (positive) or toward `a` (negative) by
+ * `fraction` of the container; false if that would leave one of them below the minimum. */
+static bool move_divider(struct rei_node *a, struct rei_node *b, double fraction)
+{
+	struct rei_node *p = a->parent;
+	double sum = 0;
+	struct rei_node *c;
+	wl_list_for_each(c, &p->children, link)
+		sum += c->weight > 0 ? c->weight : 1.0;
+	double wa = a->weight > 0 ? a->weight : 1.0, wb = b->weight > 0 ? b->weight : 1.0;
+	double d = fraction * sum;   /* weight that moves from b to a (negative: from a to b) */
+	double min = RESIZE_MIN_SHARE * sum;
+	if (wa + d < min)
+		d = min - wa;
+	if (wb - d < min)
+		d = wb - min;
+	if (fabs(d) < 1e-9 || (fraction > 0) != (d > 0))
+		return false;
+	a->weight = wa + d;
+	b->weight = wb - d;
+	return true;
+}
+
+bool rei_tree_resize(struct rei_tree *tree, struct rei_node *leaf, enum rei_direction dir, int step_px)
+{
+	(void)tree;
+	bool horizontal = dir == REI_DIR_LEFT || dir == REI_DIR_RIGHT;
+	bool forward = dir == REI_DIR_RIGHT || dir == REI_DIR_DOWN;   /* the divider moves toward the end */
+	for (struct rei_node *n = leaf; n && n->parent; n = n->parent) {
+		struct rei_node *p = n->parent;
+		if (p->layout != (horizontal ? REI_LAYOUT_SPLIT_H : REI_LAYOUT_SPLIT_V))
+			continue;
+		bool has_prev = n->link.prev != &p->children, has_next = n->link.next != &p->children;
+		struct rei_node *prev = has_prev ? wl_container_of(n->link.prev, prev, link) : NULL;
+		struct rei_node *next = has_next ? wl_container_of(n->link.next, next, link) : NULL;
+		int extent = horizontal ? p->rect.w : p->rect.h;
+		if (extent <= 0)
+			return false;
+		double fraction = (double)step_px / extent;
+		if (forward) {
+			if (next)   /* n's end divider moves forward: n grows */
+				return move_divider(n, next, fraction);
+			if (prev)   /* n's start divider moves forward: n shrinks */
+				return move_divider(prev, n, fraction);
+		} else {
+			if (prev)   /* n's start divider moves back: n grows */
+				return move_divider(prev, n, -fraction);
+			if (next)   /* n's end divider moves back: n shrinks */
+				return move_divider(n, next, -fraction);
+		}
+	}
+	return false;
+}

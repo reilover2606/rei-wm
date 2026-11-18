@@ -5,6 +5,7 @@
 #include "input/input.h"
 #include "pointer_cursor.h"
 
+#include <event2/event.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -143,6 +144,8 @@ void rei_input_finish(struct rei_server *server)
 	wl_list_remove(&in->grab_destroy.link);
 	rei_bindings_free(in->bindings);
 	rei_xkb_destroy(in->xkb);
+	if (in->resize_timer)
+		event_free(in->resize_timer);
 	free(in);
 }
 
@@ -222,6 +225,65 @@ void rei_input_refocus(struct rei_server *server)
 /* Keys                                                                     */
 /* ------------------------------------------------------------------------ */
 
+void rei_input_stop_resize_repeat(struct rei_server *server)
+{
+	struct rei_input *in = server->input;
+	if (!in)
+		return;
+	if (in->resize_timer)
+		evtimer_del(in->resize_timer);
+	in->resize_code = 0;
+}
+
+static void on_resize_repeat(evutil_socket_t fd, short what, void *arg)
+{
+	(void)fd; (void)what;
+	struct rei_input *in = arg;
+	if (!in->server->resize_mode || in->resize_code == 0)
+		return;
+	rei_wm_resize_step(in->server, in->resize_dir, in->resize_big);
+	int rate = in->server->config->repeat_rate;
+	if (rate <= 0)
+		return;
+	struct timeval tv = { 0, 1000000 / rate };
+	evtimer_add(in->resize_timer, &tv);
+}
+
+/* In resize mode, i j k l (or the arrows) move the dividers of the focused tile in that direction (Shift: bigger
+ * steps), and Escape or Enter leave the mode; everything else is typed as usual. Returns whether the key was taken. */
+static bool resize_key(struct rei_server *server, struct rei_input *in, uint32_t code)
+{
+	if (rei_xkb_mods(in->xkb) & ~REI_MOD_SHIFT)
+		return false;   /* Super+..., Ctrl+... are not for the mode */
+	xkb_keysym_t sym = rei_xkb_base_sym(in->xkb, code);
+	enum rei_direction dir;
+	switch (sym) {
+	case XKB_KEY_i: case XKB_KEY_I: case XKB_KEY_Up: dir = REI_DIR_UP; break;
+	case XKB_KEY_k: case XKB_KEY_K: case XKB_KEY_Down: dir = REI_DIR_DOWN; break;
+	case XKB_KEY_j: case XKB_KEY_J: case XKB_KEY_Left: dir = REI_DIR_LEFT; break;
+	case XKB_KEY_l: case XKB_KEY_L: case XKB_KEY_Right: dir = REI_DIR_RIGHT; break;
+	case XKB_KEY_Escape: case XKB_KEY_Return: case XKB_KEY_KP_Enter:
+		set_add(in->swallowed, &in->n_swallowed, REI_MAX_PRESSED, code);
+		rei_wm_set_resize_mode(server, false);
+		return true;
+	default:
+		return false;
+	}
+	set_add(in->swallowed, &in->n_swallowed, REI_MAX_PRESSED, code);
+	bool big = (rei_xkb_mods(in->xkb) & REI_MOD_SHIFT) != 0;
+	rei_wm_resize_step(server, dir, big);
+	in->resize_code = code;
+	in->resize_dir = dir;
+	in->resize_big = big;
+	if (server->config->repeat_rate > 0) {
+		if (!in->resize_timer)
+			in->resize_timer = evtimer_new(server->base, on_resize_repeat, in);
+		struct timeval tv = { server->config->repeat_delay / 1000, (server->config->repeat_delay % 1000) * 1000 };
+		evtimer_add(in->resize_timer, &tv);
+	}
+	return true;
+}
+
 void rei_input_key(struct rei_server *server, uint32_t time_ms, uint32_t code, bool pressed)
 {
 	struct rei_input *in = server->input;
@@ -288,6 +350,11 @@ void rei_input_key(struct rei_server *server, uint32_t time_ms, uint32_t code, b
 			return;
 		}
 	}
+
+	if (pressed && server->resize_mode && resize_key(server, in, code))
+		return;
+	if (!pressed && code == in->resize_code)
+		rei_input_stop_resize_repeat(server);   /* (its release is swallowed below, as its press was) */
 
 	if (pressed) {
 		uint32_t mods = rei_xkb_mods(in->xkb);

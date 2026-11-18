@@ -8,6 +8,9 @@
 
 #include "decoration.h"
 #include "geom.h"
+#include "layout.h"
+
+struct event;
 
 struct rei_server;
 struct rei_surface;
@@ -39,6 +42,13 @@ struct rei_input {
 	size_t n_pressed;
 	uint32_t swallowed[REI_MAX_PRESSED];  /* Held keys a binding consumed. */
 	size_t n_swallowed;
+
+	/* Resize mode (see rei_wm_set_resize_mode): the key being held, which repeats on a timer of our own (a key the
+	 * compositor consumes is never repeated by the client). */
+	struct event *resize_timer;
+	uint32_t resize_code;
+	enum rei_direction resize_dir;
+	bool resize_big;
 
 	struct rei_surface *keyboard_focus;
 	struct wl_listener keyboard_focus_destroy;
@@ -111,6 +121,8 @@ void rei_input_release_all(struct rei_server *server, uint32_t time_ms);
 /* Re-evaluates which surface should have keyboard focus: the topmost popup
  * holding a grab, else the active window. Cheap; call after any change. */
 void rei_input_refocus(struct rei_server *server);
+/* Resize mode ended (or the key was let go): the held key stops repeating. */
+void rei_input_stop_resize_repeat(struct rei_server *server);
 
 /* Keeps the cursor on a screen after outputs change. */
 void rei_input_clamp_cursor(struct rei_server *server);

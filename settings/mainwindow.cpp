@@ -237,6 +237,8 @@ QWidget *MainWindow::buildGeneralTab()
 		    "terminals below can also be pasted with Ctrl+V in other programs."));
 	addField(f, tr("Terminals (app names, comma separated)"), "clipboard", "terminals", String, "URxvt, XTerm, foot, kitty, Alacritty",
 		 {}, 0, 0, 1, tr("Windows of these programs count as terminals. Case does not matter; the X11 class or Wayland app id."));
+	addField(f, tr("Workspace key on the current workspace goes back"), "general", "workspace_back_and_forth", Bool, true, {}, 0, 0, 1,
+		 tr("Pressing Mod+3 while on workspace 3 returns to the workspace you were on before (as in i3)."));
 	addField(f, tr("Run Xwayland (X11 programs)"), "general", "xwayland", Bool, true,
 		 {}, 0, 0, 1, tr("Needs a restart of rei-wm to change."));
 	addField(f, tr("X resources file"), "general", "xresources", String, "~/.Xresources", {}, 0, 0, 1,
@@ -268,6 +270,8 @@ QWidget *MainWindow::buildLayoutTab()
 	addField(f, tr("Show programs' own title bars"), "decoration", "client_titlebars", Bool, true, {}, 0, 0, 1,
 		 tr("Off: programs that honour the xdg-decoration protocol (Qt, SDL, GTK4, many others) leave their title bar out. "
 		    "Programs that never ask (GTK3, Firefox's own bar) and X11 programs are not affected."));
+	addField(f, tr("Resize step (px)"), "layout", "resize_step", Int, 40, {}, 5, 500, 1,
+		 tr("How far a key of the resize mode (Mod+Shift+r, then i j k l) moves a divider; Shift is three times as much."));
 	addField(f, tr("Window notch height (px, 0 = off)"), "decoration", "notch_height", Int, 22, {}, 0, 64);
 	return w;
 }

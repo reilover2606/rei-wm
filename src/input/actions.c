@@ -219,8 +219,11 @@ void rei_actions_run(struct rei_server *s, const struct rei_action *action)
 	case REI_ACTION_FULLSCREEN:
 		rei_wm_toggle_fullscreen(s);
 		break;
+	case REI_ACTION_RESIZE_MODE:
+		rei_wm_set_resize_mode(s, !s->resize_mode);
+		break;
 	case REI_ACTION_WORKSPACE:
-		rei_wm_goto_workspace(s, action->value);
+		rei_wm_workspace_command(s, action->value);
 		break;
 	case REI_ACTION_MOVE_TO_WORKSPACE:
 		rei_wm_move_to_workspace(s, action->value);

@@ -808,20 +808,30 @@ void rei_wm_toggle_fullscreen(struct rei_server *s)
 		rei_wm_set_fullscreen(v, !v->fullscreen);
 }
 
+static int current_workspace_number(const struct rei_server *s)
+{
+	return s->focused_output && s->focused_output->workspace ? s->focused_output->workspace->number : 0;
+}
+
 void rei_wm_goto_workspace(struct rei_server *s, int number)
 {
 	struct rei_output *out = s->focused_output;
 	if (!out)
 		return;
 	s->focus_cleared = false;
+	int was = current_workspace_number(s);
 
 	struct rei_workspace *ws = ws_find(s, number);
 	if (ws && ws->output && ws->output->workspace == ws) {
 		/* Already showing somewhere: just go there. */
 		s->focused_output = ws->output;
+		if (was && was != number)
+			s->prev_workspace = was;
 		update_activation(s);
 		return;
 	}
+	if (was && was != number)
+		s->prev_workspace = was;
 	if (!ws)
 		ws = ws_create(s, number, out);
 	struct rei_output *target = ws->output ? ws->output : out;
@@ -836,6 +846,37 @@ void rei_wm_goto_workspace(struct rei_server *s, int number)
 
 	arrange(target);
 	update_activation(s);
+}
+
+void rei_wm_workspace_command(struct rei_server *s, int number)
+{
+	if (s->config->workspace_back_and_forth && number == current_workspace_number(s) && s->prev_workspace > 0 &&
+	    s->prev_workspace != number)
+		number = s->prev_workspace;
+	rei_wm_goto_workspace(s, number);
+}
+
+void rei_wm_set_resize_mode(struct rei_server *s, bool on)
+{
+	if (s->resize_mode == on)
+		return;
+	s->resize_mode = on;
+	if (!on)
+		rei_input_stop_resize_repeat(s);
+	rei_debug("resize mode %s", on ? "on" : "off");
+	rei_server_schedule_damage(s);   /* the toolbar shows it */
+}
+
+bool rei_wm_resize_step(struct rei_server *s, enum rei_direction dir, bool big)
+{
+	struct rei_view *v = rei_wm_active_view(s);
+	if (!v || !v->ws || !v->node || v->floating || v->fullscreen)
+		return false;   /* only tiles in the grid */
+	int step = s->config->resize_step * (big ? 3 : 1);
+	if (!rei_tree_resize(v->ws->tree, v->node, dir, step))
+		return false;
+	arrange_ws(v->ws);
+	return true;
 }
 
 void rei_wm_move_to_workspace(struct rei_server *s, int number)

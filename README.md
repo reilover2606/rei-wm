@@ -121,6 +121,20 @@ So: highlight in a terminal, then middle-click in the terminal or in another pro
 What you copy with Ctrl+C in a program is pasted with Ctrl+V; a terminal pastes it with its own clipboard key (foot and
 kitty: Ctrl+Shift+V) and, if the program also set the primary selection by highlighting, with a middle click.
 
+## Workspaces and resizing
+
+**Back and forth.** Pressing the key of the workspace you are on (`Mod+3` on workspace 3) goes back to the workspace you were
+on before, so one key switches between two workspaces, as in i3 (`[general] workspace_back_and_forth`, on by default).
+A workspace that was empty when you left it has gone, and comes back empty.
+
+**Resize mode.** `Mod+Shift+r` (the `resize_mode` action) enters resize mode: the mode switch next to the Start button shows
+an **R** instead of its icon. In the mode the keys **i j k l** (or the arrow keys) move a divider of the focused tiled window
+up, left, down and right, **Shift** takes three steps at a time, a held key repeats, and **Escape** or **Enter** leaves it. A key
+moves the divider the way it points: the window's own edge on that side when it has a neighbour there (it grows that way),
+otherwise the opposite edge (it shrinks away), so `l` on the right-hand window of two shrinks it and `j` grows it. A step is
+`[layout] resize_step` pixels (40); no tile gets smaller than 8% of its container. Other keys are typed as usual while the mode is
+on, and floating windows are not resized by it. (`Mod+r`, i3's key for this, is the Run prompt here, so the mode has its own.)
+
 ## Display sleep
 
 `[general] display_sleep = 5` turns the displays off after that many minutes without keyboard, mouse or touchpad

@@ -271,3 +271,9 @@ if have_xwayland
   )
   test('xselection', xselection_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 90)
 endif
+
+resize_test = executable('test_resize', 'test_resize.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('resize', resize_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)

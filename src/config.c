@@ -257,6 +257,8 @@ struct rei_config *rei_config_defaults(void)
 	cfg->start_enabled = true;
 	cfg->focus_follows_mouse = true;
 	cfg->display_sleep_minutes = 5;
+	cfg->workspace_back_and_forth = true;
+	cfg->resize_step = 40;
 	cfg->cursor_theme = rei_xstrdup("");
 	cfg->volume_target = REI_VOLUME_AUTO;
 	cfg->brightness_step = 5;
@@ -347,6 +349,9 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		cfg->session_bus_private = strcmp(bus, "private") == 0;
 		free(bus);
 		read_int(&r, general, "general.", "display_sleep", &cfg->display_sleep_minutes, 0, 1440);
+		const struct toml_value *baf = get(&r, general, "general.", "workspace_back_and_forth", TOML_BOOL);
+		if (baf)
+			cfg->workspace_back_and_forth = baf->u.b;
 		const struct toml_value *ffm = get(&r, general, "general.", "focus_follows_mouse", TOML_BOOL);
 		if (ffm)
 			cfg->focus_follows_mouse = ffm->u.b;
@@ -385,6 +390,7 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 	if (layout) {
 		read_int(&r, layout, "layout.", "gap_outer", &cfg->gap_outer, 0, 500);
 		read_int(&r, layout, "layout.", "gap_inner", &cfg->gap_inner, 0, 500);
+		read_int(&r, layout, "layout.", "resize_step", &cfg->resize_step, 5, 500);
 		static const char *const modes[] = { "tile", "float", NULL };
 		char *mode = rei_xstrdup("tile");
 		read_choice(&r, layout, "layout.", "new_windows", &mode, modes);
