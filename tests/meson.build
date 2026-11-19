@@ -277,3 +277,23 @@ resize_test = executable('test_resize', 'test_resize.c', xdg_shell_client_h, xdg
   dependencies: [wayland_client, m_dep],
 )
 test('resize', resize_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)
+
+thin_test = executable('test_thin', 'test_thin.c', xdg_shell_client_h, xdg_shell_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('thin', thin_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)
+
+dmabuf_fb_test = executable('test_dmabuf_feedback', 'test_dmabuf_feedback.c', xdg_shell_client_h, xdg_shell_code,
+  linux_dmabuf_client_h, linux_dmabuf_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('dmabuf-feedback', dmabuf_fb_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)
+
+syncobj_test = executable('test_syncobj', 'test_syncobj.c', xdg_shell_client_h, xdg_shell_code,
+  linux_drm_syncobj_client_h, linux_drm_syncobj_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('syncobj', syncobj_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)

@@ -2,6 +2,7 @@
 #define REI_SERVER_H
 
 #include <stdbool.h>
+#include <sys/types.h>
 #include <stdint.h>
 #include <wayland-util.h>
 
@@ -16,6 +17,7 @@ struct event_base;
 struct wl_display;
 struct wl_event_loop;
 struct rei_backend;
+struct rei_syncobj;
 struct rei_seat;
 struct rei_input;
 struct rei_image;
@@ -87,6 +89,8 @@ struct rei_server {
 
 	/* linux-dmabuf: what clients may send, and buffers waiting for their release. */
 	struct wl_global *dmabuf_global;
+	dev_t dmabuf_main_device;            /* the render node feedback names (0: none, version 3 only) */
+	struct wl_list dmabuf_feedbacks;     /* feedback objects to resend to when the formats change */
 	struct rei_format_mod *dmabuf_formats;
 	size_t n_dmabuf_formats;
 	struct wl_list buffer_leases;
@@ -105,6 +109,7 @@ struct rei_server {
 	struct rei_mpd *mpd;
 	struct rei_wifi *wifi;
 	struct rei_idle *idle;
+	struct rei_syncobj *syncobj;   /* explicit synchronization, when offered (proto/syncobj.c) */
 	bool resize_mode;        /* the keys i j k l resize the focused tile (see desktop.c) */
 	int prev_workspace;      /* the workspace that was focused before the current one (0: none) */
 	struct rei_clipboard *clipboard;   /* clipboard.c */

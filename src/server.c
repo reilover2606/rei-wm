@@ -30,6 +30,7 @@
 #include "proto/fractional_scale.h"
 #include "proto/viewporter.h"
 #include "proto/xdg_decoration.h"
+#include "proto/syncobj.h"
 #include "proto/idle_inhibit.h"
 #include "idle.h"
 #include "clipboard.h"
@@ -170,6 +171,7 @@ static void on_inbox(struct rei_msg *m, void *userdata)
 		rei_buffer_leases_check(s);
 		rei_debug("frame output=%s seq=%llu serial=%llu", o->name,
 			  (unsigned long long)f->seq, (unsigned long long)f->scene_serial);
+		rei_output_frame_stats(o, f->present_ns);
 		fire_frame_callbacks(s, o, f);
 		rei_server_schedule_flush(s);
 		break;
@@ -732,6 +734,7 @@ void rei_server_destroy(struct rei_server *s)
 	rei_audio_stop(s);
 	rei_reload_stop(s);
 	rei_xwayland_stop(s);
+	rei_syncobj_finish(s);
 	rei_linux_dmabuf_finish(s);
 	if (s->protocol_logger)
 		wl_protocol_logger_destroy(s->protocol_logger);

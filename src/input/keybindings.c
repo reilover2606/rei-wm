@@ -32,6 +32,7 @@ const struct rei_default_binding rei_default_bindings[] = {
 	{ "Mod+f", "fullscreen" },
 	{ "Mod+m", "minimize" },
 	{ "Mod+Shift+r", "resize_mode" },
+	{ "Mod+t", "thin_mode" },
 	{ "Mod+r", "run" },
 	{ "Mod+n", "messages" },
 	{ "Mod+1", "workspace 1" },
@@ -167,6 +168,7 @@ bool rei_action_parse(const char *text, struct rei_action *out, char *err, size_
 		{ "fullscreen", REI_ACTION_FULLSCREEN, ARG_NONE },
 		{ "minimize", REI_ACTION_MINIMIZE, ARG_NONE },
 		{ "resize_mode", REI_ACTION_RESIZE_MODE, ARG_NONE },
+		{ "thin_mode", REI_ACTION_THIN_MODE, ARG_NONE },
 		{ "run", REI_ACTION_RUN, ARG_NONE },
 		{ "messages", REI_ACTION_MESSAGES, ARG_NONE },
 		{ "workspace", REI_ACTION_WORKSPACE, ARG_WORKSPACE },
@@ -243,7 +245,7 @@ bool rei_action_parse(const char *text, struct rei_action *out, char *err, size_
 	}
 
 	snprintf(err, errlen, "unknown action '%.*s' (known: none, exec, close, quit, focus_next, "
-		 "focus_prev, focus, move, split, toggle_floating, fullscreen, minimize, resize_mode, run, messages, workspace, "
+		 "focus_prev, focus, move, split, toggle_floating, fullscreen, minimize, resize_mode, thin_mode, run, messages, workspace, "
 		 "move_to_workspace, volume_up, volume_down, volume_mute, brightness_up, brightness_down)", (int)name_len, text);
 	return false;
 }

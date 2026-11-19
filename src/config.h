@@ -41,7 +41,10 @@ struct rei_config {
 	bool xwayland;             /* Run Xwayland so X11 programs work. */
 	bool session_bus_private;  /* [general] session_bus = "private": launched programs get their own D-Bus session bus. */
 	bool workspace_back_and_forth;  /* pressing the key of the workspace you are on goes back to the previous one */
+	int thin_shrink;                /* thin mode narrows the tiling grid by this many percent */
 	int resize_step;                /* pixels a key press of the resize mode moves a divider */
+	bool drm_explicit_sync;         /* [drm] explicit_sync: offer wp_linux_drm_syncobj_v1 when the kernel can do it */
+	char *drm_devices;              /* [drm] devices: "auto" (every GPU with a monitor) or "first" (one only) */
 	int display_sleep_minutes;  /* The displays go to sleep after this long without input; 0 = never. */
 	bool focus_follows_mouse;  /* Moving the pointer onto a window focuses it. */
 

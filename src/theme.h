@@ -80,6 +80,8 @@ struct rei_style {
 	struct rei_glow glow;  /* a soft halo outside the element (hovered rows, dialogs, the Run prompt) */
 	struct rei_text_fx text_fx;
 	enum rei_button_mode button_mode;   /* button-group elements only (rei_element_button_parent) */
+	char font[96];        /* Pango font description for this element's text; "" = the default font of the place it is in. Partial
+	                       * descriptions ("Bold", "14", "Mono Italic") change only what they name. */
 };
 
 enum rei_element {

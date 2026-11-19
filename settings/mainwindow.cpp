@@ -272,6 +272,9 @@ QWidget *MainWindow::buildLayoutTab()
 		    "Programs that never ask (GTK3, Firefox's own bar) and X11 programs are not affected."));
 	addField(f, tr("Resize step (px)"), "layout", "resize_step", Int, 40, {}, 5, 500, 1,
 		 tr("How far a key of the resize mode (Mod+Shift+r, then i j k l) moves a divider; Shift is three times as much."));
+	addField(f, tr("Thin mode shrink (%)"), "layout", "thin_shrink", Int, 30, {}, 0, 90, 1,
+		 tr("How much narrower thin mode (Mod+t) makes the tiling grid of a workspace: the windows are gathered in a column "
+		    "in the middle and the wallpaper shows at the sides."));
 	addField(f, tr("Window notch height (px, 0 = off)"), "decoration", "notch_height", Int, 22, {}, 0, 64);
 	return w;
 }
@@ -779,17 +782,83 @@ QWidget *MainWindow::buildThemeTab()
 	auto *f = new QFormLayout;
 	/* The three colours every element's built-in look is derived from. Changing one moves every value
 	 * below that you have not set by hand. */
-	QWidget *base[3] = {
+	QWidget **base = baseColors_;
+	QWidget *made[3] = {
 		addField(f, tr("Base background"), "toolbar", "background", Color, "#161c26", {}, 0, 0, 1,
 			 tr("The toolbar's background; menus, tiles and boxes are derived from it.")),
 		addField(f, tr("Base text"), "toolbar", "foreground", Color, "#d6dde8"),
 		addField(f, tr("Base highlight"), "toolbar", "highlight", Color, "#3c6ebe", {}, 0, 0, 1,
 			 tr("The accent: the focused workspace, active tiles and hovered rows.")),
 	};
+	for (int i = 0; i < 3; i++)
+		base[i] = made[i];
 	addField(f, tr("Flavor icons folder"), "theme", "flavor_icons", Dir, "", {}, 0, 0, 1,
 		 tr("A folder of square PNGs, at most 64x64. When set, every iconable element (tray tiles, the Start "
 		    "button, Start menu rows) gets a random icon from it. Empty: off."));
 	v->addLayout(f);
+
+	/* Theme files. */
+	auto *files = new QHBoxLayout;
+	files->addWidget(new QLabel(tr("Saved themes:")));
+	themeList_ = new QComboBox;
+	themeList_->setObjectName("theme_list");
+	themeList_->setMinimumContentsLength(18);
+	themeList_->setToolTip(tr("Theme files in %1").arg(QDir::toNativeSeparators(themesDir())));
+	files->addWidget(themeList_, 1);
+	auto *loadBtn = new QPushButton(tr("Load"));
+	auto *importBtn = new QPushButton(tr("Import…"));
+	auto *exportBtn = new QPushButton(tr("Export…"));
+	loadBtn->setObjectName("theme_load");
+	importBtn->setObjectName("theme_import");
+	exportBtn->setObjectName("theme_export");
+	loadBtn->setToolTip(tr("Replace the current look with the chosen saved theme. Nothing is written until you Save."));
+	importBtn->setToolTip(tr("Replace the current look with a theme file from anywhere. Nothing is written until you Save."));
+	exportBtn->setToolTip(tr("Save the current look as a theme file (by default into the themes folder)."));
+	files->addWidget(loadBtn);
+	files->addWidget(importBtn);
+	files->addWidget(exportBtn);
+	v->addLayout(files);
+	connect(loadBtn, &QPushButton::clicked, this, [this] {
+		if (themeList_->currentIndex() < 0)
+			return;
+		QStringList warn;
+		QString err;
+		const QString file = themeList_->currentData().toString();
+		if (!importTheme(file, &warn, &err))
+			QMessageBox::warning(this, tr("Load theme"), err);
+		else
+			status_->setText(warn.isEmpty() ? tr("Loaded %1.").arg(QFileInfo(file).completeBaseName())
+							: tr("Loaded with problems: %1").arg(warn.join("; ")));
+	});
+	connect(importBtn, &QPushButton::clicked, this, [this] {
+		const QString file = QFileDialog::getOpenFileName(this, tr("Import a theme"), themesDir(),
+								  tr("Themes (*.toml);;All files (*)"));
+		if (file.isEmpty())
+			return;
+		QStringList warn;
+		QString err;
+		if (!importTheme(file, &warn, &err))
+			QMessageBox::warning(this, tr("Import theme"), err);
+		else
+			status_->setText(warn.isEmpty() ? tr("Imported %1.").arg(QFileInfo(file).completeBaseName())
+							: tr("Imported with problems: %1").arg(warn.join("; ")));
+	});
+	connect(exportBtn, &QPushButton::clicked, this, [this] {
+		QDir().mkpath(themesDir());
+		QString file = QFileDialog::getSaveFileName(this, tr("Export the theme"), themesDir() + "/my-theme.toml",
+							    tr("Themes (*.toml)"));
+		if (file.isEmpty())
+			return;
+		if (!file.endsWith(".toml"))
+			file += ".toml";
+		QString err;
+		if (!exportTheme(file, &err))
+			QMessageBox::warning(this, tr("Export theme"), err);
+		else
+			status_->setText(tr("Exported to %1.").arg(file));
+		refreshThemeList();
+	});
+	refreshThemeList();
 	theme_ = new ThemeEditor(findCompositor(), [this] { return buildDoc().text(); });
 	theme_->setObjectName("theme_editor");
 	connect(theme_, &ThemeEditor::edited, this, &MainWindow::markDirty);
@@ -801,7 +870,7 @@ QWidget *MainWindow::buildThemeTab()
 		if (theme_->load(doc_.text(), &e))
 			status_->setText(tr("Using %1 for the theme editor.").arg(path));
 	});
-	for (QWidget *b : base) {   /* the built-in look follows these */
+	for (QWidget *b : baseColors_) {   /* the built-in look follows these */
 		auto *cb = static_cast<ColorButton *>(b);
 		cb->onChange = [this] {
 			markDirty();
@@ -811,6 +880,69 @@ QWidget *MainWindow::buildThemeTab()
 	}
 	v->addWidget(theme_, 1);
 	return w;
+}
+
+QString MainWindow::themesDir() const
+{
+	return QFileInfo(path_).absolutePath() + "/themes";
+}
+
+void MainWindow::refreshThemeList()
+{
+	if (!themeList_)
+		return;
+	const QString keep = themeList_->currentData().toString();
+	themeList_->clear();
+	for (const QFileInfo &fi : QDir(themesDir()).entryInfoList({ "*.toml" }, QDir::Files, QDir::Name | QDir::IgnoreCase))
+		themeList_->addItem(fi.completeBaseName(), fi.absoluteFilePath());
+	int at = themeList_->findData(keep);
+	if (at >= 0)
+		themeList_->setCurrentIndex(at);
+}
+
+bool MainWindow::exportTheme(const QString &file, QString *error)
+{
+	TomlDoc doc = TomlDoc::parse(QString());
+	static const char *const names[3] = { "background", "foreground", "highlight" };
+	for (int i = 0; i < 3; i++)
+		doc.set("toolbar", names[i], static_cast<ColorButton *>(baseColors_[i])->color());
+	theme_->exportTo(doc);
+	QString text = "# A rei-wm theme. Import it from the settings app's Theme tab, or paste these tables into config.toml.\n" +
+		       doc.text();
+	QDir().mkpath(QFileInfo(file).absolutePath());
+	QSaveFile out(file);
+	if (!out.open(QIODevice::WriteOnly | QIODevice::Text) || out.write(text.toUtf8()) < 0 || !out.commit()) {
+		if (error)
+			*error = tr("Cannot write %1: %2").arg(file, out.errorString());
+		return false;
+	}
+	refreshThemeList();
+	return true;
+}
+
+bool MainWindow::importTheme(const QString &file, QStringList *warnings, QString *error)
+{
+	QFile in(file);
+	if (!in.open(QIODevice::ReadOnly | QIODevice::Text)) {
+		if (error)
+			*error = tr("Cannot read %1: %2").arg(file, in.errorString());
+		return false;
+	}
+	TomlDoc doc = TomlDoc::parse(QString::fromUtf8(in.readAll()));
+	static const char *const names[3] = { "background", "foreground", "highlight" };
+	static const char *const defaults[3] = { "#161c26", "#d6dde8", "#3c6ebe" };
+	loading_ = true;
+	for (int i = 0; i < 3; i++) {
+		QString c = doc.get("toolbar", names[i]).toString();
+		static_cast<ColorButton *>(baseColors_[i])->setColor(QColor(c).isValid() ? c : QString(defaults[i]));
+	}
+	loading_ = false;
+	theme_->baseColorsChanged();   /* the built-in look the file's tables are measured against */
+	QStringList warn = theme_->importFrom(doc);
+	markDirty();
+	if (warnings)
+		*warnings = warn;
+	return true;
 }
 
 QWidget *MainWindow::buildStartMenuTab()

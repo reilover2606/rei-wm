@@ -150,8 +150,7 @@ echo 'gui-wm/rei-wm **' >> /etc/portage/package.accept_keywords/rei-wm   # live 
 emerge --ask gui-wm/rei-wm
 ```
 
-Things the ebuild does not do yet, for a finished package: a `rei-wm.desktop` file in
-`/usr/share/wayland-sessions` (there is none in the tree yet), a tagged release tarball and
+Things the ebuild does not do yet, for a finished package: a tagged release tarball and
 `SRC_URI` instead of the live git fetch, running `meson test` as `src_test` (several tests need
 a writable `/tmp`, and the Xwayland/audio tests skip themselves when those programs are missing),
 and a keyworded `KEYWORDS`.

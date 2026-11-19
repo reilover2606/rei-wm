@@ -3,7 +3,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <event2/event.h>
-#include <execinfo.h>
+#include "util/backtrace.h"
 #include <pthread.h>
 #include <signal.h>
 #include <stdatomic.h>
@@ -67,9 +67,9 @@ static void on_dump_signal(int sig)
 	char name[32] = "?";
 	prctl(PR_GET_NAME, name, 0, 0, 0);
 	void *frames[48];
-	int n = backtrace(frames, 48);
+	int n = rei_backtrace(frames, 48);
 	dprintf(STDERR_FILENO, "\n--- thread '%s' (tid %ld) is at:\n", name, (long)syscall(SYS_gettid));
-	backtrace_symbols_fd(frames, n, STDERR_FILENO);
+	rei_backtrace_symbols_fd(frames, n, STDERR_FILENO);
 	atomic_flag_clear(&g_dump_lock);
 }
 
@@ -167,7 +167,7 @@ void rei_watchdog_start(struct event_base *base)
 	sa.sa_handler = on_dump_signal;
 	sigaction(SIGUSR2, &sa, NULL);
 	void *warm[2];
-	backtrace(warm, 2);   /* loads libgcc now, not inside the handler */
+	rei_backtrace(warm, 2);   /* loads libgcc now, not inside the handler */
 
 	atomic_store(&g_beat_ms, now_ms());
 	g_timer = event_new(base, -1, EV_PERSIST, on_beat, NULL);

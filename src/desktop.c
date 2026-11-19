@@ -191,6 +191,13 @@ static void arrange(struct rei_output *o)
 		if (area.h < 1)
 			area.h = 1;
 	}
+	if (ws->thin && cfg->thin_shrink > 0) {   /* a column in the middle: the wallpaper shows on both sides */
+		int32_t w = (int32_t)((int64_t)area.w * (100 - cfg->thin_shrink) / 100);
+		if (w < 1)
+			w = 1;
+		area.x += (area.w - w) / 2;
+		area.w = w;
+	}
 	rei_tree_layout_xy(ws->tree, area, cfg->gap_inner, notch > cfg->gap_inner ? notch : cfg->gap_inner);
 
 	size_t n = rei_tree_leaf_count(ws->tree);
@@ -854,6 +861,17 @@ void rei_wm_workspace_command(struct rei_server *s, int number)
 	    s->prev_workspace != number)
 		number = s->prev_workspace;
 	rei_wm_goto_workspace(s, number);
+}
+
+void rei_wm_toggle_thin(struct rei_server *s)
+{
+	struct rei_output *o = s->focused_output;
+	if (!o || !o->workspace)
+		return;
+	o->workspace->thin = !o->workspace->thin;
+	rei_debug("thin mode %s on workspace %d", o->workspace->thin ? "on" : "off", o->workspace->number);
+	arrange(o);
+	rei_server_schedule_damage(s);
 }
 
 void rei_wm_set_resize_mode(struct rei_server *s, bool on)

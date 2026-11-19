@@ -1,4 +1,4 @@
-#include <execinfo.h>
+#include "util/backtrace.h"
 #include <getopt.h>
 #include <signal.h>
 #include <unistd.h>
@@ -57,13 +57,13 @@ static void crash_handler(int sig)
 		_exit(128 + sig);
 	in_handler = 1;
 	void *frames[64];
-	int n = backtrace(frames, 64);
+	int n = rei_backtrace(frames, 64);
 	const char head[] = "\nrei-wm crashed (signal ";
 	ssize_t r = write(STDERR_FILENO, head, sizeof head - 1);
 	char num[8] = { (char)('0' + sig / 10), (char)('0' + sig % 10), ')', ':', '\n', 0 };
 	r = write(STDERR_FILENO, num, 5);
 	(void)r;
-	backtrace_symbols_fd(frames, n, STDERR_FILENO);
+	rei_backtrace_symbols_fd(frames, n, STDERR_FILENO);
 	signal(sig, SIG_DFL);
 	raise(sig);
 }
@@ -71,7 +71,7 @@ static void crash_handler(int sig)
 static void install_crash_handler(void)
 {
 	void *warm[2];
-	backtrace(warm, 2);  /* Loads libgcc now, not inside the handler. */
+	rei_backtrace(warm, 2);  /* Loads libgcc now, not inside the handler. */
 	static const int sigs[] = { SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL };
 	for (size_t i = 0; i < sizeof sigs / sizeof sigs[0]; i++)
 		signal(sigs[i], crash_handler);

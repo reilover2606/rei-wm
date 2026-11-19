@@ -258,7 +258,10 @@ struct rei_config *rei_config_defaults(void)
 	cfg->focus_follows_mouse = true;
 	cfg->display_sleep_minutes = 5;
 	cfg->workspace_back_and_forth = true;
+	cfg->drm_explicit_sync = true;
+	cfg->drm_devices = rei_xstrdup("auto");
 	cfg->resize_step = 40;
+	cfg->thin_shrink = 30;
 	cfg->cursor_theme = rei_xstrdup("");
 	cfg->volume_target = REI_VOLUME_AUTO;
 	cfg->brightness_step = 5;
@@ -391,6 +394,7 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		read_int(&r, layout, "layout.", "gap_outer", &cfg->gap_outer, 0, 500);
 		read_int(&r, layout, "layout.", "gap_inner", &cfg->gap_inner, 0, 500);
 		read_int(&r, layout, "layout.", "resize_step", &cfg->resize_step, 5, 500);
+		read_int(&r, layout, "layout.", "thin_shrink", &cfg->thin_shrink, 0, 90);
 		static const char *const modes[] = { "tile", "float", NULL };
 		char *mode = rei_xstrdup("tile");
 		read_choice(&r, layout, "layout.", "new_windows", &mode, modes);
@@ -584,6 +588,15 @@ struct rei_config *rei_config_parse(const char *text, char *err, size_t errlen)
 		char theme_err[300];
 		if (!rei_theme_read(&cfg->theme, root, theme_err, sizeof theme_err))
 			fail(&r, "%s", theme_err);
+	}
+
+	const struct toml_table *drm = get_table(&r, root, "drm");
+	if (drm) {
+		const struct toml_value *es = get(&r, drm, "drm.", "explicit_sync", TOML_BOOL);
+		if (es)
+			cfg->drm_explicit_sync = es->u.b;
+		static const char *const dev_modes[] = { "auto", "first", NULL };
+		read_choice(&r, drm, "drm.", "devices", &cfg->drm_devices, dev_modes);
 	}
 
 	const struct toml_table *clip = get_table(&r, root, "clipboard");
@@ -846,6 +859,7 @@ void rei_config_free(struct rei_config *cfg)
 	free(cfg->brightness_command);
 	free(cfg->mpd_host);
 	free(cfg->clipboard_terminals);
+	free(cfg->drm_devices);
 	free(cfg->mpd_start_command);
 	free(cfg->start_run_font);
 	free(cfg->messages_font);

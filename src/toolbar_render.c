@@ -101,6 +101,37 @@ static PangoLayout *make_layout(cairo_t *cr, const PangoFontDescription *font, c
 	return layout;
 }
 
+/* `base` with a style's font laid over it: the element's own `font` ("Sans Bold 12", or only "Bold", "14"...) wins where it
+ * names something. Caller frees. */
+static PangoFontDescription *style_font(const PangoFontDescription *base, const struct rei_style *style)
+{
+	PangoFontDescription *f = pango_font_description_copy(base);
+	if (style && style->font[0]) {
+		PangoFontDescription *over = pango_font_description_from_string(style->font);
+		pango_font_description_merge(f, over, TRUE);
+		pango_font_description_free(over);
+	}
+	return f;
+}
+
+/* A layout for text of an element with this style: its font, else `base`. */
+static PangoLayout *make_layout_s(cairo_t *cr, const PangoFontDescription *base, const struct rei_style *style,
+				  const char *text)
+{
+	if (!style || !style->font[0])
+		return make_layout(cr, base, text);
+	PangoFontDescription *f = style_font(base, style);
+	PangoLayout *l = make_layout(cr, f, text);
+	pango_font_description_free(f);
+	return l;
+}
+
+/* The style of an element of the bar's theme (NULL when the bar is not themed: the default look has no fonts of its own). */
+static const struct rei_style *bar_elem(const struct rei_bar_state *st, enum rei_element e)
+{
+	return st->styled ? &st->theme.e[e] : NULL;
+}
+
 /* ---- Text with an effect ------------------------------------------------------------------------
  *
  * An element whose style has a text effect (glow, blink, shine) does not get its text painted into its
@@ -238,7 +269,7 @@ static void text_layers_finish(struct rei_pixbuf *pb, cairo_surface_t *surface)
 static void draw_centered(cairo_t *cr, const PangoFontDescription *font, const char *text,
 			  double cx, double cy, const struct rei_style *style)
 {
-	PangoLayout *layout = make_layout(cr, font, text);
+	PangoLayout *layout = make_layout_s(cr, font, style, text);
 	int w, h;
 	pango_layout_get_pixel_size(layout, &w, &h);
 	cairo_move_to(cr, cx - w / 2.0, cy - h / 2.0);
@@ -273,7 +304,7 @@ static void sysinfo_size(cairo_t *cr, PangoFontDescription *font, const struct r
 		return;
 	char text[64];
 	sysinfo_text(st, text, sizeof text);
-	PangoLayout *l = make_layout(cr, font, text);
+	PangoLayout *l = make_layout_s(cr, font, bar_elem(st, REI_ELEM_SYSINFO), text);
 	pango_layout_set_alignment(l, PANGO_ALIGN_CENTER);
 	int iw, ih;
 	pango_layout_get_pixel_size(l, &iw, &ih);
@@ -295,7 +326,7 @@ static void clock_only_extent(cairo_t *cr, PangoFontDescription *font, const str
 	if (!st->clock[0])
 		return;
 	if (!rei_bar_vertical(st->position)) {
-		PangoLayout *l = make_layout(cr, font, st->clock);
+		PangoLayout *l = make_layout_s(cr, font, bar_elem(st, REI_ELEM_TOOLBAR), st->clock);
 		int iw, ih;
 		pango_layout_get_pixel_size(l, &iw, &ih);
 		g_object_unref(l);
@@ -307,7 +338,7 @@ static void clock_only_extent(cairo_t *cr, PangoFontDescription *font, const str
 	snprintf(copy, sizeof copy, "%s", st->clock);
 	int n = 0;
 	for (char *tok = strtok(copy, ": "); tok && n < 4; tok = strtok(NULL, ": ")) {
-		PangoLayout *l = make_layout(cr, font, tok);
+		PangoLayout *l = make_layout_s(cr, font, bar_elem(st, REI_ELEM_TOOLBAR), tok);
 		int iw, ih;
 		pango_layout_get_pixel_size(l, &iw, &ih);
 		g_object_unref(l);
@@ -365,7 +396,7 @@ static void volume_layout(cairo_t *cr, PangoFontDescription *font, const struct 
 	double cw, ch, cl;
 	clock_extent(cr, font, st, &cw, &ch, &cl);
 
-	PangoLayout *l = make_layout(cr, font, st->volume);
+	PangoLayout *l = make_layout_s(cr, font, bar_elem(st, REI_ELEM_TOOLBAR), st->volume);
 	int iw, ih;
 	pango_layout_get_pixel_size(l, &iw, &ih);
 	g_object_unref(l);
@@ -425,7 +456,7 @@ static void battery_layout(cairo_t *cr, PangoFontDescription *font, const struct
 	int lh = vertical ? st->length : st->thickness;
 	char text[16];
 	battery_text(st, text, sizeof text);
-	PangoLayout *l = make_layout(cr, font, text);
+	PangoLayout *l = make_layout_s(cr, font, bar_elem(st, REI_ELEM_BATTERY), text);
 	int tw, th;
 	pango_layout_get_pixel_size(l, &tw, &th);
 	g_object_unref(l);
@@ -948,7 +979,7 @@ static void draw_tile(cairo_t *cr, PangoFontDescription *font, const struct rei_
 	draw_icon(cr, it->icon, ix, iy, icon, it->minimized ? 0.5 : 1.0);
 
 	if (!vertical && st->tray_mode == REI_TRAY_ICONS_NAMES && main_w > tile + 14) {
-		PangoLayout *l = make_layout(cr, font, it->label);
+		PangoLayout *l = make_layout_s(cr, font, ts, it->label);
 		double tx = r.x + 3 + icon + 5;
 		pango_layout_set_width(l, (int)((main_w - (tx - r.x) - 4) * PANGO_SCALE));
 		pango_layout_set_ellipsize(l, PANGO_ELLIPSIZE_END);
@@ -1100,7 +1131,7 @@ static void draw_battery(cairo_t *cr, PangoFontDescription *font, const struct r
 	char text[16];
 	battery_text(st, text, sizeof text);
 	set_color(cr, low ? bs->inactive_color : bs->text_color);
-	PangoLayout *l = make_layout(cr, font, text);
+	PangoLayout *l = make_layout_s(cr, font, bs, text);
 	if (!vertical)
 		cairo_move_to(cr, ix + BATT_ICON_W + BATT_GAP, y + (h - th) / 2.0);
 	else
@@ -1133,7 +1164,7 @@ struct rei_pixbuf *rei_bar_tooltip_render(const char *text, const char *font_des
 	cairo_surface_t *probe = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
 	cairo_t *pcr = cairo_create(probe);
 	PangoFontDescription *font = pango_font_description_from_string(font_desc && font_desc[0] ? font_desc : "Sans 11");
-	PangoLayout *l = make_layout(pcr, font, text);
+	PangoLayout *l = make_layout_s(pcr, font, style, text);
 	pango_layout_set_width(l, (TIP_MAX_W - 2 * TIP_PAD_X) * PANGO_SCALE);
 	pango_layout_set_ellipsize(l, PANGO_ELLIPSIZE_END);
 	int tw, th;
@@ -1159,7 +1190,7 @@ struct rei_pixbuf *rei_bar_tooltip_render(const char *text, const char *font_des
 	cairo_t *cr = cairo_create(surface);
 	cairo_scale(cr, scale, scale);
 	draw_box(cr, style, m, m, bw, bh, style->color, 1.0);
-	PangoLayout *label = make_layout(cr, font, text);
+	PangoLayout *label = make_layout_s(cr, font, style, text);
 	pango_layout_set_width(label, (TIP_MAX_W - 2 * TIP_PAD_X) * PANGO_SCALE);
 	pango_layout_set_ellipsize(label, PANGO_ELLIPSIZE_END);
 	set_color(cr, style->text_color);
@@ -1187,7 +1218,7 @@ struct rei_pixbuf *rei_bar_tooltip_render(const char *text, const char *font_des
 static PangoLayout *prompt_layout(cairo_t *cr, PangoFontDescription *font, const struct rei_prompt_state *st,
 				  const char *text)
 {
-	PangoLayout *l = make_layout(cr, font, text);
+	PangoLayout *l = make_layout_s(cr, font, &st->style, text);
 	pango_layout_set_width(l, (st->box_w - 2 * PROMPT_PAD_X) * PANGO_SCALE);
 	pango_layout_set_wrap(l, PANGO_WRAP_CHAR);   /* A long command with no spaces still wraps. */
 	return l;
@@ -1266,7 +1297,7 @@ struct rei_pixbuf *rei_bar_message_render(const struct rei_message_state *st, in
 	cairo_surface_t *probe = cairo_image_surface_create(CAIRO_FORMAT_A8, 1, 1);
 	cairo_t *pcr = cairo_create(probe);
 	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 12");
-	PangoLayout *l = make_layout(pcr, font, st->text);
+	PangoLayout *l = make_layout_s(pcr, font, &st->style, st->text);
 	pango_layout_set_width(l, st->width * PANGO_SCALE);
 	pango_layout_set_wrap(l, PANGO_WRAP_WORD_CHAR);
 	pango_layout_set_alignment(l, st->align_right ? PANGO_ALIGN_RIGHT : PANGO_ALIGN_LEFT);
@@ -1288,7 +1319,7 @@ struct rei_pixbuf *rei_bar_message_render(const struct rei_message_state *st, in
 	cairo_surface_t *surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w * scale, h * scale);
 	cairo_t *cr = cairo_create(surface);
 	cairo_scale(cr, scale, scale);
-	l = make_layout(cr, font, st->text);
+	l = make_layout_s(cr, font, &st->style, st->text);
 	pango_layout_set_width(l, st->width * PANGO_SCALE);
 	pango_layout_set_wrap(l, PANGO_WRAP_WORD_CHAR);
 	pango_layout_set_alignment(l, st->align_right ? PANGO_ALIGN_RIGHT : PANGO_ALIGN_LEFT);
@@ -1560,7 +1591,7 @@ struct rei_pixbuf *rei_bar_mpd_render(const struct rei_mpd_panel_state *st, int 
 
 	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
 	set_color(cr, st->box.text_color);
-	PangoLayout *l = make_layout(cr, font, st->label);
+	PangoLayout *l = make_layout_s(cr, font, &st->box, st->label);
 	pango_layout_set_width(l, (REI_MPDP_W - 32) * PANGO_SCALE);
 	pango_layout_set_ellipsize(l, PANGO_ELLIPSIZE_END);
 	pango_layout_set_alignment(l, PANGO_ALIGN_CENTER);
@@ -1691,7 +1722,9 @@ struct rei_pixbuf *rei_bar_confirm_render(const struct rei_confirm_state *st, in
 	draw_box(cr, &st->box, m, m, REI_DIALOG_W, REI_DIALOG_H, st->box.color, 1.0);
 
 	const char *fname = st->font[0] ? st->font : "Sans 11";
-	PangoFontDescription *font = pango_font_description_from_string(fname);
+	PangoFontDescription *plain = pango_font_description_from_string(fname);
+	PangoFontDescription *font = style_font(plain, &st->box);   /* the dialog's own font, if it has one */
+	pango_font_description_free(plain);
 	PangoFontDescription *big = pango_font_description_copy(font);
 	pango_font_description_set_size(big, pango_font_description_get_size(font) * 3 / 2);
 	pango_font_description_set_weight(big, PANGO_WEIGHT_BOLD);
@@ -1765,7 +1798,7 @@ void rei_bar_menu_size(const struct rei_menu_state *st, int *w, int *h, int *row
 	PangoFontDescription *font = pango_font_description_from_string(st->font[0] ? st->font : "Sans 11");
 	int widest = 0;
 	for (int i = 0; i < st->n_rows; i++) {
-		PangoLayout *l = make_layout(cr, font, st->rows[i].label);
+		PangoLayout *l = make_layout_s(cr, font, &st->row, st->rows[i].label);
 		int iw, ih;
 		pango_layout_get_pixel_size(l, &iw, &ih);
 		g_object_unref(l);
@@ -1845,7 +1878,7 @@ struct rei_pixbuf *rei_bar_menu_render(const struct rei_menu_state *st)
 				if (room > 0)
 					draw_icon(cr, st->rows[i].icon, m + bw + MENU_PAD_X, y + (row_h - (room - 8)) / 2.0,
 						  room - 8, 1.0);
-				PangoLayout *l = make_layout(cr, font, st->rows[i].label);
+				PangoLayout *l = make_layout_s(cr, font, &st->row, st->rows[i].label);
 				pango_layout_set_width(l, (int)((lw - 2 * MENU_PAD_X - 2 * bw - room) * PANGO_SCALE));
 				pango_layout_set_ellipsize(l, PANGO_ELLIPSIZE_END);
 				int tw, th;
@@ -1964,7 +1997,7 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 			isz = (int)fmin(cell.w, cell.h) - 6;
 		if (!vertical) {
 			if (isz > 0) {   /* icon, then the word, together centred */
-				PangoLayout *l = make_layout(cr, font, st->start_label);
+				PangoLayout *l = make_layout_s(cr, font, sbs, st->start_label);
 				int tw, th;
 				pango_layout_get_pixel_size(l, &tw, &th);
 				double total = isz + 5 + tw;
@@ -2065,7 +2098,7 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 		char text[64];
 		sysinfo_text(st, text, sizeof text);
 		set_color(cr, ss->text_color);
-		PangoLayout *l = make_layout(cr, font, text);
+		PangoLayout *l = make_layout_s(cr, font, ss, text);
 		pango_layout_set_alignment(l, PANGO_ALIGN_CENTER);
 		int iw, ih;
 		pango_layout_get_pixel_size(l, &iw, &ih);
@@ -2079,7 +2112,7 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 		double vx, vy, vw, vh;
 		volume_layout(cr, font, st, &vx, &vy, &vw, &vh);
 		set_color(cr, st->volume_muted ? bar->inactive_text_color : bar->text_color);
-		PangoLayout *layout = make_layout(cr, font, st->volume);
+		PangoLayout *layout = make_layout_s(cr, font, bar, st->volume);
 		cairo_move_to(cr, vx, vy);
 		show_text(cr, layout, bar);
 		g_object_unref(layout);
@@ -2091,7 +2124,7 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 		set_color(cr, bar->text_color);
 		const double pad = 8;
 		if (!vertical) {
-			PangoLayout *layout = make_layout(cr, font, st->clock);
+			PangoLayout *layout = make_layout_s(cr, font, bar, st->clock);
 			int w, h;
 			pango_layout_get_pixel_size(layout, &w, &h);
 			cairo_move_to(cr, lw - pad - w, (lh - h) / 2.0);
@@ -2107,7 +2140,7 @@ struct rei_pixbuf *rei_bar_render(const struct rei_bar_state *st)
 
 			double line_h = 0;
 			for (int i = 0; i < n; i++) {
-				PangoLayout *layout = make_layout(cr, font, parts[i]);
+				PangoLayout *layout = make_layout_s(cr, font, bar, parts[i]);
 				int w, h;
 				pango_layout_get_pixel_size(layout, &w, &h);
 				line_h = h > line_h ? h : line_h;

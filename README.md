@@ -66,7 +66,7 @@ This installs `rei-wm`, `rei-settings`, a launcher `rei-wm-session` and the sess
 `/usr/share/wayland-sessions/rei-wm.desktop`, so **rei-wm** is listed by a display manager (LXDM, or any that reads
 `wayland-sessions`) next to your other sessions. The launcher sets up the environment of a Wayland session and logs to
 `~/.cache/rei-wm/session.log`. It needs a login with seat access (elogind or systemd-logind through PAM). See
-[docs/GENTOO.md](docs/GENTOO.md) for the details, what to check if the session drops straight back to the login
+[docs/GENTOO.md](docs/GENTOO.md) (and [docs/VOID.md](docs/VOID.md) for Void Linux) for the details, what to check if the session drops straight back to the login
 screen, and what is untested.
 
 ## The toolbar's application tray
@@ -127,6 +127,12 @@ kitty: Ctrl+Shift+V) and, if the program also set the primary selection by highl
 on before, so one key switches between two workspaces, as in i3 (`[general] workspace_back_and_forth`, on by default).
 A workspace that was empty when you left it has gone, and comes back empty.
 
+**Thin mode.** `Mod+t` (the `thin_mode` action) toggles thin mode on the workspace you are looking at: its tiled windows are
+gathered in a narrower column in the middle of the screen and the wallpaper shows at both sides. The grid gets
+`[layout] thin_shrink` percent narrower (30 by default, 0 to 90; also in the settings app's Layout tab). Only tiled windows are
+affected: floating windows, fullscreen windows and the other workspaces keep their place. Press the key again to widen the grid;
+resizing with resize mode works inside the column. The mode belongs to the workspace and is forgotten when an empty workspace goes.
+
 **Resize mode.** `Mod+Shift+r` (the `resize_mode` action) enters resize mode: the mode switch next to the Start button shows
 an **R** instead of its icon. In the mode the keys **i j k l** (or the arrow keys) move a divider of the focused tiled window
 up, left, down and right, **Shift** takes three steps at a time, a held key repeats, and **Escape** or **Enter** leaves it. A key
@@ -134,6 +140,15 @@ moves the divider the way it points: the window's own edge on that side when it 
 otherwise the opposite edge (it shrinks away), so `l` on the right-hand window of two shrinks it and `j` grows it. A step is
 `[layout] resize_step` pixels (40); no tile gets smaller than 8% of its container. Other keys are typed as usual while the mode is
 on, and floating windows are not resized by it. (`Mod+r`, i3's key for this, is the Run prompt here, so the mode has its own.)
+
+## GPUs: Intel, AMD, NVIDIA, more than one
+
+The DRM backend decides by what each GPU can do, not by vendor: it offers explicit synchronization (`wp_linux_drm_syncobj_v1`, for
+drivers without implicit synchronization such as NVIDIA's, harmless on the others) and dmabuf feedback (`linux-dmabuf` version 4, so
+programs allocate buffers for the right GPU), and uses every GPU that has a monitor, each drawing for its own. `[drm] explicit_sync` and
+`[drm] devices` control it, `rei-wm --drm-info` shows what each GPU supports, and `-v` logs frame pacing every five seconds.
+See [docs/DRM.md](docs/DRM.md) for the NVIDIA setup (kernel parameter, driver) and what is not done. Untested on real
+hardware: all of this was written without a GPU; the protocol logic is tested against a fake kernel.
 
 ## Display sleep
 

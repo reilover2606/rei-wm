@@ -59,7 +59,19 @@ struct rei_output {
 
 	uint64_t frames_presented;
 	uint64_t last_presented_serial;
+
+	/* Frame pacing, summarized in the debug log every few seconds (see rei_output_frame_stats). */
+	struct {
+		uint64_t last_ns, window_start_ns;
+		uint32_t frames, late;
+		uint64_t worst_ns, sum_ns;
+	} pace;
 };
+
+/* A frame reached the screen at `present_ns` (monotonic; 0 if the backend does not know): counts it, and every five seconds
+ * logs (at debug level) how many frames there were, their average and worst spacing, and how many came more than half a
+ * refresh late. This is what to look at when comparing how smoothly rei-wm runs on one GPU or another. */
+void rei_output_frame_stats(struct rei_output *o, uint64_t present_ns);
 
 /* Size in the global layout's coordinate space (physical size / scale). */
 void rei_output_logical_size(const struct rei_output *o, int32_t *w, int32_t *h);

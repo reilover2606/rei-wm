@@ -174,6 +174,21 @@ int main(void)
 	parse_fails("[theme.mpd_modes]\nmode = \"fancy\"\n", "theme.mpd_modes.mode: expected one of");
 	parse_fails("[theme.tooltip]\nmode = \"text\"\n", "theme.tooltip.mode: only groups of buttons");
 
+	/* A font of an element's own. */
+	c = parse_ok("");
+	CHECK(c->theme.e[REI_ELEM_TOOLTIP].font[0] == '\0' && c->theme.e[REI_ELEM_MPD_TRANSPORT].font[0] == '\0');
+	rei_config_free(c);
+	c = parse_ok("[theme.tooltip]\nfont = \"Mono Bold 13\"\n[theme.mpd]\nfont = \"Serif\"\n"
+		     "[theme.mpd_modes]\nmode = \"color\"\nfont = \"Italic\"\n");
+	CHECK_STR(c->theme.e[REI_ELEM_TOOLTIP].font, "Mono Bold 13");
+	CHECK_STR(c->theme.e[REI_ELEM_MPD].font, "Serif");
+	CHECK_STR(c->theme.e[REI_ELEM_MENU].font, "");           /* elements are independent */
+	struct rei_style bs2;
+	rei_theme_button_style(&c->theme, REI_ELEM_MPD_MODES, &bs2);
+	CHECK_STR(bs2.font, "Italic");                           /* the group's own font survives the mode */
+	rei_config_free(c);
+	parse_fails("[theme.tooltip]\nfont = 12\n", "theme.tooltip.font");
+
 	/* Typos are errors that say where. */
 	parse_fails("[theme.tray_tyle]\ncolor = \"#000000\"\n", "theme.tray_tyle: unknown element");
 	parse_fails("[theme.tray_tile]\ncolour = \"#000000\"\n", "theme.tray_tile.colour: unknown property");

@@ -7,6 +7,7 @@
 
 #include "server.h"
 #include "proto/linux_dmabuf.h"
+#include "proto/syncobj.h"
 #include "util/log.h"
 #include "util/util.h"
 #include "util/wlsignal.h"
@@ -361,7 +362,9 @@ static void note_buffer_kind(struct rei_surface *s, bool dmabuf, int32_t w, int3
 		 dmabuf ? "GPU buffers (dmabuf)" : "shared memory: every frame is copied by the CPU");
 }
 
-static bool latch_buffer(struct rei_surface *s)
+/* Turns the attached wl_buffer into pixels and releases it. `points`: the commit's explicit synchronization points,
+ * whose release point goes to the buffer's lease (or is signaled at once for a buffer that is copied here). */
+static bool latch_buffer(struct rei_surface *s, struct rei_sync_points *points)
 {
 	struct rei_surface_state *p = &s->pending;
 	if (!p->buffer_set)
@@ -385,6 +388,8 @@ static bool latch_buffer(struct rei_surface *s)
 		 * the frame that stops showing it. */
 		p->dmabuf = rei_dmabuf_ref(gpu);
 		p->lease = rei_buffer_lease_new(p->buffer);
+		if (points && points->has)
+			rei_buffer_lease_set_release(p->lease, points);
 		p->content = NULL;
 		wl_list_remove(&p->buffer_destroy.link);
 		p->buffer = NULL;
@@ -430,7 +435,10 @@ static bool latch_buffer(struct rei_surface *s)
 	wl_shm_buffer_end_access(shm);
 
 	/* Everything we need is copied, so the client can reuse its buffer now. */
-	wl_buffer_send_release(p->buffer);
+	if (points && points->has && points->release_tl)
+		rei_sync_points_signal_release(s->server, points);   /* (explicit synchronization: the point, no wl_buffer.release) */
+	else
+		wl_buffer_send_release(p->buffer);
 	wl_list_remove(&p->buffer_destroy.link);
 	p->buffer = NULL;
 	p->buffer_set = false;
@@ -439,20 +447,93 @@ static bool latch_buffer(struct rei_surface *s)
 	return true;
 }
 
+/* A commit that has to wait for its acquire point (explicit synchronization), or for an earlier commit that does. */
+struct blocked_commit {
+	struct wl_list link;   /* rei_surface.blocked */
+	struct rei_surface *surface;
+	struct rei_surface_state st;
+	struct rei_syncobj_timeline *acquire_tl;
+	struct rei_sync_wait *wait;
+	bool ready;
+};
+
+static void commit_state(struct rei_surface *s, struct rei_surface_state *st)
+{
+	if (s->sub && effectively_sync(s)) {
+		state_merge(s->server, &s->cached, st);
+		s->has_cached = true;
+	} else {
+		apply_state(s, st);
+	}
+}
+
+/* Applies the commits at the head of the queue that are ready, in order. */
+static void blocked_flush(struct rei_surface *s)
+{
+	while (!wl_list_empty(&s->blocked)) {
+		struct blocked_commit *b = wl_container_of(s->blocked.next, b, link);
+		if (!b->ready)
+			return;
+		wl_list_remove(&b->link);
+		commit_state(s, &b->st);
+		state_clear(s->server, &b->st);
+		rei_syncobj_timeline_unref(b->acquire_tl);
+		free(b);
+	}
+}
+
+static void on_acquire_ready(void *data)
+{
+	struct blocked_commit *b = data;
+	b->wait = NULL;   /* (the wait has finished and freed itself) */
+	b->ready = true;
+	blocked_flush(b->surface);
+}
+
+static void blocked_free_all(struct rei_surface *s)
+{
+	struct blocked_commit *b, *tmp;
+	wl_list_for_each_safe(b, tmp, &s->blocked, link) {
+		wl_list_remove(&b->link);
+		rei_sync_wait_cancel(b->wait);
+		state_clear(s->server, &b->st);   /* (its buffer's lease is retired, so a release point is still signaled) */
+		rei_syncobj_timeline_unref(b->acquire_tl);
+		free(b);
+	}
+}
+
 static void surface_commit(struct wl_client *client, struct wl_resource *resource)
 {
 	(void)client;
 	struct rei_surface *s = wl_resource_get_user_data(resource);
 
-	if (!latch_buffer(s))
+	struct rei_sync_points points;
+	if (!rei_syncobj_commit_begin(s, &points))
+		return;   /* a protocol error was raised */
+	if (!latch_buffer(s, &points)) {
+		rei_sync_points_clear(&points);
 		return;
-
-	if (s->sub && effectively_sync(s)) {
-		state_merge(s->server, &s->cached, &s->pending);
-		s->has_cached = true;
-	} else {
-		apply_state(s, &s->pending);
 	}
+
+	if (points.has || !wl_list_empty(&s->blocked)) {
+		/* It waits for its acquire point (and everything after it for it, so commits stay in order). */
+		struct blocked_commit *b = rei_xcalloc(1, sizeof *b);
+		b->surface = s;
+		state_init(&b->st);
+		state_merge(s->server, &b->st, &s->pending);
+		if (points.has) {
+			b->acquire_tl = points.acquire_tl;
+			points.acquire_tl = NULL;
+			b->wait = rei_sync_wait_start(s->server, b->acquire_tl, points.acquire, on_acquire_ready, b);
+		}
+		b->ready = b->wait == NULL;   /* nothing to wait for (or it cannot be waited for: do not stall the window) */
+		rei_sync_points_clear(&points);
+		wl_list_insert(s->blocked.prev, &b->link);
+		blocked_flush(s);
+		return;
+	}
+	rei_sync_points_clear(&points);
+	commit_state(s, &s->pending);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -621,6 +702,7 @@ static void surface_resource_destroy(struct wl_resource *resource)
 	/* Subsurfaces (as parent or child) detach themselves via destroy_signal. */
 
 	wl_list_remove(&s->link);
+	blocked_free_all(s);
 	state_clear(s->server, &s->pending);
 	state_clear(s->server, &s->cached);
 	content_release(s->server, &s->content, &s->dmabuf, &s->lease);
@@ -656,6 +738,7 @@ static void compositor_create_surface(struct wl_client *client,
 	s->input_default = true;
 	state_init(&s->pending);
 	state_init(&s->cached);
+	wl_list_init(&s->blocked);
 	wl_list_init(&s->frames);
 	wl_list_init(&s->subs);
 	wl_signal_init(&s->destroy_signal);

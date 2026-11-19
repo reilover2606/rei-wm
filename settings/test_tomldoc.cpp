@@ -70,6 +70,7 @@ int main()
 	CHECK(!d.has("general", "nothing"));
 	CHECK(d.get("keybindings", "Mod+Return").toString() == "exec foot");
 	CHECK(d.keys("keybindings") == QStringList({ "Mod+Return", "Mod+Shift+q" }));
+	CHECK(d.sections().contains("keybindings"));
 
 	/* Replacing a value keeps the trailing comment and everything else. */
 	d.set("general", "backend", "drm");

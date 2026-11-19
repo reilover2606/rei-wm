@@ -40,6 +40,7 @@ struct rei_workspace {
 	struct wl_list floating;     /* rei_view.float_link, bottom to top */
 	struct wl_list focus;        /* rei_view.focus_link, most recently focused first */
 	struct rei_view *fullscreen;
+	bool thin;                   /* thin mode: the tiling grid is narrowed to a column in the middle ([layout] thin_shrink) */
 };
 
 struct rei_view {
@@ -130,6 +131,9 @@ void rei_wm_toggle_floating(struct rei_server *server);
  * you are on (and [general] workspace_back_and_forth is on). */
 void rei_wm_workspace_command(struct rei_server *server, int number);
 /* Resize mode: the keys i j k l move the focused tile's dividers; the toolbar shows an R. */
+/* Toggles thin mode on the workspace the focused output shows: the tiled windows are gathered in a narrower
+ * column in the middle of the screen. Floating windows are not affected. */
+void rei_wm_toggle_thin(struct rei_server *server);
 void rei_wm_set_resize_mode(struct rei_server *server, bool on);
 /* One step of resizing the focused tiled window toward `dir` (`big`: three steps). False if nothing moved. */
 bool rei_wm_resize_step(struct rei_server *server, enum rei_direction dir, bool big);

@@ -525,6 +525,28 @@ static void test_theme_render(void)
 	rei_pixbuf_unref(pb);
 }
 
+/* An element's own font changes how its text is drawn and measured: a tooltip's box grows with a bigger font, and a partial
+ * description ("Bold") changes only what it names. */
+static void test_element_font(void)
+{
+	struct rei_theme t;
+	rei_theme_defaults(&t, 0x101010, 0xe0e0e0, 0x3060c0);
+	struct rei_style *tip = &t.e[REI_ELEM_TOOLTIP];
+	CHECK(tip->font[0] == '\0');
+	int bw0, bh0, m0, bw1, bh1, m1, bw2, bh2, m2;
+	struct rei_pixbuf *a = rei_bar_tooltip_render("Some tooltip text", "Sans 10", tip, 1, &bw0, &bh0, &m0);
+	CHECK(a);
+	snprintf(tip->font, sizeof tip->font, "Sans 30");   /* a whole description */
+	struct rei_pixbuf *b = rei_bar_tooltip_render("Some tooltip text", "Sans 10", tip, 1, &bw1, &bh1, &m1);
+	CHECK(b && bw1 > bw0 * 2 && bh1 > bh0 * 2);
+	snprintf(tip->font, sizeof tip->font, "24");        /* only a size: the base family stays */
+	struct rei_pixbuf *c = rei_bar_tooltip_render("Some tooltip text", "Sans 10", tip, 1, &bw2, &bh2, &m2);
+	CHECK(c && bw2 > bw0 + 20 && bh2 > bh0 + 10);
+	rei_pixbuf_unref(a);
+	rei_pixbuf_unref(b);
+	rei_pixbuf_unref(c);
+}
+
 int main(void)
 {
 	test_geometry();
@@ -535,6 +557,7 @@ int main(void)
 	test_theme_render();
 	test_battery_render();
 	rei_bar_render_cleanup();
+	test_element_font();
 	puts("test_toolbar: ok");
 	return 0;
 }

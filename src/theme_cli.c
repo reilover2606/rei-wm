@@ -44,6 +44,7 @@ static void print_theme(const struct rei_theme *theme)
 		printf("%s.text_blink=%g\n", n, s->text_fx.blink);
 		printf("%s.text_shine=%g\n", n, s->text_fx.shine);
 		printf("%s.text_shine_color=#%06x\n", n, s->text_fx.shine_color);
+		printf("%s.font=%s\n", n, s->font);
 		if (rei_element_button_parent((enum rei_element)e) >= 0)
 			printf("%s.mode=%s\n", n, rei_button_mode_name(s->button_mode));
 		if (e == REI_ELEM_WINDOW_TEXT) {
