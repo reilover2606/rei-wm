@@ -192,7 +192,7 @@ static void test_workspaces(struct client *c, struct window *w1, struct window *
 	move_to(OUT_W / 2, OUT_H / 2);
 }
 
-static void test_fullscreen_keeps_bar(struct window *w1)
+static void test_fullscreen_covers_bar(struct window *w1)
 {
 	CHECK(w1->activated);
 	struct box bar = bar_of(0, OUT_W, OUT_H);
@@ -200,13 +200,13 @@ static void test_fullscreen_keeps_bar(struct window *w1)
 	mod(KEY_F);
 	settle_all();
 	CHECK(w1->cfg_fullscreen);
-	/* Fullscreen fills the same area: the bar stays, and the outer gap is respected. */
-	/* Fullscreen fills the area beside the bar, less the outer gap (10) on every side. */
-	int ew = vertical() ? OUT_W - T - 20 : OUT_W - 20, eh = vertical() ? OUT_H - 20 : OUT_H - T - 20;
-	CHECK(w1->cfg_w == ew && w1->cfg_h == eh);
+	/* Fullscreen is the whole output: the window covers the bar and the gaps. */
+	CHECK(w1->cfg_w == OUT_W && w1->cfg_h == OUT_H);
 	(void)tw; (void)th;
+	struct box b0 = button_of(bar, 0);
 	struct ppm img = screenshot();
-	probe(&img, button_of(bar, 0), BAR_FOCUSED, "the bar is still there");
+	expect_px(&img, b0.x + b0.w / 2, b0.y + b0.h / 2, 255, 0, 0, 0, "the window covers the bar");
+	expect_px(&img, 0, 0, 255, 0, 0, 0, "and the corner");
 	free(img.rgb);
 	mod(KEY_F);
 	settle_all();
@@ -313,7 +313,7 @@ int main(int argc, char **argv)
 	} else {
 		test_exclusive_zone_and_buttons(&c, &w1);
 		test_workspaces(&c, &w1, &w2);
-		test_fullscreen_keeps_bar(&w1);
+		test_fullscreen_covers_bar(&w1);
 		if (g_pos == TOP)
 			test_clock_ticks();
 	}

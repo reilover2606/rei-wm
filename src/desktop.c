@@ -227,7 +227,7 @@ static void arrange(struct rei_output *o)
 	}
 
 	if (ws->fullscreen)
-		apply_to_view(ws->fullscreen, inset(output_usable(o), o->server->config->gap_outer), false, true);
+		apply_to_view(ws->fullscreen, output_rect(o), false, true);   /* the whole output: over the toolbar and the gaps too */
 
 	rei_server_schedule_damage(s);
 }
