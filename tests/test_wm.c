@@ -164,12 +164,13 @@ static void test_fullscreen(struct window *w3)
 	CHECK(w3->activated);
 	mod(KEY_F);
 	settle_all();
-	CHECK(w3->cfg_w == 780 && w3->cfg_h == 580 && w3->cfg_fullscreen && !w3->cfg_tiled);
+	CHECK(w3->cfg_w == 800 && w3->cfg_h == 600 && w3->cfg_fullscreen && !w3->cfg_tiled);   /* the whole output */
+	inject("motion_abs 400 300");   /* (the pointer is drawn over the window, wherever it is) */
+	settle_all();
 	struct ppm img = screenshot();
-	expect_px(&img, 12, 12, 0, 0, 255, 0, "fullscreen fills to the outer gap, top-left");
-	CHECK(!near_px(&img, 5, 5, 0, 0, 255, 0));   /* but the outer gap is respected */
+	expect_px(&img, 0, 0, 0, 0, 255, 0, "fullscreen covers the corner, no gap");
 	expect_px(&img, 400, 100, 0, 0, 255, 0, "fullscreen");
-	expect_px(&img, 12, 588, 0, 0, 255, 0, "fullscreen fills to the outer gap, bottom-left");
+	expect_px(&img, 799, 599, 0, 0, 255, 0, "fullscreen covers the opposite corner");
 	free(img.rgb);
 
 	mod(KEY_F);

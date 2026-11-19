@@ -356,8 +356,8 @@ message ("Brightness: 60%") that updates in place. The backlight is the finest d
 - **Tiled/floating switch:** the small square after the Start button decides how *new* windows open (a grid
   of panes: tiled; two overlapping windows, lit: floating). It starts from `[layout] new_windows`, and a
   config reload resets it to that.
-- **Fullscreen** fills everything beside the toolbar, but keeps the outer gap (`gap_outer`), so the toolbar
-  stays visible and usable. Style the confirmation dialog with `[theme.dialog]`.
+- **Fullscreen** (`Mod+f`, or a program's own: a browser's F11, a video's fullscreen button) covers the whole
+  monitor, over the toolbar and the gaps; leaving it brings them back. Style the confirmation dialog with `[theme.dialog]`.
 
 ## CPU/RAM readout and glow
 
