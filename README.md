@@ -1,27 +1,10 @@
 # rei-wm
 
-A Wayland compositor, tiling/floating window manager and small desktop
-environment, written in C11. MIT licensed.
+Rei-wm is a 100% vibecoded Wayland-based window manager for linux. It supports both tiling and floating behavior, with gaps, multiple workspaces, and overall an i3-like usage flow. It has a built-in taskbar with a classic Windows-like start menu and per-workspace window tray. Virtually aspect of the UI can be edited from the theme editor inside rei-settings. Wallpapers can be set per-workspace or globally, and multiple wallpapers can be assigned, creating a slideshow.
 
-**Status: early development.** Milestones 0–11 are done (the DRM/KMS backend
-is written but still untested on real hardware: see [docs/DRM.md](docs/DRM.md)): the build, config,
-event loop and threading model, the core Wayland protocols, an OpenGL ES
-renderer, keyboard/pointer input with a configurable keybinding engine, the
-window manager (an i3-style tiling tree with configurable gaps, floating windows,
-fullscreen, per-output workspaces), the window notches (a drag handle and
-minimize/maximize/close tabs on the focused window), and a built-in toolbar with
-workspace buttons and a clock. Real applications can connect, be tiled, and be
-driven from the keyboard or mouse. On real hardware it drives displays through
-DRM/KMS with libinput, dma-buf clients, direct scanout and a hardware cursor. X11 programs run through Xwayland, tiled and floated like native windows. The config
-reloads live, and a Qt settings app edits it. The toolbar shows the PipeWire volume (click to mute, wheel to change) and the media keys
-work. Screen capture through PipeWire is still to come: see the roadmap in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Volume control currently assumes you have PipeWire. Later, we will support users bringing their own sound server.
 
-![Two unmodified Weston demo clients tiled by rei-wm under the toolbar](docs/images/milestone-7-toolbar.png)
-
-*Unmodified Weston demo clients tiled by rei-wm over a wallpaper, under the toolbar:
-workspace buttons at the start (workspace 1 is where you are; the pointer is over 2,
-which has a window of its own) and the clock at the end. Windows have no border; the
-focused one shows its drag handle and minimize/maximize/close tabs above it.*
+NOTE: if you find some design choices to be illogical, remember that I made this purely for my own amusement, and not with the intention of creating a mass-use-case end product. Feel free to fork and change whatever you like ;)
 
 ## Building
 
