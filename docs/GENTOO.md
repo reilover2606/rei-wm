@@ -10,7 +10,7 @@ in 2023, for instance).
 | what | atom | needed for |
 |---|---|---|
 | Meson, Ninja, pkg-config | `dev-build/meson` `dev-build/ninja` `virtual/pkgconfig` | building |
-| Wayland | `dev-libs/wayland` (>= 1.20) `dev-libs/wayland-protocols` (>= 1.30 for xwayland-shell) | always |
+| Wayland | `dev-libs/wayland` (>= 1.20) `dev-libs/wayland-protocols` (>= 1.34, for the explicit-sync protocol) | always |
 | libevent | `dev-libs/libevent` | always |
 | Mesa (EGL, GLES 3) | `media-libs/mesa` with `USE="egl gles2"` | always (the renderer) |
 | xkbcommon | `x11-libs/libxkbcommon` and `x11-misc/xkeyboard-config` | always (keyboard layouts) |

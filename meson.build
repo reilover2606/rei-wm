@@ -15,7 +15,7 @@ cc = meson.get_compiler('c')
 
 wayland_server = dependency('wayland-server', version: '>=1.20')
 wayland_client = dependency('wayland-client', version: '>=1.20')
-wayland_protocols = dependency('wayland-protocols', version: '>=1.24')
+wayland_protocols = dependency('wayland-protocols', version: '>=1.34')
 egl = dependency('egl')
 glesv2 = dependency('glesv2')
 xkbcommon = dependency('xkbcommon')
