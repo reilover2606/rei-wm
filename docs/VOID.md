@@ -20,7 +20,7 @@ sudo xbps-install -S meson ninja pkg-config gcc git \
 | what | package | for |
 |---|---|---|
 | Meson, Ninja, a C compiler, pkg-config | `meson ninja gcc pkg-config` | building (rei-wm is C11; the settings app is C++17) |
-| Wayland | `wayland-devel wayland-protocols` (>= 1.30: `xwayland-shell`) | always |
+| Wayland | `wayland-devel wayland-protocols` (>= 1.34: `linux-drm-syncobj`) | always |
 | libevent | `libevent-devel` | always |
 | Mesa (EGL, GLES 3, GBM headers) | `MesaLib-devel` | always (the renderer) and the DRM backend |
 | xkbcommon | `libxkbcommon-devel` | always |
