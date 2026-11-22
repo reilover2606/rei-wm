@@ -50,6 +50,7 @@ struct blur_state {
 	int32_t src_w, src_h;
 	GLuint tex[2], fbo[2];
 	int32_t w, h;   /* the small targets' size */
+	bool broken;    /* the copy of the frame failed once: no more blurring on this renderer */
 };
 
 struct rei_gles_buffer {
@@ -678,7 +679,10 @@ static bool blur_ready(struct rei_gles *g, int32_t w, int32_t h)
 	}
 	if (b->src_w != w || b->src_h != h) {
 		glBindTexture(GL_TEXTURE_2D, b->src_tex);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		/* RGB, not RGBA: glCopyTexSubImage2D needs the texture to have no component the frame lacks, and a
+		 * scanout buffer is XRGB8888, which a strict driver (NVIDIA's) exposes without alpha. The frame is
+		 * opaque, so nothing is lost. */
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
@@ -723,7 +727,7 @@ static void blur_pass(struct rei_gles *g, GLuint src, int dst, float sx, float s
 /* Blurs what is in the frame so far by `radius` pixels and darkens it. */
 static void blur_frame(struct rei_gles *g, const struct rei_gles_target *t, float radius, float dim)
 {
-	if (!blur_ready(g, t->width, t->height))
+	if (g->blur.broken || !blur_ready(g, t->width, t->height))
 		return;
 	struct blur_state *b = &g->blur;
 	glDisable(GL_SCISSOR_TEST);
@@ -731,8 +735,17 @@ static void blur_frame(struct rei_gles *g, const struct rei_gles_target *t, floa
 	/* A copy of the frame. */
 	glBindFramebuffer(GL_FRAMEBUFFER, g->cur_fbo);
 	glBindTexture(GL_TEXTURE_2D, b->src_tex);
+	while (glGetError() != GL_NO_ERROR)   /* (an earlier error is not this copy's) */
+		;
 	glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, t->width, t->height);
 	glGenerateMipmap(GL_TEXTURE_2D);   /* level 2 is the frame at a quarter size, averaged (not sampled) */
+	GLenum err = glGetError();
+	if (err != GL_NO_ERROR) {
+		/* Without the blur the stack view is just over the sharp screen: better than a dropped frame. */
+		rei_error("gles: cannot copy the frame for the blur (GL error 0x%x); the message stack's blur is off", err);
+		b->broken = true;
+		return;
+	}
 
 	glUseProgram(b->program);
 	glUniform1i(b->u_tex, 0);
