@@ -53,6 +53,9 @@ void rei_seat_pointer_motion(struct rei_seat *seat, struct rei_surface *surface,
 			     uint32_t time_ms, double sx, double sy);
 uint32_t rei_seat_pointer_button(struct rei_seat *seat, struct rei_surface *surface,
 				 uint32_t time_ms, uint32_t button, bool pressed);
+/* Closes a group of pointer events for the client (wl_pointer.frame): events such as relative motion that are sent
+ * alone are only acted on by some clients (Xwayland among them) when the frame arrives. */
+void rei_seat_pointer_frame(struct rei_seat *seat, struct rei_surface *surface);
 void rei_seat_pointer_axis(struct rei_seat *seat, struct rei_surface *surface,
 			   uint32_t time_ms, bool horizontal, double value, int32_t v120);
 

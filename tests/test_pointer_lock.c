@@ -124,6 +124,7 @@ int main(int argc, char **argv)
 	flush_all(&c);
 	CHECK(g_rel_n == 2 && g_rel_dx == 17 && g_rel_dy == 5);   /* relative motion arrives... */
 	CHECK(ev_count(&c, EV_PTR_MOTION) == 0);                    /* ...but the cursor does not move */
+	CHECK(ev_count(&c, EV_PTR_FRAME) >= 2);                     /* each one is closed by a frame */
 	zwp_locked_pointer_v1_destroy(lock);
 	flush_all(&c);
 	ev_clear(&c);

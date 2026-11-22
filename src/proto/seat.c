@@ -315,6 +315,12 @@ uint32_t rei_seat_pointer_button(struct rei_seat *seat, struct rei_surface *surf
 	return serial;
 }
 
+void rei_seat_pointer_frame(struct rei_seat *seat, struct rei_surface *surface)
+{
+	FOR_CLIENT_POINTERS(seat, surface, r)
+		pointer_frame(r);
+}
+
 void rei_seat_pointer_axis(struct rei_seat *seat, struct rei_surface *surface,
 			   uint32_t time_ms, bool horizontal, double value, int32_t v120)
 {
