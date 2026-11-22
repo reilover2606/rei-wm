@@ -63,6 +63,7 @@ struct rei_input {
 	struct rei_surface *grab_surface;
 	struct wl_listener grab_destroy;
 	double grab_origin_x, grab_origin_y;  /* Global position of that surface's top-left. */
+	double focus_ox, focus_oy;            /* Global position of the pointer-focus surface's top-left (as last picked). */
 
 	uint32_t last_button_serial;
 
@@ -107,9 +108,15 @@ void rei_input_finish(struct rei_server *server);
 void rei_input_key(struct rei_server *server, uint32_t time_ms, uint32_t evdev_code, bool pressed);
 void rei_input_pointer_motion(struct rei_server *server, uint32_t time_ms, double dx, double dy);
 /* Position in global layout coordinates. */
+/* The same with the motion before pointer acceleration too (what relative-pointer clients get as "unaccelerated"). */
+void rei_input_pointer_motion_raw(struct rei_server *server, uint32_t time_ms, double dx, double dy, double ux, double uy);
+/* Puts the cursor at a global position and has the pointer follow (a client's warp, from a pointer lock's hint). */
+void rei_input_warp(struct rei_server *server, double x, double y);
 void rei_input_pointer_motion_abs(struct rei_server *server, uint32_t time_ms, double x, double y);
 void rei_input_pointer_button(struct rei_server *server, uint32_t time_ms, uint32_t button, bool pressed);
 void rei_input_pointer_axis(struct rei_server *server, uint32_t time_ms, bool horizontal, double value);
+/* A wheel: `v120` is the turn in 120ths of a step (120 = one notch), 0 for smooth scrolling (touchpads). */
+void rei_input_pointer_axis_wheel(struct rei_server *server, uint32_t time_ms, bool horizontal, double value, int32_t v120);
 
 /* Releases every held key and button, as if the user let go. A backend calls this
  * when it loses the input focus (e.g. the nested window is deactivated), so no

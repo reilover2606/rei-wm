@@ -103,6 +103,16 @@ idle_inhibit_server_h = scan_server_header.process(idle_inhibit_xml)
 idle_inhibit_client_h = scan_client_header.process(idle_inhibit_xml)
 idle_inhibit_code = scan_code.process(idle_inhibit_xml)
 
+pointer_constraints_xml = files(protocols_dir / 'unstable' / 'pointer-constraints' / 'pointer-constraints-unstable-v1.xml')
+pointer_constraints_server_h = scan_server_header.process(pointer_constraints_xml)
+pointer_constraints_client_h = scan_client_header.process(pointer_constraints_xml)
+pointer_constraints_code = scan_code.process(pointer_constraints_xml)
+
+relative_pointer_xml = files(protocols_dir / 'unstable' / 'relative-pointer' / 'relative-pointer-unstable-v1.xml')
+relative_pointer_server_h = scan_server_header.process(relative_pointer_xml)
+relative_pointer_client_h = scan_client_header.process(relative_pointer_xml)
+relative_pointer_code = scan_code.process(relative_pointer_xml)
+
 xdg_decoration_xml = files(protocols_dir / 'unstable' / 'xdg-decoration' / 'xdg-decoration-unstable-v1.xml')
 xdg_decoration_server_h = scan_server_header.process(xdg_decoration_xml)
 xdg_decoration_client_h = scan_client_header.process(xdg_decoration_xml)

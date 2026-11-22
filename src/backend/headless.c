@@ -27,7 +27,7 @@
  * written to it are injected as input events:
  *
  *   key <evdev-code> <0|1>        motion_abs <x> <y>     motion <dx> <dy>
- *   button <code> <0|1>           axis <v|h> <value>     release_all
+ *   button <code> <0|1>           axis <v|h> <value>     wheel <v|h> <value> <v120>     release_all
  *   sync <token>                  (logs "input sync <token>" once reached)
  */
 
@@ -148,6 +148,7 @@ static void handle_line(struct headless_backend *hb, char *line)
 	uint32_t t = now_ms();
 	unsigned code, down;
 	double a, b;
+	int wheel120;
 	char word[16], tok[64];
 
 	if (sscanf(line, "key %u %u", &code, &down) == 2)
@@ -158,6 +159,8 @@ static void handle_line(struct headless_backend *hb, char *line)
 		rei_input_pointer_motion(s, t, a, b);
 	else if (sscanf(line, "button %u %u", &code, &down) == 2)
 		rei_input_pointer_button(s, t, code, down != 0);
+	else if (sscanf(line, "wheel %15s %lf %d", word, &a, &wheel120) == 3)   /* wheel <v|h> <px> <v120> */
+		rei_input_pointer_axis_wheel(s, t, word[0] == 'h', a, wheel120);
 	else if (sscanf(line, "axis %15s %lf", word, &a) == 2)
 		rei_input_pointer_axis(s, t, word[0] == 'h', a);
 	else if (!strncmp(line, "release_all", 11))

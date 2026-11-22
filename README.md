@@ -356,6 +356,11 @@ message ("Brightness: 60%") that updates in place. The backlight is the finest d
 - **Tiled/floating switch:** the small square after the Start button decides how *new* windows open (a grid
   of panes: tiled; two overlapping windows, lit: floating). It starts from `[layout] new_windows`, and a
   config reload resets it to that.
+- **Games and the mouse.** Programs that want the mouse for themselves (looking around in a game, a 3D editor, Minecraft
+  and other Java/SDL/GLFW programs, through Xwayland or natively) can lock or confine the pointer and receive raw relative
+  motion (`zwp_pointer_constraints_v1`, `zwp_relative_pointer_manager_v1`). While the pointer is locked the cursor stays
+  where it is and only the program sees the motion; it is released when the pointer leaves the program's window (Mod+n, the
+  toolbar and so on). The mouse wheel reports whole steps (`axis_value120`), so one notch is one step in the program.
 - **Fullscreen** (`Mod+f`, or a program's own: a browser's F11, a video's fullscreen button) covers the whole
   monitor, over the toolbar and the gaps; leaving it brings them back. Style the confirmation dialog with `[theme.dialog]`.
 

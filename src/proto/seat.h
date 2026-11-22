@@ -54,7 +54,7 @@ void rei_seat_pointer_motion(struct rei_seat *seat, struct rei_surface *surface,
 uint32_t rei_seat_pointer_button(struct rei_seat *seat, struct rei_surface *surface,
 				 uint32_t time_ms, uint32_t button, bool pressed);
 void rei_seat_pointer_axis(struct rei_seat *seat, struct rei_surface *surface,
-			   uint32_t time_ms, bool horizontal, double value);
+			   uint32_t time_ms, bool horizontal, double value, int32_t v120);
 
 /* Keyboard events likewise. `keys` are the evdev codes held down on entry. */
 void rei_seat_keyboard_enter(struct rei_seat *seat, struct rei_surface *surface,

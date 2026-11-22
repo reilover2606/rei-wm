@@ -284,6 +284,13 @@ thin_test = executable('test_thin', 'test_thin.c', xdg_shell_client_h, xdg_shell
 )
 test('thin', thin_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)
 
+pointer_lock_test = executable('test_pointer_lock', 'test_pointer_lock.c', xdg_shell_client_h, xdg_shell_code, pointer_constraints_client_h, pointer_constraints_code,
+  relative_pointer_client_h, relative_pointer_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('pointer-lock', pointer_lock_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)
+
 dmabuf_fb_test = executable('test_dmabuf_feedback', 'test_dmabuf_feedback.c', xdg_shell_client_h, xdg_shell_code,
   linux_dmabuf_client_h, linux_dmabuf_code,
   include_directories: inc,
