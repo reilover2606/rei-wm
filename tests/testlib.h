@@ -277,7 +277,7 @@ struct global_info {
 
 /* One recorded wl_pointer / wl_keyboard event. */
 enum ev_type {
-	EV_PTR_ENTER = 1, EV_PTR_LEAVE, EV_PTR_MOTION, EV_PTR_BUTTON, EV_PTR_AXIS,
+	EV_PTR_ENTER = 1, EV_PTR_LEAVE, EV_PTR_MOTION, EV_PTR_BUTTON, EV_PTR_AXIS, EV_PTR_AXIS120,
 	EV_KB_KEYMAP, EV_KB_REPEAT, EV_KB_ENTER, EV_KB_LEAVE, EV_KB_KEY, EV_KB_MODS,
 };
 struct ev {
@@ -644,10 +644,22 @@ static void p_frame(void *d, struct wl_pointer *p) { (void)d; (void)p; }
 static void p_axis_source(void *d, struct wl_pointer *p, uint32_t s) { (void)d; (void)p; (void)s; }
 static void p_axis_stop(void *d, struct wl_pointer *p, uint32_t t, uint32_t a) { (void)d; (void)p; (void)t; (void)a; }
 static void p_axis_discrete(void *d, struct wl_pointer *p, uint32_t a, int32_t v) { (void)d; (void)p; (void)a; (void)v; }
+#ifdef WL_POINTER_AXIS_VALUE120_SINCE_VERSION
+static void p_axis_value120(void *d, struct wl_pointer *p, uint32_t a, int32_t v)
+{
+	(void)p;
+	struct ev *e = ev_push(d, EV_PTR_AXIS120);
+	e->a = a; e->b = (uint32_t)v;
+}
+static void p_axis_relative_direction(void *d, struct wl_pointer *p, uint32_t a, uint32_t dir) { (void)d; (void)p; (void)a; (void)dir; }
+#endif
 static const struct wl_pointer_listener test_pointer_listener = {
 	.enter = p_enter, .leave = p_leave, .motion = p_motion, .button = p_button,
 	.axis = p_axis, .frame = p_frame, .axis_source = p_axis_source,
 	.axis_stop = p_axis_stop, .axis_discrete = p_axis_discrete,
+#ifdef WL_POINTER_AXIS_VALUE120_SINCE_VERSION
+	.axis_value120 = p_axis_value120, .axis_relative_direction = p_axis_relative_direction,
+#endif
 };
 
 static void k_keymap(void *d, struct wl_keyboard *k, uint32_t format, int32_t fd, uint32_t size)

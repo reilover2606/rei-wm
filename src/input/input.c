@@ -5,6 +5,7 @@
 #include "input/input.h"
 #include "pointer_cursor.h"
 
+#include <time.h>
 #include <event2/event.h>
 #include <math.h>
 #include <stdlib.h>
@@ -18,6 +19,7 @@
 #include "proto/data_device.h"
 #include "proto/primary_selection.h"
 #include "xwayland.h"
+#include "proto/pointer_constraints.h"
 #include "proto/seat.h"
 #include "proto/surface.h"
 #include "proto/xdg_shell.h"
@@ -427,12 +429,17 @@ static void set_pointer_focus(struct rei_input *in, struct rei_surface *surface,
 		wl_list_init(&in->pointer_focus_destroy.link);
 	}
 	in->pointer_focus = surface;
+	if (surface) {
+		in->focus_ox = in->server->cursor_x - sx;
+		in->focus_oy = in->server->cursor_y - sy;
+	}
 	rei_pointer_cursor_focus_changed(in->server);   /* the last client's cursor request ends here */
 	if (surface) {
 		in->pointer_focus_destroy.notify = on_pointer_focus_destroyed;
 		wl_signal_add(&surface->destroy_signal, &in->pointer_focus_destroy);
 		rei_seat_pointer_enter(in->server->seat, surface, sx, sy);
 	}
+	rei_pointer_constraints_focus(in->server, surface, in->focus_ox, in->focus_oy);   /* a lock or confinement follows the focus */
 }
 
 void rei_input_clamp_cursor(struct rei_server *s)
@@ -550,6 +557,10 @@ static void update_pointer(struct rei_input *in, uint32_t time_ms, bool send_mot
 		return;
 	}
 	rei_toolbar_set_hover(s, NULL, 0);
+	if (hit && hit == in->pointer_focus) {
+		in->focus_ox = s->cursor_x - sx;
+		in->focus_oy = s->cursor_y - sy;
+	}
 	if (hit != in->pointer_focus)
 		set_pointer_focus(in, hit, sx, sy);
 	else if (hit && send_motion)
@@ -578,12 +589,40 @@ static void pointer_moved(struct rei_input *in, uint32_t time_ms)
 
 void rei_input_pointer_motion(struct rei_server *s, uint32_t time_ms, double dx, double dy)
 {
-	if (!s->input || wl_list_empty(&s->outputs))
+	rei_input_pointer_motion_raw(s, time_ms, dx, dy, dx, dy);
+}
+
+void rei_input_pointer_motion_raw(struct rei_server *s, uint32_t time_ms, double dx, double dy, double ux, double uy)
+{
+	struct rei_input *in = s->input;
+	if (!in || wl_list_empty(&s->outputs))
 		return;
 	rei_idle_activity(s, false);
+	/* A program that wants relative motion (a game, Xwayland) gets it whatever happens to the cursor. */
+	struct rei_surface *target = in->grab_surface ? in->grab_surface : in->pointer_focus;
+	if (target && (dx != 0 || dy != 0))
+		rei_relative_pointer_motion(s, target, (uint64_t)time_ms * 1000, dx, dy, ux, uy);
+	/* Locked: the cursor stays where it is (unless the compositor is moving or resizing a window). */
+	if (rei_pointer_locked(s) && !in->move_view && !in->resize_view) {
+		rei_server_schedule_flush(s);
+		return;
+	}
 	s->cursor_x += dx;
 	s->cursor_y += dy;
-	pointer_moved(s->input, time_ms);
+	if (in->pointer_focus && !in->move_view && !in->resize_view)
+		rei_pointer_confine(s, in->focus_ox, in->focus_oy, &s->cursor_x, &s->cursor_y);
+	pointer_moved(in, time_ms);
+}
+
+void rei_input_warp(struct rei_server *s, double x, double y)
+{
+	if (!s->input || wl_list_empty(&s->outputs))
+		return;
+	s->cursor_x = x;
+	s->cursor_y = y;
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	pointer_moved(s->input, (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000));
 }
 
 void rei_input_pointer_motion_abs(struct rei_server *s, uint32_t time_ms, double x, double y)
@@ -871,6 +910,11 @@ void rei_input_pointer_button(struct rei_server *s, uint32_t time_ms, uint32_t b
 
 void rei_input_pointer_axis(struct rei_server *s, uint32_t time_ms, bool horizontal, double value)
 {
+	rei_input_pointer_axis_wheel(s, time_ms, horizontal, value, 0);
+}
+
+void rei_input_pointer_axis_wheel(struct rei_server *s, uint32_t time_ms, bool horizontal, double value, int32_t v120)
+{
 	struct rei_input *in = s->input;
 	if (in && rei_idle_activity(s, true))
 		return;
@@ -905,7 +949,7 @@ void rei_input_pointer_axis(struct rei_server *s, uint32_t time_ms, bool horizon
 	struct rei_surface *to = in->grab_surface ? in->grab_surface : in->pointer_focus;
 	if (!to)
 		return;
-	rei_seat_pointer_axis(s->seat, to, time_ms, horizontal, value);
+	rei_seat_pointer_axis(s->seat, to, time_ms, horizontal, value, v120);
 	rei_server_schedule_flush(s);
 }
 

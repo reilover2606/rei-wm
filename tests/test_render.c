@@ -38,7 +38,11 @@ static void test_globals_and_output(struct client *c)
 	CHECK(global_version(c, "wl_subcompositor") == 1);
 	CHECK(global_version(c, "wl_shm") >= 1);
 	CHECK(global_version(c, "xdg_wm_base") == 5);
+#ifdef WL_POINTER_AXIS_VALUE120_SINCE_VERSION
+	CHECK(global_version(c, "wl_seat") == 8);   /* wheel steps as axis_value120 */
+#else
 	CHECK(global_version(c, "wl_seat") == 7);
+#endif
 	CHECK(global_version(c, "wl_data_device_manager") == 3);
 	CHECK(global_version(c, "wl_output") == 4);
 	CHECK(c->compositor && c->subcompositor && c->shm && c->wm && c->seat && c->ddm && c->output);

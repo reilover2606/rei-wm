@@ -26,6 +26,7 @@ core_sources = files(
   'volume.c',
   'proto/viewporter.c',
   'proto/idle_inhibit.c',
+  'proto/pointer_constraints.c',
   'proto/xdg_decoration.c',
   'proto/syncobj.c',
   'proto/selection.c',
@@ -100,7 +101,8 @@ stb = static_library('stb',
 generated = [xdg_shell_client_h, xdg_shell_server_h, xdg_shell_code,
   linux_dmabuf_server_h, linux_dmabuf_code, xwayland_shell_server_h, xwayland_shell_code,
   viewporter_server_h, viewporter_code, idle_inhibit_server_h, idle_inhibit_code, xdg_decoration_server_h, xdg_decoration_code, primary_selection_server_h, primary_selection_code, linux_drm_syncobj_server_h, linux_drm_syncobj_code, fractional_scale_server_h, fractional_scale_code,
-  cursor_shape_server_h, cursor_shape_code, tablet_server_h, tablet_code]
+  cursor_shape_server_h, cursor_shape_code, tablet_server_h, tablet_code,
+  pointer_constraints_server_h, pointer_constraints_code, relative_pointer_server_h, relative_pointer_code]
 
 drm_deps = have_drm ? [libdrm, gbm, libseat, libinput, libudev] : []
 xcb_deps = have_xwayland ? [xcb, xcb_xfixes] : []
@@ -119,7 +121,7 @@ rei_core_dep = declare_dependency(
   include_directories: inc,
   dependencies: core_deps,
   sources: [xdg_shell_client_h, xdg_shell_server_h, linux_dmabuf_server_h, xwayland_shell_server_h,
-    viewporter_server_h, idle_inhibit_server_h, xdg_decoration_server_h, primary_selection_server_h, linux_drm_syncobj_server_h, fractional_scale_server_h, cursor_shape_server_h, tablet_server_h],
+    viewporter_server_h, idle_inhibit_server_h, xdg_decoration_server_h, primary_selection_server_h, linux_drm_syncobj_server_h, fractional_scale_server_h, cursor_shape_server_h, tablet_server_h, pointer_constraints_server_h, relative_pointer_server_h],
 )
 
 rei_wm = executable('rei-wm', 'main.c',

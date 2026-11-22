@@ -173,8 +173,10 @@ static void handle_event(struct rei_libinput *li, struct libinput_event *ev)
 	}
 	case LIBINPUT_EVENT_POINTER_MOTION: {
 		struct libinput_event_pointer *p = libinput_event_get_pointer_event(ev);
-		rei_input_pointer_motion(s, event_ms(p), libinput_event_pointer_get_dx(p),
-					 libinput_event_pointer_get_dy(p));
+		rei_input_pointer_motion_raw(s, event_ms(p), libinput_event_pointer_get_dx(p),
+					     libinput_event_pointer_get_dy(p),
+					     libinput_event_pointer_get_dx_unaccelerated(p),
+					     libinput_event_pointer_get_dy_unaccelerated(p));
 		break;
 	}
 	case LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE: {
@@ -202,11 +204,10 @@ static void handle_event(struct rei_libinput *li, struct libinput_event *ev)
 							    : LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL;
 			if (!libinput_event_pointer_has_axis(p, axis))
 				continue;
-			double v = wheel ? libinput_event_pointer_get_scroll_value_v120(p, axis) / 120.0 *
-						   WHEEL_STEP_PX
-					 : libinput_event_pointer_get_scroll_value(p, axis);
+			double v120 = wheel ? libinput_event_pointer_get_scroll_value_v120(p, axis) : 0.0;
+			double v = wheel ? v120 / 120.0 * WHEEL_STEP_PX : libinput_event_pointer_get_scroll_value(p, axis);
 			if (v != 0.0)
-				rei_input_pointer_axis(s, event_ms(p), h != 0, v);
+				rei_input_pointer_axis_wheel(s, event_ms(p), h != 0, v, (int32_t)lround(v120));
 		}
 		break;
 	}

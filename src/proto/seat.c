@@ -149,6 +149,13 @@ static void seat_get_touch(struct wl_client *client, struct wl_resource *seat_re
 	wl_resource_set_implementation(r, &touch_impl, wl_resource_get_user_data(seat_res), NULL);
 }
 
+/* Version 8 (wheel steps as axis_value120) needs libwayland 1.21; older ones stop at 7 (axis_discrete). */
+#ifdef WL_POINTER_AXIS_VALUE120_SINCE_VERSION
+#define SEAT_VERSION 8
+#else
+#define SEAT_VERSION 7
+#endif
+
 static const struct wl_seat_interface seat_impl = {
 	.get_pointer = seat_get_pointer,
 	.get_keyboard = seat_get_keyboard,
@@ -203,7 +210,7 @@ bool rei_seat_init(struct rei_server *server)
 	wl_list_init(&seat->primary_devices);
 	wl_list_init(&seat->pointers);
 	wl_list_init(&seat->keyboards);
-	seat->global = wl_global_create(server->display, &wl_seat_interface, 7, seat, seat_bind);
+	seat->global = wl_global_create(server->display, &wl_seat_interface, SEAT_VERSION, seat, seat_bind);
 	if (!seat->global) {
 		free(seat);
 		return false;
@@ -309,7 +316,7 @@ uint32_t rei_seat_pointer_button(struct rei_seat *seat, struct rei_surface *surf
 }
 
 void rei_seat_pointer_axis(struct rei_seat *seat, struct rei_surface *surface,
-			   uint32_t time_ms, bool horizontal, double value)
+			   uint32_t time_ms, bool horizontal, double value, int32_t v120)
 {
 	FOR_CLIENT_POINTERS(seat, surface, r) {
 		if (wl_resource_get_version(r) >= WL_POINTER_AXIS_SOURCE_SINCE_VERSION)
@@ -320,6 +327,16 @@ void rei_seat_pointer_axis(struct rei_seat *seat, struct rei_surface *surface,
 			if (wl_resource_get_version(r) >= WL_POINTER_AXIS_STOP_SINCE_VERSION)
 				wl_pointer_send_axis_stop(r, time_ms, axis);
 		} else {
+			/* A wheel says how many steps it turned, so a program (and Xwayland, which turns it into button 4
+			 * and 5 clicks) counts notches instead of guessing them from the distance. */
+#ifdef WL_POINTER_AXIS_VALUE120_SINCE_VERSION
+			if (v120 != 0 && wl_resource_get_version(r) >= WL_POINTER_AXIS_VALUE120_SINCE_VERSION)
+				wl_pointer_send_axis_value120(r, axis, v120);
+			else
+#endif
+			if (v120 != 0 && wl_resource_get_version(r) >= WL_POINTER_AXIS_DISCRETE_SINCE_VERSION &&
+			    wl_resource_get_version(r) < 8)
+				wl_pointer_send_axis_discrete(r, axis, v120 / 120);
 			wl_pointer_send_axis(r, time_ms, axis, wl_fixed_from_double(value));
 		}
 		pointer_frame(r);

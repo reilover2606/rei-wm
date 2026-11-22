@@ -32,6 +32,7 @@
 #include "proto/xdg_decoration.h"
 #include "proto/syncobj.h"
 #include "proto/idle_inhibit.h"
+#include "proto/pointer_constraints.h"
 #include "idle.h"
 #include "clipboard.h"
 #include "sessionbus.h"
@@ -596,7 +597,7 @@ struct rei_server *rei_server_create(const struct rei_config *config,
 
 	if (wl_display_init_shm(s->display) != 0 || !rei_surface_init(s) ||
 	    !rei_xdg_shell_init(s) || !rei_seat_init(s) || !rei_viewporter_init(s) ||
-	    !rei_fractional_scale_init(s) || !rei_cursor_shape_init(s) || !rei_idle_inhibit_init(s) || !rei_xdg_decoration_init(s)) {
+	    !rei_fractional_scale_init(s) || !rei_cursor_shape_init(s) || !rei_idle_inhibit_init(s) || !rei_pointer_constraints_init(s) || !rei_xdg_decoration_init(s)) {
 		rei_error("cannot register Wayland globals");
 		goto fail;
 	}

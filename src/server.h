@@ -18,6 +18,7 @@ struct wl_display;
 struct wl_event_loop;
 struct rei_backend;
 struct rei_syncobj;
+struct rei_pointer_constraints;
 struct rei_seat;
 struct rei_input;
 struct rei_image;
@@ -109,6 +110,7 @@ struct rei_server {
 	struct rei_mpd *mpd;
 	struct rei_wifi *wifi;
 	struct rei_idle *idle;
+	struct rei_pointer_constraints *pconstraints;   /* pointer locks and confinement, relative motion (proto/pointer_constraints.c) */
 	struct rei_syncobj *syncobj;   /* explicit synchronization, when offered (proto/syncobj.c) */
 	bool resize_mode;        /* the keys i j k l resize the focused tile (see desktop.c) */
 	int prev_workspace;      /* the workspace that was focused before the current one (0: none) */
