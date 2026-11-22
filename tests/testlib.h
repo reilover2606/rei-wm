@@ -277,7 +277,7 @@ struct global_info {
 
 /* One recorded wl_pointer / wl_keyboard event. */
 enum ev_type {
-	EV_PTR_ENTER = 1, EV_PTR_LEAVE, EV_PTR_MOTION, EV_PTR_BUTTON, EV_PTR_AXIS, EV_PTR_AXIS120,
+	EV_PTR_ENTER = 1, EV_PTR_LEAVE, EV_PTR_MOTION, EV_PTR_BUTTON, EV_PTR_AXIS, EV_PTR_AXIS120, EV_PTR_FRAME,
 	EV_KB_KEYMAP, EV_KB_REPEAT, EV_KB_ENTER, EV_KB_LEAVE, EV_KB_KEY, EV_KB_MODS,
 };
 struct ev {
@@ -640,7 +640,7 @@ static void p_axis(void *d, struct wl_pointer *p, uint32_t time, uint32_t axis, 
 	struct ev *e = ev_push(d, EV_PTR_AXIS);
 	e->a = axis; e->d = time; e->x = wl_fixed_to_double(v);
 }
-static void p_frame(void *d, struct wl_pointer *p) { (void)d; (void)p; }
+static void p_frame(void *d, struct wl_pointer *p) { (void)p; ev_push(d, EV_PTR_FRAME); }
 static void p_axis_source(void *d, struct wl_pointer *p, uint32_t s) { (void)d; (void)p; (void)s; }
 static void p_axis_stop(void *d, struct wl_pointer *p, uint32_t t, uint32_t a) { (void)d; (void)p; (void)t; (void)a; }
 static void p_axis_discrete(void *d, struct wl_pointer *p, uint32_t a, int32_t v) { (void)d; (void)p; (void)a; (void)v; }

@@ -604,6 +604,8 @@ void rei_input_pointer_motion_raw(struct rei_server *s, uint32_t time_ms, double
 		rei_relative_pointer_motion(s, target, (uint64_t)time_ms * 1000, dx, dy, ux, uy);
 	/* Locked: the cursor stays where it is (unless the compositor is moving or resizing a window). */
 	if (rei_pointer_locked(s) && !in->move_view && !in->resize_view) {
+		if (target)
+			rei_seat_pointer_frame(s->seat, target);   /* (the relative motion is acted on at the frame) */
 		rei_server_schedule_flush(s);
 		return;
 	}
