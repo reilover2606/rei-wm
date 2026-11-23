@@ -29,6 +29,8 @@ void rei_pointer_cursor_reconfigure(struct rei_server *server);
 const struct rei_cursor_image *rei_pointer_cursor_image(struct rei_server *server);
 
 /* Re-decides what to show (cheap) and redraws if it changed. */
+/* The picture of the plain arrow in the current theme (valid until the theme changes), or NULL. */
+const struct rei_cursor_image *rei_pointer_cursor_default_image(struct rei_server *server);
 void rei_pointer_cursor_refresh(struct rei_server *server);
 
 /* Client requests. They only count while that client has the pointer. */

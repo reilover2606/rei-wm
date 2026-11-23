@@ -181,7 +181,10 @@ static void set_keyboard_focus(struct rei_input *in, struct rei_surface *surface
 		wl_list_init(&in->keyboard_focus_destroy.link);
 	}
 	in->keyboard_focus = surface;
-	rei_debug("keyboard focus: %s", surface ? "a surface" : "none");
+	{
+		struct rei_view *kv = surface ? rei_wm_view_for_surface(in->server, surface) : NULL;
+		rei_debug("keyboard focus: %s%s%s", kv ? "\"" : surface ? "a surface" : "none", kv ? rei_view_title(kv) : "", kv ? "\"" : "");
+	}
 	rei_pointer_constraints_update(in->server, in->focus_ox, in->focus_oy);
 	if (!surface)
 		return;
@@ -432,7 +435,10 @@ static void set_pointer_focus(struct rei_input *in, struct rei_surface *surface,
 	}
 	double old_ox = in->focus_ox, old_oy = in->focus_oy;
 	in->pointer_focus = surface;
-	rei_debug("pointer focus: %s", surface ? "a surface" : "none");
+	{
+		struct rei_view *pv = surface ? rei_wm_view_for_surface(in->server, surface) : NULL;
+		rei_debug("pointer focus: %s%s%s", pv ? "\"" : surface ? "a surface" : "none", pv ? rei_view_title(pv) : "", pv ? "\"" : "");
+	}
 	if (surface) {
 		in->focus_ox = in->server->cursor_x - sx;
 		in->focus_oy = in->server->cursor_y - sy;
