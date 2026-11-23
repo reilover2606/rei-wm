@@ -25,7 +25,7 @@ sudo apt install build-essential meson ninja-build pkg-config git \
     libwayland-dev wayland-protocols libevent-dev libegl-dev libgles-dev libgbm-dev libxkbcommon-dev \
     libcairo2-dev libpango1.0-dev libfontconfig-dev \
     libdrm-dev libinput-dev libseat-dev libudev-dev \
-    libxcb1-dev libxcb-xfixes0-dev libxcb-cursor-dev libpipewire-0.3-dev qt6-base-dev
+    libxcb1-dev libxcb-xfixes0-dev libxcb-render0-dev libxcb-cursor-dev libpipewire-0.3-dev qt6-base-dev
 ```
 
 | what | packages | for |
@@ -36,7 +36,7 @@ sudo apt install build-essential meson ninja-build pkg-config git \
 | Mesa headers (EGL, GLES 3, GBM) | `libegl-dev libgles-dev libgbm-dev` | always (the renderer) and the DRM backend |
 | xkbcommon, Cairo, Pango, fontconfig | `libxkbcommon-dev libcairo2-dev libpango1.0-dev libfontconfig-dev` | keys; the toolbar's text and pictures |
 | **DRM backend** (a real screen) | `libdrm-dev libinput-dev libseat-dev libudev-dev` | `-Ddrm=enabled` |
-| **Xwayland support** | `libxcb1-dev libxcb-xfixes0-dev`, and optionally `libxcb-cursor-dev` (X windows then show your cursor theme; without it, a plain arrow) | `-Dxwayland=enabled` |
+| **Xwayland support** | `libxcb1-dev libxcb-xfixes0-dev`, and optionally `libxcb-render0-dev` (X windows then show exactly rei-wm's own cursor; without it a plain arrow) and `libxcb-cursor-dev` | `-Dxwayland=enabled` |
 | **PipeWire volume** | `libpipewire-0.3-dev` | `-Daudio=enabled` |
 | **Settings app** | `qt6-base-dev` (includes the Test module the tests use) | `-Dsettings=enabled` |
 

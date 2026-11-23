@@ -983,6 +983,52 @@ static bool composite_redirect_root(struct rei_xwayland *x)
 #ifdef REI_HAVE_XCB_CURSOR
 #include <xcb/xcb_cursor.h>
 #endif
+#ifdef REI_HAVE_XCB_RENDER
+#include <xcb/render.h>
+#endif
+#include "pointer_cursor.h"
+
+#ifdef REI_HAVE_XCB_RENDER
+/* The cursor rei-wm itself draws for the plain arrow, as an X cursor: the same picture, size and hot spot, whatever the
+ * theme calls it. XCB_NONE if X cannot take it. */
+static xcb_cursor_t cursor_from_theme(struct rei_xwayland *x)
+{
+	const struct rei_cursor_image *img = rei_pointer_cursor_default_image(x->server);
+	if (!img || img->pixbuf->width > 128 || img->pixbuf->height > 128 || img->width <= 0)
+		return XCB_NONE;
+	const struct rei_pixbuf *pb = img->pixbuf;
+	xcb_render_query_pict_formats_reply_t *fr =
+		xcb_render_query_pict_formats_reply(x->conn, xcb_render_query_pict_formats(x->conn), NULL);
+	if (!fr)
+		return XCB_NONE;
+	xcb_render_pictformat_t fmt = 0;
+	xcb_render_pictforminfo_t *f = xcb_render_query_pict_formats_formats(fr);
+	for (int i = 0; i < xcb_render_query_pict_formats_formats_length(fr); i++)
+		if (f[i].depth == 32 && f[i].type == XCB_RENDER_PICT_TYPE_DIRECT && f[i].direct.alpha_mask == 0xff &&
+		    f[i].direct.alpha_shift == 24 && f[i].direct.red_mask == 0xff && f[i].direct.red_shift == 16) {
+			fmt = f[i].id;
+			break;
+		}
+	free(fr);
+	if (!fmt)
+		return XCB_NONE;
+	xcb_pixmap_t pix = xcb_generate_id(x->conn);
+	xcb_gcontext_t gc = xcb_generate_id(x->conn);
+	xcb_render_picture_t pic = xcb_generate_id(x->conn);
+	xcb_cursor_t cur = xcb_generate_id(x->conn);
+	xcb_create_pixmap(x->conn, 32, pix, x->screen->root, (uint16_t)pb->width, (uint16_t)pb->height);
+	xcb_create_gc(x->conn, gc, pix, 0, NULL);
+	xcb_put_image(x->conn, XCB_IMAGE_FORMAT_Z_PIXMAP, pix, gc, (uint16_t)pb->width, (uint16_t)pb->height, 0, 0, 0, 32,
+		      (uint32_t)pb->width * (uint32_t)pb->height * 4, pb->data);   /* premultiplied BGRA: what ARGB32 is here */
+	xcb_render_create_picture(x->conn, pic, pix, fmt, 0, NULL);
+	int hx = (int)((long)img->hotspot_x * pb->width / img->width), hy = (int)((long)img->hotspot_y * pb->height / img->height);
+	xcb_render_create_cursor(x->conn, cur, pic, (uint16_t)hx, (uint16_t)hy);
+	xcb_render_free_picture(x->conn, pic);
+	xcb_free_pixmap(x->conn, pix);
+	xcb_free_gc(x->conn, gc);
+	return cur;
+}
+#endif
 
 /* Sets the root window's cursor, which windows without their own inherit. A window manager is meant to: without
  * it X shows its built-in "X" cursor over every such window (and over a game that sets none). The theme is read from
@@ -990,9 +1036,12 @@ static bool composite_redirect_root(struct rei_xwayland *x)
 static void set_root_cursor(struct rei_xwayland *x)
 {
 	xcb_cursor_t cur = XCB_NONE;
+#ifdef REI_HAVE_XCB_RENDER
+	cur = cursor_from_theme(x);
+#endif
 #ifdef REI_HAVE_XCB_CURSOR
 	xcb_cursor_context_t *ctx = NULL;
-	if (xcb_cursor_context_new(x->conn, x->screen, &ctx) >= 0) {
+	if (cur == XCB_NONE && xcb_cursor_context_new(x->conn, x->screen, &ctx) >= 0) {
 		cur = xcb_cursor_load_cursor(ctx, "left_ptr");
 		xcb_cursor_context_free(ctx);
 	}

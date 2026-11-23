@@ -190,6 +190,15 @@ static void anim_stop(struct rei_pointer_cursor *p)
 	p->anim_base = p->anim_cur = NULL;
 }
 
+const struct rei_cursor_image *rei_pointer_cursor_default_image(struct rei_server *s)
+{
+	struct rei_pointer_cursor *p = s->pcursor;
+	if (!p || !p->theme)
+		return NULL;
+	const struct rei_cursor_image *img = rei_cursor_theme_shape(p->theme, REI_SHAPE_DEFAULT);
+	return img && img->pixbuf ? img : NULL;
+}
+
 void rei_pointer_cursor_refresh(struct rei_server *s)
 {
 	struct rei_pointer_cursor *p = s->pcursor;

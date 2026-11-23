@@ -109,6 +109,9 @@ xcb_deps = have_xwayland ? [xcb, xcb_xfixes] : []
 if have_xwayland and xcb_cursor.found()
   xcb_deps += [xcb_cursor]
 endif
+if have_xwayland and xcb_render.found()
+  xcb_deps += [xcb_render]
+endif
 audio_deps = have_audio ? [libpipewire] : []
 core_deps = drm_deps + xcb_deps + audio_deps + backtrace_deps + [wayland_server, wayland_client, egl, glesv2, xkbcommon, cairo, pangocairo, fontconfig, libevent, libevent_pthreads, threads, m_dep]
 

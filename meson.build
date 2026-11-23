@@ -64,6 +64,11 @@ xcb_cursor = dependency('xcb-cursor', required: false)
 if have_xwayland and xcb_cursor.found()
   add_project_arguments('-DREI_HAVE_XCB_CURSOR=1', language: 'c')
 endif
+# XRender builds the root cursor from the very picture rei-wm draws for its own pointer (libxcb-cursor depends on it).
+xcb_render = dependency('xcb-render', required: false)
+if have_xwayland and xcb_render.found()
+  add_project_arguments('-DREI_HAVE_XCB_RENDER=1', language: 'c')
+endif
 if have_xwayland
   add_project_arguments('-DREI_HAVE_XWAYLAND=1', language: 'c')
 endif
