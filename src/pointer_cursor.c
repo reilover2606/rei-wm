@@ -261,8 +261,10 @@ static bool accepts_request(struct rei_server *s, struct wl_client *client)
 
 void rei_pointer_cursor_request_shape(struct rei_server *s, struct wl_client *client, enum rei_cursor_shape shape)
 {
-	if (!accepts_request(s, client))
+	if (!accepts_request(s, client)) {
+		rei_debug("cursor: a shape request from a program the pointer is not in: ignored");
 		return;
+	}
 	struct rei_pointer_cursor *p = s->pcursor;
 	drop_surface(p);
 	p->req = REQ_SHAPE;
@@ -274,8 +276,10 @@ void rei_pointer_cursor_request_shape(struct rei_server *s, struct wl_client *cl
 void rei_pointer_cursor_request_surface(struct rei_server *s, struct wl_client *client,
 					struct rei_surface *surface, int32_t hot_x, int32_t hot_y)
 {
-	if (!accepts_request(s, client))
+	if (!accepts_request(s, client)) {
+		rei_debug("cursor: a %s request from a program the pointer is not in: ignored", surface ? "picture" : "hide");
 		return;
+	}
 	struct rei_pointer_cursor *p = s->pcursor;
 	drop_surface(p);
 	p->req_client = client;
@@ -298,6 +302,10 @@ void rei_pointer_cursor_focus_changed(struct rei_server *s)
 {
 	struct rei_pointer_cursor *p = s->pcursor;
 	if (!p || p->req == REQ_NONE)
+		return;
+	/* Moving between two windows of the same program (Xwayland's, above all): its request still stands until it
+	 * says otherwise; it is another client's, or nobody's, that has to start over. */
+	if (p->req_client && p->req_client == pointer_client(s))
 		return;
 	drop_surface(p);
 	p->req = REQ_NONE;
