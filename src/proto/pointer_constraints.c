@@ -9,6 +9,7 @@
 #include "proto/surface.h"
 #include "relative-pointer-unstable-v1-server-protocol.h"
 #include "server.h"
+#include "util/log.h"
 #include "util/util.h"
 
 struct rei_pointer_constraints {
@@ -202,9 +203,10 @@ static void create_constraint(struct wl_client *client, struct wl_resource *mana
 	wl_list_insert(&pc->constraints, &c->link);
 	wl_resource_set_implementation(c->resource, lock ? (const void *)&locked_impl : (const void *)&confined_impl, c,
 				       constraint_resource_destroyed);
-	/* It starts at once if the surface already has the pointer. */
+	/* It starts at once if the surface already has the pointer and the keyboard. */
 	struct rei_input *in = pc->server->input;
-	if (in && in->pointer_focus == surface)
+	rei_debug("pointer %s requested (%s)", lock ? "lock" : "confinement", c->oneshot ? "oneshot" : "persistent");
+	if (in && in->pointer_focus == surface && in->keyboard_focus == surface)
 		activate(c);
 }
 
@@ -239,24 +241,32 @@ static void bind_constraints(struct wl_client *client, void *data, uint32_t vers
 	wl_resource_set_implementation(r, &constraints_impl, data, NULL);
 }
 
-void rei_pointer_constraints_focus(struct rei_server *s, struct rei_surface *surface, double ox, double oy)
+/* A constraint holds while its surface has both the pointer and the keyboard: a program that has lost the keyboard (another
+ * window took focus) is not using the mouse either, and a locked pointer would leave nobody able to click it back. */
+void rei_pointer_constraints_update(struct rei_server *s, double old_ox, double old_oy)
 {
 	struct rei_pointer_constraints *pc = s->pconstraints;
-	if (!pc)
+	struct rei_input *in = s->input;
+	if (!pc || !in)
 		return;
 	struct constraint *c, *tmp;
-	struct rei_input *in = s->input;
-	double old_ox = in ? in->focus_ox : ox, old_oy = in ? in->focus_oy : oy;
 	wl_list_for_each_safe(c, tmp, &pc->constraints, link) {
-		if (c->active && c->surface != surface)
+		bool want = c->surface && c->surface == in->pointer_focus && c->surface == in->keyboard_focus;
+		if (c->active && !want) {
+			rei_debug("pointer %s ends (pointer focus %s, keyboard focus %s)", c->lock ? "lock" : "confinement",
+				  c->surface == in->pointer_focus ? "kept" : "gone", c->surface == in->keyboard_focus ? "kept" : "gone");
 			deactivate(c, old_ox, old_oy, false);
-	}
-	if (!surface)
-		return;
-	wl_list_for_each(c, &pc->constraints, link) {
-		if (c->surface == surface && !c->active)
+		} else if (!c->active && want) {
+			rei_debug("pointer %s starts", c->lock ? "lock" : "confinement");
 			activate(c);
+		}
 	}
+}
+
+void rei_pointer_constraints_focus(struct rei_server *s, struct rei_surface *surface, double ox, double oy)
+{
+	(void)surface;
+	rei_pointer_constraints_update(s, ox, oy);
 }
 
 bool rei_pointer_locked(const struct rei_server *s)

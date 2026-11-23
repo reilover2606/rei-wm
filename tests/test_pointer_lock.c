@@ -158,6 +158,27 @@ int main(int argc, char **argv)
 	zwp_confined_pointer_v1_destroy(conf);
 	flush_all(&c);
 
+	/* ---- A lock holds only while its surface has the keyboard too ---- */
+	struct window w2;
+	open_win(&c, &w2, "W2", 0xffc08020);
+	CHECK(w2.activated && !w.activated);   /* the new window has the keyboard; W (left) does not */
+	inject("motion_abs 100 150");          /* the pointer is over W */
+	flush_all(&c);
+	lock = zwp_pointer_constraints_v1_lock_pointer(pcm, w.surface, c.pointer, NULL, ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+	zwp_locked_pointer_v1_add_listener(lock, &locked_listener, NULL);
+	g_locked = false;
+	g_unlocked = 0;
+	flush_all(&c);
+	CHECK(!g_locked);                      /* not yet: it is not the focused window */
+	chord(KEY_SUPER, 0, 15);               /* Mod+Tab: focus W */
+	flush_all(&c);
+	CHECK(w.activated && g_locked);
+	chord(KEY_SUPER, 0, 15);               /* and away again: the lock lets go, so the mouse can click the other one */
+	flush_all(&c);
+	CHECK(!w.activated && !g_locked && g_unlocked == 1);
+	zwp_locked_pointer_v1_destroy(lock);
+	flush_all(&c);
+
 	/* ---- The wheel ---- */
 	ev_clear(&c);
 	inject("wheel v 15 120");

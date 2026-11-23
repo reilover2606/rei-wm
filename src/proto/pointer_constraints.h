@@ -24,6 +24,10 @@ bool rei_pointer_constraints_init(struct rei_server *server);
  * (server->cursor_x/y) when it stops. */
 void rei_pointer_constraints_focus(struct rei_server *server, struct rei_surface *surface, double ox, double oy);
 
+/* The keyboard focus changed (a constraint holds only while its surface has the keyboard as well); the pointer
+ * focus's own top-left is (ox, oy), for a lock's position hint. */
+void rei_pointer_constraints_update(struct rei_server *server, double ox, double oy);
+
 /* Whether the pointer is locked: the cursor must not move. */
 bool rei_pointer_locked(const struct rei_server *server);
 

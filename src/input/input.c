@@ -181,6 +181,8 @@ static void set_keyboard_focus(struct rei_input *in, struct rei_surface *surface
 		wl_list_init(&in->keyboard_focus_destroy.link);
 	}
 	in->keyboard_focus = surface;
+	rei_debug("keyboard focus: %s", surface ? "a surface" : "none");
+	rei_pointer_constraints_update(in->server, in->focus_ox, in->focus_oy);
 	if (!surface)
 		return;
 
@@ -428,7 +430,9 @@ static void set_pointer_focus(struct rei_input *in, struct rei_surface *surface,
 		wl_list_remove(&in->pointer_focus_destroy.link);
 		wl_list_init(&in->pointer_focus_destroy.link);
 	}
+	double old_ox = in->focus_ox, old_oy = in->focus_oy;
 	in->pointer_focus = surface;
+	rei_debug("pointer focus: %s", surface ? "a surface" : "none");
 	if (surface) {
 		in->focus_ox = in->server->cursor_x - sx;
 		in->focus_oy = in->server->cursor_y - sy;
@@ -439,7 +443,7 @@ static void set_pointer_focus(struct rei_input *in, struct rei_surface *surface,
 		wl_signal_add(&surface->destroy_signal, &in->pointer_focus_destroy);
 		rei_seat_pointer_enter(in->server->seat, surface, sx, sy);
 	}
-	rei_pointer_constraints_focus(in->server, surface, in->focus_ox, in->focus_oy);   /* a lock or confinement follows the focus */
+	rei_pointer_constraints_focus(in->server, surface, old_ox, old_oy);   /* a lock or confinement follows the focus */
 }
 
 void rei_input_clamp_cursor(struct rei_server *s)
