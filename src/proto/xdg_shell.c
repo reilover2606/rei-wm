@@ -594,7 +594,7 @@ static void xdg_surface_commit(struct rei_surface *surface, void *data)
 		xs->has_pending_geometry = false;
 	}
 
-	bool has_buffer = surface->content != NULL;
+	bool has_buffer = surface->content != NULL || surface->dmabuf != NULL;   /* (a GPU-buffer window has no pixels here) */
 
 	if (!xs->initial_sent) {
 		if (has_buffer) {
@@ -839,7 +839,7 @@ static void wm_base_get_xdg_surface(struct wl_client *client, struct wl_resource
 				    uint32_t id, struct wl_resource *surface_res)
 {
 	struct rei_surface *surface = rei_surface_from_resource(surface_res);
-	if (surface->role_commit || surface->content || surface->pending.buffer_set) {
+	if (surface->role_commit || surface->content || surface->dmabuf || surface->pending.buffer_set) {
 		/* Already has an xdg_surface, or already has content (not allowed). */
 		wl_resource_post_error(res, XDG_WM_BASE_ERROR_ROLE,
 				       "surface already has an xdg_surface or a buffer");

@@ -291,6 +291,13 @@ pointer_lock_test = executable('test_pointer_lock', 'test_pointer_lock.c', xdg_s
 )
 test('pointer-lock', pointer_lock_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)
 
+dmabuf_win_test = executable('test_dmabuf_window', 'test_dmabuf_window.c', xdg_shell_client_h, xdg_shell_code,
+  linux_dmabuf_client_h, linux_dmabuf_code,
+  include_directories: inc,
+  dependencies: [wayland_client, m_dep],
+)
+test('dmabuf-window', dmabuf_win_test, args: [rei_wm.full_path()], depends: rei_wm, env: test_env, timeout: 60)
+
 dmabuf_fb_test = executable('test_dmabuf_feedback', 'test_dmabuf_feedback.c', xdg_shell_client_h, xdg_shell_code,
   linux_dmabuf_client_h, linux_dmabuf_code,
   include_directories: inc,
