@@ -59,6 +59,11 @@ endif
 xcb = dependency('xcb', required: get_option('xwayland'))
 xcb_xfixes = dependency('xcb-xfixes', required: get_option('xwayland'))
 have_xwayland = xcb.found() and xcb_xfixes.found()
+# The X cursor theme (libxcb-cursor), to give the X root window rei-wm's cursor; without it the plain arrow glyph is used.
+xcb_cursor = dependency('xcb-cursor', required: false)
+if have_xwayland and xcb_cursor.found()
+  add_project_arguments('-DREI_HAVE_XCB_CURSOR=1', language: 'c')
+endif
 if have_xwayland
   add_project_arguments('-DREI_HAVE_XWAYLAND=1', language: 'c')
 endif

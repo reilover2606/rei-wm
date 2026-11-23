@@ -18,6 +18,7 @@
 #include "runprompt.h"
 #include "server.h"
 #include "toolbar.h"
+#include "xwayland.h"
 #include "tray.h"
 #include "util/log.h"
 #include "util/util.h"
@@ -359,6 +360,7 @@ void rei_pointer_cursor_reconfigure(struct rei_server *s)
 	rei_pointer_cursor_refresh(s);
 	rei_cursor_theme_close(old);
 	export_env(p);
+	rei_xwayland_refresh_cursor(s);   /* X windows without a cursor of their own show this one */
 	rei_info("cursor: theme '%s', size %d", rei_cursor_theme_name(p->theme), size);
 	if (s->damage_event)
 		rei_server_schedule_damage(s);

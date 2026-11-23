@@ -10,6 +10,7 @@
 #include "testlib.h"
 
 #include <xcb/xcb.h>
+#include <xcb/xfixes.h>
 
 #define OUT_W 800
 #define OUT_H 600
@@ -244,6 +245,29 @@ static void test_override_redirect(void)
 	xcb_flush(g_x);
 }
 
+/* A window without a cursor of its own shows the root window's: rei-wm sets it (an arrow, hot spot at its top-left),
+ * instead of leaving X's built-in cross, whose hot spot is in the middle. */
+static void test_root_cursor(void)
+{
+	xcb_window_t win = make_window(200, 200, 0x3060c0, false, false, "cursor");
+	xcb_map_window(g_x, win);
+	xcb_flush(g_x);
+	wait_log("x11 window mapped: \"cursor\"", 8000);
+	sleep_ms(300);
+	int x, y, w, h;
+	geometry(win, &x, &y, &w, &h);
+	inject("motion_abs %d %d", x + w / 2, y + h / 2);
+	sleep_ms(400);
+	xcb_xfixes_query_version_reply(g_x, xcb_xfixes_query_version(g_x, 4, 0), NULL);
+	xcb_xfixes_get_cursor_image_reply_t *c = xcb_xfixes_get_cursor_image_reply(g_x, xcb_xfixes_get_cursor_image(g_x), NULL);
+	CHECK(c);
+	CHECK(c->width >= 8 && c->height >= 8);
+	CHECK(c->xhot <= 4 && c->yhot <= 4);
+	free(c);
+	xcb_destroy_window(g_x, win);
+	xcb_flush(g_x);
+}
+
 static void test_fullscreen(void)
 {
 	xcb_window_t win = make_window(100, 100, 0xff00ff, false, false, "full");
@@ -327,6 +351,7 @@ int main(int argc, char **argv)
 
 	test_floating_and_tiled();
 	test_override_redirect();
+	test_root_cursor();
 	test_fullscreen();
 
 	xcb_disconnect(g_x);

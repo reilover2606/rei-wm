@@ -30,6 +30,9 @@ struct rei_xsel;
 /* Starts Xwayland when the config allows it and the binary exists. */
 void rei_xwayland_start(struct rei_server *server);
 void rei_xwayland_stop(struct rei_server *server);
+/* The X root window's cursor is the one every X window without a cursor of its own shows (the margin of a terminal,
+ * most games): give it the pointer theme's arrow (after the theme changed, too). */
+void rei_xwayland_refresh_cursor(struct rei_server *server);
 
 /* Copy and paste with X11 programs (xwayland_sel.c); both do nothing when Xwayland is not running.
  * The Wayland clipboard / primary selection changed: follow it in X11. */
