@@ -14,7 +14,7 @@ sudo xbps-install -S meson ninja pkg-config gcc git \
     wayland-devel wayland-protocols libevent-devel MesaLib-devel libxkbcommon-devel \
     cairo-devel pango-devel fontconfig-devel libxcb-devel \
     libdrm-devel libinput-devel seatd-devel eudev-libudev-devel \
-    pipewire-devel qt6-base-devel
+    xcb-util-cursor-devel pipewire-devel qt6-base-devel
 ```
 
 | what | package | for |
@@ -26,7 +26,7 @@ sudo xbps-install -S meson ninja pkg-config gcc git \
 | xkbcommon | `libxkbcommon-devel` | always |
 | Cairo, Pango, fontconfig | `cairo-devel pango-devel fontconfig-devel` | the toolbar's text and pictures |
 | **DRM backend** (needed for a real screen) | `libdrm-devel libinput-devel seatd-devel eudev-libudev-devel` | `-Ddrm=enabled` |
-| **Xwayland support** | `libxcb-devel` (it includes `xcb-xfixes`, used for copy and paste with X11 programs) | `-Dxwayland=enabled` |
+| **Xwayland support** | `libxcb-devel` (it includes `xcb-xfixes`, used for copy and paste with X11 programs), optionally `xcb-util-cursor-devel` (X windows then show your cursor theme) | `-Dxwayland=enabled` |
 | **PipeWire volume** | `pipewire-devel` | `-Daudio=enabled` |
 | **Settings app** | `qt6-base-devel` | `-Dsettings=enabled` |
 

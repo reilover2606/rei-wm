@@ -13,7 +13,7 @@ everything, so none of rei-wm's minimum versions (wayland-protocols 1.34, libdrm
 ```bash
 sudo pacman -S --needed base-devel git meson ninja pkgconf \
     wayland wayland-protocols libevent mesa libxkbcommon cairo pango fontconfig \
-    libdrm libinput seatd systemd-libs libxcb pipewire qt6-base
+    libdrm libinput seatd systemd-libs libxcb xcb-util-cursor pipewire qt6-base
 ```
 
 Arch packages carry their headers, so there are no separate `-dev` packages.
@@ -26,7 +26,7 @@ Arch packages carry their headers, so there are no separate `-dev` packages.
 | Mesa (EGL, GLES 3, GBM) | `mesa` | always (the renderer) and the DRM backend |
 | xkbcommon, Cairo, Pango, fontconfig | `libxkbcommon cairo pango fontconfig` | keys; the toolbar's text and pictures |
 | **DRM backend** (a real screen) | `libdrm libinput seatd systemd-libs` (libudev comes with `systemd-libs`) | `-Ddrm=enabled` |
-| **Xwayland support** | `libxcb` (includes `xcb-xfixes`) | `-Dxwayland=enabled` |
+| **Xwayland support** | `libxcb` (includes `xcb-xfixes`), optionally `xcb-util-cursor` (X windows then show your cursor theme) | `-Dxwayland=enabled` |
 | **PipeWire volume** | `pipewire` (its headers are in the same package) | `-Daudio=enabled` |
 | **Settings app** | `qt6-base` | `-Dsettings=enabled` |
 

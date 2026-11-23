@@ -980,6 +980,42 @@ static bool composite_redirect_root(struct rei_xwayland *x)
 /* Loads the user's X resources (~/.Xresources) into the X server, as an X session's startup script
  * does with `xrdb -merge`. Without this the server has none: urxvt and xterm would ignore their
  * colours, fonts and transparency, which a desktop session that runs xrdb applies. */
+#ifdef REI_HAVE_XCB_CURSOR
+#include <xcb/xcb_cursor.h>
+#endif
+
+/* Sets the root window's cursor, which windows without their own inherit. A window manager is meant to: without
+ * it X shows its built-in "X" cursor over every such window (and over a game that sets none). The theme is read from
+ * XCURSOR_THEME / XCURSOR_SIZE / XCURSOR_PATH, which the pointer-cursor code exports. */
+static void set_root_cursor(struct rei_xwayland *x)
+{
+	xcb_cursor_t cur = XCB_NONE;
+#ifdef REI_HAVE_XCB_CURSOR
+	xcb_cursor_context_t *ctx = NULL;
+	if (xcb_cursor_context_new(x->conn, x->screen, &ctx) >= 0) {
+		cur = xcb_cursor_load_cursor(ctx, "left_ptr");
+		xcb_cursor_context_free(ctx);
+	}
+#endif
+	if (cur == XCB_NONE) {   /* no theme loader: the arrow glyph of the standard cursor font */
+		xcb_font_t font = xcb_generate_id(x->conn);
+		xcb_open_font(x->conn, font, 6, "cursor");
+		cur = xcb_generate_id(x->conn);
+		xcb_create_glyph_cursor(x->conn, cur, font, font, 68, 69, 0, 0, 0, 0xffff, 0xffff, 0xffff);
+		xcb_close_font(x->conn, font);
+	}
+	xcb_change_window_attributes(x->conn, x->screen->root, XCB_CW_CURSOR, &cur);
+	xcb_free_cursor(x->conn, cur);
+	xcb_flush(x->conn);
+}
+
+void rei_xwayland_refresh_cursor(struct rei_server *s)
+{
+	struct rei_xwayland *x = s->xwayland;
+	if (x && x->running && x->conn)
+		set_root_cursor(x);
+}
+
 static void load_xresources(struct rei_xwayland *x)
 {
 	const char *setting = x->server->config->xresources;
@@ -1083,6 +1119,7 @@ static void become_window_manager(struct rei_xwayland *x)
 	event_add(x->xcb_event, NULL);
 	x->running = true;
 	rei_info("xwayland: ready on DISPLAY=%s", x->display_name);
+	set_root_cursor(x);
 	load_xresources(x);
 	on_xcb_readable(-1, 0, x);  /* Anything that arrived while we were setting up. */
 }
