@@ -9,6 +9,8 @@
 
 class QComboBox;
 class QLabel;
+class QListWidget;
+class QPushButton;
 class QTableWidget;
 class QWidget;
 class ThemeEditor;
@@ -74,6 +76,8 @@ private:
 	void loadWallpapers();
 	QList<QVariantMap> wallpaperTable() const;
 	QString wallpaperProblem() const;
+	void showWallpaperFiles();   /* the picture list under the table: the pictures of the selected group */
+	void setWallpaperPaths(int row, const QStringList &paths);
 	void setWallpaperRow(int row, const QString &name, const QStringList &paths, int interval, bool any, const QString &workspaces);
 	QWidget *buildKeysTab();
 	QWidget *buildOutputsTab();
@@ -101,6 +105,8 @@ private:
 	TomlDoc doc_;
 	QVector<Field> fields_;
 	QTableWidget *keys_ = nullptr, *outputs_ = nullptr, *shortcuts_ = nullptr, *wallpapers_ = nullptr;
+	QListWidget *wpFiles_ = nullptr;
+	QPushButton *wpFileAdd_ = nullptr, *wpFolderAdd_ = nullptr, *wpFileDel_ = nullptr;
 	class QButtonGroup *anyGroup_ = nullptr;   /* the "any" radio buttons: at most one group is the any group */
 	QLabel *status_ = nullptr, *cursorPreview_ = nullptr;
 	ThemeEditor *theme_ = nullptr;

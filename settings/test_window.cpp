@@ -6,6 +6,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QDialog>
+#include <QListWidget>
 #include <QComboBox>
 #include <QDir>
 #include <QDoubleSpinBox>
@@ -296,6 +297,25 @@ int main(int argc, char **argv)
 		CHECK(table->item(3, 1)->text().contains("2 picture") && table->item(3, 0)->text() == "pics");
 		ww.addWallpapers({ dir.path() + "/pics/folder" });
 		CHECK(table->item(4, 0)->text() == "folder" && table->item(4, 1)->text().contains("2 picture"));
+		CHECK(ww.dirty());
+		/* A folder became a list of its pictures, which can be taken from: the list under the table shows the selected group. */
+		auto *files = field<QListWidget>(ww, "wallpaper_files");
+		table->setCurrentCell(4, 0);
+		CHECK(files->count() == 2 && files->item(0)->text() == "a.png" && files->item(1)->text() == "b.jpg");
+		CHECK(files->selectionMode() == QAbstractItemView::ExtendedSelection);   /* Shift and Ctrl */
+		table->setCurrentCell(0, 0);   /* the Forest group still holds the folder itself, as the file said */
+		CHECK(files->count() == 1 && files->item(0)->text().startsWith("Folder "));
+		table->setCurrentCell(4, 0);
+		files->item(0)->setSelected(true);
+		field<QPushButton>(ww, "wallpaper_file_remove")->click();
+		CHECK(files->count() == 1 && files->item(0)->text() == "b.jpg" && table->item(4, 1)->text() == "b.jpg");
+		files->item(0)->setSelected(true);
+		field<QPushButton>(ww, "wallpaper_file_remove")->click();
+		CHECK(files->count() == 0 && table->item(4, 1)->text() == "(no pictures)");
+		/* (put the two back through the same data the Add buttons write) */
+		ww.addWallpapers({ dir.path() + "/pics/folder" });
+		table->removeRow(4);
+		CHECK(table->rowCount() == 5);
 		CHECK(ww.dirty());
 		/* Only one group can be the any group: choosing another one moves it. */
 		table->cellWidget(2, 3)->findChild<QRadioButton *>()->setChecked(true);

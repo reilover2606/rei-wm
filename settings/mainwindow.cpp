@@ -21,6 +21,8 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
+#include <QGroupBox>
 #include <QMessageBox>
 #include <QPixmap>
 #include <QProcess>
@@ -359,6 +361,28 @@ static int pictureCount(const QString &path)
 	return fi.exists() ? 1 : 0;
 }
 
+/* The pictures directly in a folder, as full paths, in name order. */
+static QStringList imagesIn(const QString &dir)
+{
+	QStringList out;
+	QDir d(dir);
+	for (const QString &n : d.entryList(QString(kImageFilter).split(' '), QDir::Files, QDir::Name | QDir::IgnoreCase))
+		out << d.absoluteFilePath(n);
+	return out;
+}
+
+/* Several pictures chosen at once (Shift for a range, Ctrl for single ones). */
+static QStringList chooseImages(QWidget *parent)
+{
+	QFileDialog dlg(parent, QObject::tr("Choose pictures"),
+			QStandardPaths::writableLocation(QStandardPaths::PicturesLocation),
+			QObject::tr("Pictures (%1)").arg(kImageFilter));
+	dlg.setObjectName("wallpaper_file_dialog");
+	dlg.setFileMode(QFileDialog::ExistingFiles);
+	dlg.setAcceptMode(QFileDialog::AcceptOpen);
+	return dlg.exec() == QDialog::Accepted ? dlg.selectedFiles() : QStringList();
+}
+
 static QString pictures(int n)
 {
 	return n == 1 ? QObject::tr("1 picture") : QObject::tr("%1 pictures").arg(n);
@@ -387,8 +411,8 @@ QWidget *MainWindow::buildWallpaperTab()
 	auto *hint = new QLabel(tr("A wallpaper group is one picture, or many that take turns. Choose which group shows on every workspace "
 				   "(the “any” column; only one group can be it), and give a group to particular workspaces if they "
 				   "should look different (write their numbers, like 2, 5). A workspace with no group of its own shows "
-				   "the “any” group. Add a single picture to make a group of one; add several pictures, or a folder, "
-				   "for a group that changes by itself."));
+				   "the “any” group. Make a group from one picture, several pictures or a folder, then select it to "
+				   "see its list of pictures below, where you can add more and take some out."));
 	hint->setWordWrap(true);
 	v->addWidget(hint);
 	auto *f = new QFormLayout;
@@ -406,17 +430,18 @@ QWidget *MainWindow::buildWallpaperTab()
 	anyGroup_->setExclusive(true);
 
 	auto *row = new QHBoxLayout;
-	auto *addImages = new QPushButton(tr("Add picture(s)…"));
+	auto *addImages = new QPushButton(tr("New group from picture(s)…"));
 	addImages->setObjectName("wallpaper_add_images");
 	addImages->setToolTip(tr("One picture makes a group of one; select several (Shift or Ctrl) for a group that cycles."));
-	auto *addFolder = new QPushButton(tr("Add folder…"));
+	auto *addFolder = new QPushButton(tr("New group from folder…"));
 	addFolder->setObjectName("wallpaper_add_folder");
-	addFolder->setToolTip(tr("Every picture in the folder is the group; the folder is looked at again each time it moves on."));
+	addFolder->setToolTip(tr("Every picture in the folder goes into the new group's list, where you can add and remove pictures."));
 	auto *none = new QPushButton(tr("No “any” group"));
 	none->setObjectName("wallpaper_no_any");
 	none->setToolTip(tr("Workspaces without a group of their own then show the plain background colour."));
 	auto *del = new QPushButton(tr("Remove"));
 	del->setObjectName("wallpaper_remove");
+	del->setText(tr("Remove group"));
 	row->addWidget(addImages);
 	row->addWidget(addFolder);
 	row->addStretch(1);
@@ -425,9 +450,7 @@ QWidget *MainWindow::buildWallpaperTab()
 	v->addLayout(row);
 
 	connect(addImages, &QPushButton::clicked, this, [this] {
-		QString start = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
-		QStringList files = QFileDialog::getOpenFileNames(this, tr("Choose pictures"), start,
-								  tr("Pictures (%1)").arg(kImageFilter));
+		QStringList files = chooseImages(this);
 		if (!files.isEmpty())
 			addWallpapers(files);
 	});
@@ -456,7 +479,113 @@ QWidget *MainWindow::buildWallpaperTab()
 		markDirty();
 	});
 	connect(wallpapers_, &QTableWidget::itemChanged, this, &MainWindow::markDirty);
+
+	/* The pictures of the selected group, one per line, to add to and take from. */
+	auto *box = new QGroupBox(tr("Pictures in the selected group"));
+	auto *bl = new QVBoxLayout(box);
+	wpFiles_ = new QListWidget;
+	wpFiles_->setObjectName("wallpaper_files");
+	wpFiles_->setSelectionMode(QAbstractItemView::ExtendedSelection);   /* Shift and Ctrl */
+	wpFiles_->setMinimumHeight(110);
+	bl->addWidget(wpFiles_, 1);
+	auto *frow = new QHBoxLayout;
+	wpFileAdd_ = new QPushButton(tr("Add pictures…"));
+	wpFileAdd_->setObjectName("wallpaper_file_add");
+	wpFileAdd_->setToolTip(tr("Choose one or more pictures (Shift or Ctrl) to add to this group."));
+	wpFolderAdd_ = new QPushButton(tr("Add pictures from a folder…"));
+	wpFolderAdd_->setObjectName("wallpaper_file_add_folder");
+	wpFolderAdd_->setToolTip(tr("Adds every picture in the folder to this group's list."));
+	wpFileDel_ = new QPushButton(tr("Remove selected"));
+	wpFileDel_->setObjectName("wallpaper_file_remove");
+	wpFileDel_->setToolTip(tr("Takes the selected pictures out of this group (the files themselves stay)."));
+	frow->addWidget(wpFileAdd_);
+	frow->addWidget(wpFolderAdd_);
+	frow->addStretch(1);
+	frow->addWidget(wpFileDel_);
+	bl->addLayout(frow);
+	v->addWidget(box);
+
+	connect(wallpapers_, &QTableWidget::currentCellChanged, this, [this] { showWallpaperFiles(); });
+	connect(wpFileAdd_, &QPushButton::clicked, this, [this] {
+		int r = wallpapers_->currentRow();
+		if (r < 0)
+			return;
+		QStringList have = wallpapers_->item(r, WpPictures)->data(Qt::UserRole).toStringList();
+		for (const QString &f : chooseImages(this))
+			if (!have.contains(f))
+				have << f;
+		setWallpaperPaths(r, have);
+	});
+	connect(wpFolderAdd_, &QPushButton::clicked, this, [this] {
+		int r = wallpapers_->currentRow();
+		if (r < 0)
+			return;
+		QString start = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+		QString dir = QFileDialog::getExistingDirectory(this, tr("Choose a folder of pictures"), start);
+		if (dir.isEmpty())
+			return;
+		QStringList have = wallpapers_->item(r, WpPictures)->data(Qt::UserRole).toStringList();
+		for (const QString &f : imagesIn(dir))
+			if (!have.contains(f))
+				have << f;
+		setWallpaperPaths(r, have);
+	});
+	connect(wpFileDel_, &QPushButton::clicked, this, [this] {
+		int r = wallpapers_->currentRow();
+		if (r < 0)
+			return;
+		QStringList have = wallpapers_->item(r, WpPictures)->data(Qt::UserRole).toStringList();
+		for (QListWidgetItem *it : wpFiles_->selectedItems())
+			have.removeOne(it->data(Qt::UserRole).toString());
+		setWallpaperPaths(r, have);
+	});
+	connect(wpFiles_, &QListWidget::itemSelectionChanged, this, [this] { wpFileDel_->setEnabled(!wpFiles_->selectedItems().isEmpty()); });
+	showWallpaperFiles();
 	return w;
+}
+
+void MainWindow::showWallpaperFiles()
+{
+	if (!wpFiles_)
+		return;
+	wpFiles_->clear();
+	int r = wallpapers_->currentRow();
+	bool have_row = r >= 0 && r < wallpapers_->rowCount() && wallpapers_->item(r, WpPictures);
+	if (have_row) {
+		for (const QString &p : wallpapers_->item(r, WpPictures)->data(Qt::UserRole).toStringList()) {
+			QFileInfo fi(p);
+			QString text = fi.isDir() ? tr("Folder %1 (%2)").arg(p, pictures(pictureCount(p))) : fi.fileName();
+			auto *it = new QListWidgetItem(text);
+			it->setData(Qt::UserRole, p);
+			it->setToolTip(p);
+			if (!fi.exists())
+				it->setForeground(Qt::red);   /* missing: it is skipped when the group is shown */
+			wpFiles_->addItem(it);
+		}
+	}
+	wpFiles_->setEnabled(have_row);
+	wpFileAdd_->setEnabled(have_row);
+	wpFolderAdd_->setEnabled(have_row);
+	wpFileDel_->setEnabled(false);
+}
+
+/* Gives a group a new list of pictures: its summary, its tooltip and the list under the table follow. */
+void MainWindow::setWallpaperPaths(int row, const QStringList &paths)
+{
+	QTableWidgetItem *pics = wallpapers_->item(row, WpPictures);
+	if (!pics)
+		return;
+	if (pics->data(Qt::UserRole).toStringList() == paths)
+		return;
+	bool was = loading_;
+	loading_ = true;   /* (not an edit of the table's own cells) */
+	pics->setData(Qt::UserRole, paths);
+	pics->setText(paths.isEmpty() ? tr("(no pictures)") : summaryOf(paths));
+	pics->setToolTip(paths.join('\n'));
+	loading_ = was;
+	if (row == wallpapers_->currentRow())
+		showWallpaperFiles();
+	markDirty();
 }
 
 void MainWindow::setWallpaperRow(int r, const QString &name, const QStringList &paths, int interval, bool any,
@@ -509,9 +638,18 @@ void MainWindow::addWallpapers(const QStringList &paths)
 		name = first.dir().dirName();
 	if (name.isEmpty())
 		name = tr("Wallpapers");
+	/* A folder is its pictures, listed one by one so they can be taken out again. */
+	QStringList files;
+	for (const QString &p : paths) {
+		if (QFileInfo(p).isDir())
+			files << imagesIn(p);
+		else if (!files.contains(p))
+			files << p;
+	}
 	int r = wallpapers_->rowCount();
 	wallpapers_->insertRow(r);
-	setWallpaperRow(r, name, paths, 600, false, QString());
+	setWallpaperRow(r, name, files, 600, false, QString());
+	wallpapers_->setCurrentCell(r, WpName);
 	markDirty();
 }
 
@@ -541,6 +679,10 @@ void MainWindow::loadWallpapers()
 		wallpapers_->insertRow(0);
 		setWallpaperRow(0, QFileInfo(legacy).completeBaseName(), { legacy }, 600, true, QString());
 	}
+	if (wallpapers_->rowCount() > 0)
+		wallpapers_->setCurrentCell(0, WpName);   /* its pictures show in the list below */
+	else
+		showWallpaperFiles();
 }
 
 static QList<int> parseWorkspaces(const QString &text, bool *ok)
