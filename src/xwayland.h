@@ -33,6 +33,11 @@ void rei_xwayland_stop(struct rei_server *server);
 /* The X root window's cursor is the one every X window without a cursor of its own shows (the margin of a terminal,
  * most games): give it the pointer theme's arrow (after the theme changed, too). */
 void rei_xwayland_refresh_cursor(struct rei_server *server);
+/* Makes X11's stacking order the one the user sees: `views` (X11 windows only), bottom to top, then X11's own menus.
+ * X11 decides which window is under the pointer from its own stacking, so a window hidden on another workspace, or
+ * lying under a fullscreen game, must not be above it there. */
+struct rei_view;
+void rei_xwayland_restack(struct rei_server *server, struct rei_view *const *views, size_t n);
 
 /* Copy and paste with X11 programs (xwayland_sel.c); both do nothing when Xwayland is not running.
  * The Wayland clipboard / primary selection changed: follow it in X11. */

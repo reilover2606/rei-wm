@@ -268,6 +268,52 @@ static void test_root_cursor(void)
 	xcb_flush(g_x);
 }
 
+/* X11 picks the window under the pointer by its own stacking: a floating window left above a fullscreen game, or one on
+ * another workspace, would take the pointer over its part of the screen. */
+static xcb_window_t window_under_pointer(void)
+{
+	xcb_query_pointer_reply_t *q = xcb_query_pointer_reply(g_x, xcb_query_pointer(g_x, g_scr->root), NULL);
+	CHECK(q);
+	xcb_window_t child = q->child;
+	free(q);
+	return child;
+}
+
+static void test_stacking(void)
+{
+	xcb_window_t game = make_window(100, 100, 0x00ff00, false, false, "stack-game");
+	xcb_map_window(g_x, game);
+	xcb_flush(g_x);
+	wait_log("x11 window mapped: \"stack-game\"", 8000);
+	paint(game, 0x00ff00);
+	sleep_ms(300);
+	/* A floating window mapped after it: above it in X11's order. */
+	xcb_window_t fl = make_window(200, 150, 0xff00ff, true, false, "stack-float");
+	xcb_map_window(g_x, fl);
+	xcb_flush(g_x);
+	wait_log("x11 window mapped: \"stack-float\"", 8000);
+	paint(fl, 0xff00ff);
+	sleep_ms(300);
+	int fx, fy, fw, fh;
+	geometry(fl, &fx, &fy, &fw, &fh);
+
+	/* The game goes fullscreen (the window manager keeps the floater on this workspace, under it). */
+	xcb_client_message_event_t m = { .response_type = XCB_CLIENT_MESSAGE, .format = 32, .window = game, .type = a_state };
+	m.data.data32[0] = 1;
+	m.data.data32[1] = a_fullscreen;
+	xcb_send_event(g_x, 0, g_scr->root, XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY,
+		       (const char *)&m);
+	xcb_flush(g_x);
+	sleep_ms(500);
+	inject("motion_abs %d %d", fx + fw / 2, fy + fh / 2);   /* where the floater is */
+	sleep_ms(400);
+	CHECK(window_under_pointer() == game);   /* not the floater */
+	xcb_destroy_window(g_x, game);
+	xcb_destroy_window(g_x, fl);
+	xcb_flush(g_x);
+	sleep_ms(300);
+}
+
 static void test_fullscreen(void)
 {
 	xcb_window_t win = make_window(100, 100, 0xff00ff, false, false, "full");
@@ -352,6 +398,7 @@ int main(int argc, char **argv)
 	test_floating_and_tiled();
 	test_override_redirect();
 	test_root_cursor();
+	test_stacking();
 	test_fullscreen();
 
 	xcb_disconnect(g_x);

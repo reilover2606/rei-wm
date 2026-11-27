@@ -303,9 +303,12 @@ workspaces = [2, 5]
 ```
 
 In the settings app the **Wallpaper** tab (it used to be "Look") lists the groups as rows. Choose the "any" group with
-the radio buttons, write a group's workspaces in the last column, and set how often it changes. **Add picture(s)…**
-makes a group from one picture (a group of one) or from several you select with Shift or Ctrl; **Add folder…** makes
-one from a folder. The fit mode and background colour are above the table. `[wallpaper] path`, the single picture
+the radio buttons, write a group's workspaces in the last column, and set how often it changes. **New group from
+picture(s)…** makes a group from one picture or from several you select with Shift or Ctrl; **New group from folder…**
+makes one from the pictures in a folder. Whichever you use, the group's pictures are listed one by one under the table
+when the group is selected, and that list can be added to (**Add pictures…**, again with Shift or Ctrl to select many,
+or **Add pictures from a folder…**) and taken from (**Remove selected**; the files themselves stay). A group that
+names a whole folder in the config file (`paths = ["/pictures/forest"]`) still works and shows as one "Folder" entry. The fit mode and background colour are above the table. `[wallpaper] path`, the single picture
 of earlier versions, still works and shows up there as one group; the first time you change the groups it is
 replaced by `[[wallpaper_group]]` tables. Pictures are drawn at the output's size and kept for a while, so going back
 to a workspace costs nothing; one that cannot be loaded is skipped (and said so in the log).
