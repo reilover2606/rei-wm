@@ -172,6 +172,46 @@ static void apply_to_view(struct rei_view *v, struct rei_rect r, bool tiled, boo
 		rei_xdg_toplevel_set_state(v->toplevel, r.w, r.h, tiled, fullscreen);
 }
 
+/* X11 chooses the window under the pointer by its own stacking order, not ours: a floating X11 window left above a
+ * fullscreen game (or one on another workspace) would take the pointer over its part of the screen. So X11's order
+ * is made ours: windows not shown at the bottom, then per output the tiled ones, the floating ones (bottom to top)
+ * and the fullscreen one. */
+static void restack_x11(struct rei_server *s)
+{
+	size_t cap = 0, n = 0;
+	struct rei_view *v;
+	wl_list_for_each(v, &s->views, link)
+		cap++;
+	if (!cap)
+		return;
+	struct rei_view **order = rei_xcalloc(cap, sizeof *order);
+	wl_list_for_each(v, &s->views, link)
+		if (v->xwin && !rei_view_visible(v))
+			order[n++] = v;
+	struct rei_output *o;
+	wl_list_for_each(o, &s->outputs, link) {
+		struct rei_workspace *ws = o->workspace;
+		if (!ws)
+			continue;
+		size_t nl = rei_tree_leaf_count(ws->tree);
+		struct rei_node **leaves = rei_xcalloc(nl ? nl : 1, sizeof *leaves);
+		rei_tree_leaves(ws->tree, leaves, nl);
+		for (size_t i = 0; i < nl; i++) {
+			struct rei_view *t = leaves[i]->data;
+			if (t->xwin && rei_view_visible(t) && t != ws->fullscreen && n < cap)
+				order[n++] = t;
+		}
+		free(leaves);
+		wl_list_for_each(v, &ws->floating, float_link)
+			if (v->xwin && rei_view_visible(v) && v != ws->fullscreen && n < cap)
+				order[n++] = v;
+		if (ws->fullscreen && ws->fullscreen->xwin && n < cap)
+			order[n++] = ws->fullscreen;
+	}
+	rei_xwayland_restack(s, order, n);
+	free(order);
+}
+
 static void arrange(struct rei_output *o)
 {
 	struct rei_server *s = o->server;
@@ -229,6 +269,7 @@ static void arrange(struct rei_output *o)
 	if (ws->fullscreen)
 		apply_to_view(ws->fullscreen, output_rect(o), false, true);   /* the whole output: over the toolbar and the gaps too */
 
+	restack_x11(s);
 	rei_server_schedule_damage(s);
 }
 
@@ -301,6 +342,7 @@ static void focus_view(struct rei_view *v, bool raise)
 	if (raise && v->floating) {   /* Focusing a floating window raises it, unless only the pointer came over it. */
 		wl_list_remove(&v->float_link);
 		wl_list_insert(v->ws->floating.prev, &v->float_link);
+		restack_x11(s);
 	}
 	update_activation(s);
 }

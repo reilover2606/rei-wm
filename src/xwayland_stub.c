@@ -9,6 +9,7 @@
 void rei_xwayland_start(struct rei_server *server) { (void)server; }
 void rei_xwayland_stop(struct rei_server *server) { (void)server; }
 void rei_xwayland_refresh_cursor(struct rei_server *server) { (void)server; }
+void rei_xwayland_restack(struct rei_server *server, struct rei_view *const *views, size_t n) { (void)server; (void)views; (void)n; }
 const char *rei_xwayland_display_name(const struct rei_server *server) { (void)server; return NULL; }
 struct rei_rect rei_xwindow_geometry(const struct rei_xwindow *xw) { (void)xw; return (struct rei_rect){ 0 }; }
 void rei_xwindow_configure(struct rei_xwindow *xw, int32_t x, int32_t y, int32_t w, int32_t h, bool f)

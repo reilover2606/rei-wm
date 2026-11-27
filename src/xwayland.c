@@ -87,6 +87,8 @@ struct rei_xwayland {
 
 	xcb_connection_t *conn;
 	xcb_screen_t *screen;
+	xcb_window_t *stack;   /* the stacking order last given to X11, bottom to top (rei_xwayland_restack) */
+	size_t n_stack;
 	xcb_window_t wm_window;
 	struct atoms atoms;
 	struct wl_list windows;   /* rei_xwindow */
@@ -1058,6 +1060,34 @@ static void set_root_cursor(struct rei_xwayland *x)
 	xcb_flush(x->conn);
 }
 
+void rei_xwayland_restack(struct rei_server *s, struct rei_view *const *views, size_t n)
+{
+	struct rei_xwayland *x = X(s);
+	if (!x || !x->running || !x->conn)
+		return;
+	size_t cap = n + 64, m = 0;
+	xcb_window_t *want = rei_xcalloc(cap, sizeof *want);
+	for (size_t i = 0; i < n; i++)
+		if (views[i]->xwin && m < cap)
+			want[m++] = views[i]->xwin->id;
+	struct rei_xwindow *w;
+	wl_list_for_each(w, &x->windows, link)
+		if (w->override_redirect && w->mapped_x && m < cap)
+			want[m++] = w->id;   /* menus and tooltips stay above everything */
+	if (m == x->n_stack && memcmp(want, x->stack, m * sizeof *want) == 0) {
+		free(want);
+		return;
+	}
+	for (size_t i = 0; i < m; i++) {
+		uint32_t mode = XCB_STACK_MODE_ABOVE;
+		xcb_configure_window(x->conn, want[i], XCB_CONFIG_WINDOW_STACK_MODE, &mode);   /* each to the top, in order */
+	}
+	xcb_flush(x->conn);
+	free(x->stack);
+	x->stack = want;
+	x->n_stack = m;
+}
+
 void rei_xwayland_refresh_cursor(struct rei_server *s)
 {
 	struct rei_xwayland *x = s->xwayland;
@@ -1332,6 +1362,7 @@ fail:
 	close_fd(&wm_sv[0]); close_fd(&wm_sv[1]);
 	close_fd(&ready[0]); close_fd(&ready[1]);
 	release_display(x);
+	free(x->stack);
 	free(x);
 }
 
@@ -1368,6 +1399,7 @@ void rei_xwayland_stop(struct rei_server *server)
 		rei_wait_child(x->pid, 2000, "Xwayland");
 	}
 	release_display(x);
+	free(x->stack);
 	free(x);
 }
 
